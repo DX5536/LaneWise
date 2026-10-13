@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="lw_background">#FFF4F5F8</color>
+    <color name="lw_violet">#FF6C4CF5</color>
+    <color name="lw_lime">#FFB8F33A</color>
+    <color name="lw_asphalt">#FF23262E</color>
+    <color name="ic_launcher_background">#FF6C4CF5</color>
+</resources>

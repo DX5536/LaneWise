@@ -1,0 +1,40 @@
+package de.lanewise.search
+
+import de.lanewise.core.geo.LatLon
+import de.lanewise.core.net.Http
+import de.lanewise.core.net.arr
+import de.lanewise.core.net.dbl
+import de.lanewise.core.net.get
+import de.lanewise.core.net.str
+import java.net.URLEncoder
+import java.util.Locale
+
+data class Place(val title: String, val subtitle: String, val position: LatLon)
+
+/**
+ * Address/POI search via Photon (komoot, OpenStreetMap data, no key), restricted to Germany and biased
+ * towards the current position (Hannover by default).
+ */
+class Geocoder(private val baseUrl: String = "https://photon.komoot.io") {
+
+    suspend fun search(query: String, near: LatLon?): List<Place> {
+        if (query.isBlank()) return emptyList()
+        val bias = near ?: LatLon(52.3759, 9.7320)
+        val url = String.format(
+            Locale.US, "%s/api/?q=%s&lang=de&limit=10&lat=%.5f&lon=%.5f&bbox=5.87,47.27,15.04,55.06",
+            baseUrl, URLEncoder.encode(query, "UTF-8"), bias.lat, bias.lon,
+        )
+        val root = Http.getJson(url)
+        return root["features"].arr.orEmpty().mapNotNull { f ->
+            val c = f["geometry"]["coordinates"]
+            val lon = c[0].dbl ?: return@mapNotNull null
+            val lat = c[1].dbl ?: return@mapNotNull null
+            val p = f["properties"]
+            val street = listOfNotNull(p["street"].str, p["housenumber"].str).joinToString(" ")
+            val name = p["name"].str ?: street.ifBlank { null } ?: return@mapNotNull null
+            val place = listOfNotNull(p["postcode"].str, p["city"].str ?: p["district"].str).joinToString(" ")
+            val sub = listOf(if (name != street) street else "", place).filter { it.isNotBlank() }.joinToString(", ")
+            Place(name, sub, LatLon(lat, lon))
+        }.distinctBy { it.title + it.subtitle }
+    }
+}

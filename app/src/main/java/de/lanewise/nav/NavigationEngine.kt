@@ -1,0 +1,141 @@
+package de.lanewise.nav
+
+import de.lanewise.core.model.ManeuverType
+import de.lanewise.core.model.Route
+import de.lanewise.core.model.RouteStep
+import de.lanewise.lane.LaneGuidance
+import de.lanewise.lane.LaneState
+import de.lanewise.lane.RoadKind
+import de.lanewise.location.Fix
+import de.lanewise.settings.AppSettings
+import kotlin.math.abs
+import kotlin.math.max
+
+enum class SpeedStatus { OK, OVER, UNDER, UNKNOWN }
+
+data class NavSnapshot(
+    val route: Route,
+    val fix: Fix,
+    val distanceAlong: Double,
+    val remainingDistance: Double,
+    val remainingSeconds: Double,
+    val nextStep: RouteStep?,
+    val distanceToNextStep: Double,
+    val stepAfter: RouteStep?,
+    /** km/h; null = unknown. */
+    val speedLimit: Int?,
+    /** True on de-restricted Autobahn sections (Richtgeschwindigkeit 130). */
+    val noSpeedLimit: Boolean,
+    val speedStatus: SpeedStatus,
+    val lanes: LaneState,
+    val roadKind: RoadKind,
+    val offRoute: Boolean,
+    val arrived: Boolean,
+)
+
+/** Something to say. [key] de-duplicates so each announcement is spoken once. */
+data class Announcement(val key: String, val text: String, val priority: Int = 0)
+
+/**
+ * Turns GNSS fixes into navigation state. Pure Kotlin (no Android) so it is unit-testable and can be
+ * driven by the simulator.
+ */
+class NavigationEngine(
+    private val route: Route,
+    private val laneGuidance: LaneGuidance = LaneGuidance(),
+) {
+    private var hint = 0
+    private var lastAlong = 0.0
+    private var offRouteCount = 0
+    private var overActive = false
+    private val spoken = HashSet<String>()
+
+    /** Carry progress and already-spoken announcements over when the same route is enriched (e.g. speed limits). */
+    fun rehydrate(previous: NavigationEngine?) {
+        if (previous == null) return
+        hint = previous.hint
+        lastAlong = previous.lastAlong
+        spoken += previous.spoken
+    }
+
+    fun update(fix: Fix, settings: AppSettings, phrases: Phrases): Pair<NavSnapshot, List<Announcement>> {
+        val line = route.geometry
+        val proj = line.project(fix.position, hint, 300) ?: line.project(fix.position)!!
+        val tolerance = max(35.0, fix.accuracyM + 20.0)
+        val headingOk = fix.bearing?.let { b ->
+            abs(de.lanewise.core.geo.Geo.bearingDelta(b.toDouble(), line.bearingAt(proj.distanceAlong))) < 100
+        } ?: true
+        offRouteCount = if (abs(proj.signedOffset) > tolerance || !headingOk) offRouteCount + 1 else 0
+        val offRoute = offRouteCount >= 3
+
+        // Keep progress monotonic against GNSS jitter, but allow re-anchoring on large jumps.
+        val along = if (proj.distanceAlong < lastAlong && lastAlong - proj.distanceAlong < 30) lastAlong else proj.distanceAlong
+        if (!offRoute) { hint = proj.segmentIndex; lastAlong = along }
+
+        val remaining = max(0.0, route.distance - along)
+        val remainingSec = route.effectiveDuration * (remaining / max(1.0, route.distance))
+        val nextIdx = route.steps.indexOfFirst { it.distanceAlong > along + 5 }
+        val next = route.steps.getOrNull(nextIdx)
+        val after = if (nextIdx >= 0) route.steps.getOrNull(nextIdx + 1) else null
+        val distNext = next?.let { it.distanceAlong - along } ?: remaining
+
+        val span = route.speedLimitAt(along)
+        val limit = span?.kmh
+        val noLimit = span != null && span.kmh == null
+        val kmh = fix.speedKmh
+        val status = when {
+            limit == null -> SpeedStatus.UNKNOWN
+            settings.overSpeedWarning && (kmh > limit + settings.overSpeedOffset || (overActive && kmh > limit + settings.overSpeedOffset - 2)) -> SpeedStatus.OVER
+            settings.underSpeedWarning && kmh >= settings.underSpeedMinSpeed && kmh < limit - settings.underSpeedOffset -> SpeedStatus.UNDER
+            else -> SpeedStatus.OK
+        }
+        overActive = status == SpeedStatus.OVER
+
+        val kind = route.roadSpanAt(along)?.kind ?: RoadKind.URBAN
+        val lanes = laneGuidance.update(route.laneSites, along, settings.avoidLaneChanges, settings.keepRight)
+        val arrived = remaining < 25
+
+        val snap = NavSnapshot(route, fix, along, remaining, remainingSec, next, distNext, after, limit, noLimit,
+            status, lanes, kind, offRoute, arrived)
+        return snap to announcements(snap, phrases)
+    }
+
+    private fun announcements(s: NavSnapshot, p: Phrases): List<Announcement> {
+        val out = ArrayList<Announcement>()
+        val step = s.nextStep
+        if (s.arrived) {
+            say(out, "arrive", p.instruction(route.steps.last()))
+            return out
+        }
+        if (step != null && step.maneuver.type != ManeuverType.DEPART) {
+            val fast = s.roadKind == RoadKind.MOTORWAY || s.roadKind == RoadKind.TRUNK
+            val far = if (fast) 2000.0 else 500.0
+            val near = if (fast) 800.0 else 200.0
+            val now = max(if (fast) 300.0 else 40.0, s.fix.speedMps * 4.0)
+            val id = step.distanceAlong.toInt()
+            val d = s.distanceToNextStep
+            when {
+                d <= now -> say(out, "$id-now", p.instruction(step), 2)
+                d <= near -> say(out, "$id-near", p.spoken(step, d), 1)
+                d <= far && d > near + 100 -> say(out, "$id-far", p.spoken(step, d))
+            }
+        }
+        // Lane advice — the "advanced lane assist" voice.
+        val change = s.lanes.pendingChange
+        if (change != null && s.distanceAlong >= change.startAt - 50) {
+            say(out, "lane-${change.site.distanceAlong.toInt()}-${change.targetLane}", p.laneChange(change, change.site.laneCount), 3)
+        } else {
+            val a = s.lanes.nextAdvice
+            if (a != null && s.lanes.stayInLane && a.site.isManeuver) {
+                val dist = a.site.distanceAlong - s.distanceAlong
+                val restrictive = a.allowed.count { it } < a.site.laneCount
+                if (restrictive && dist in 80.0..400.0) say(out, "stay-${a.site.distanceAlong.toInt()}", p.stayInLane())
+            }
+        }
+        return out
+    }
+
+    private fun say(out: MutableList<Announcement>, key: String, text: String, prio: Int = 0) {
+        if (spoken.add(key)) out += Announcement(key, text, prio)
+    }
+}

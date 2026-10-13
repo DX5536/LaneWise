@@ -1,0 +1,49 @@
+# --- Gradle / build output ---
+.gradle/
+build/
+**/build/
+!gradle/wrapper/gradle-wrapper.jar
+out/
+captures/
+.externalNativeBuild/
+.cxx/
+*.hprof
+
+# --- Android Studio / IntelliJ ---
+*.iml
+.idea/
+.navigation/
+.kotlin/
+local.properties
+
+# --- Secrets (API keys, signing) ---
+*.keystore
+*.jks
+*.p12
+*.pfx
+keystore.properties
+secrets.properties
+google-services.json
+
+# --- Packages (never commit APKs or reverse-engineering inputs) ---
+*.apk
+*.apkm
+*.aab
+*.ap_
+*.dex
+output-metadata.json
+
+# --- Reverse-engineering scratch (raw extracted vendor files must not be committed) ---
+re-work/
+extracted/
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+.vscode/
+
+# --- Logs ---
+*.log
