@@ -153,7 +153,7 @@ fun ManeuverIcon(step: RouteStep, color: Color, modifier: Modifier = Modifier) {
         else -> step.maneuver.modifier.toLaneDir()
     }
     Canvas(modifier) {
-        LaneArrows.draw(this, bit, bit, color, color, size.width * 0.14f) { p -> Offset(p.x * size.width, p.y * size.height) }
+        LaneArrows.draw(this, bit, bit, color, color, size.width * LaneArrows.SHAFT) { p -> Offset(p.x * size.width, p.y * size.height) }
         if (step.maneuver.type == ManeuverType.ARRIVE) {
             drawCircle(color, size.width * 0.16f, Offset(size.width / 2, size.height * 0.2f))
         }

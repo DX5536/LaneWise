@@ -27,10 +27,17 @@ Tag `v0.1.0` to publish a release with the APKs attached. Install the APK on And
 (allow "install unknown apps").
 
 ## Build locally
-Requirements: JDK 17, Android SDK (API 36), Gradle 8.14+ (or Android Studio).
-```bash
-gradle wrapper --gradle-version 8.14.3
+Requirements: JDK 17–21 (**not** Java 25 — Android Studio's bundled JBR is too new for Gradle 8.14),
+Android SDK with platform 36 (`local.properties` → `sdk.dir`, not committed).
+
+Windows, one command (tests + debug APK → `app/build/outputs/apk/debug/app-debug.apk`):
+```powershell
+.\build-local.ps1
 ```
+Add `-Release` for the minified release APK, `-Install` to install on a USB-connected phone.
+The script uses its own Gradle home (`%LOCALAPPDATA%\LaneWise\gradle-home`).
+
+Other platforms:
 ```bash
 ./gradlew testDebugUnitTest assembleDebug
 ```

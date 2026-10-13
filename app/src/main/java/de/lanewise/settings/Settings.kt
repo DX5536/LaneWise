@@ -23,6 +23,10 @@ data class AppSettings(
     val avoidLaneChanges: Boolean = true,
     val keepRight: Boolean = true,
     val showLaneScene: Boolean = true,
+    /** Show the 3D junction close-up (and zoom the map in) only this close to the junction (m). */
+    val laneSceneDistance: Int = 50,
+    /** Zoom the map camera in when approaching a junction. */
+    val junctionZoom: Boolean = true,
     val laneRibbonsOnMap: Boolean = true,
     // Speed warnings
     val overSpeedWarning: Boolean = true,
@@ -59,6 +63,8 @@ class SettingsRepository(private val context: Context) {
         val avoid = booleanPreferencesKey("avoid_lane_changes")
         val keepRight = booleanPreferencesKey("keep_right")
         val laneScene = booleanPreferencesKey("lane_scene")
+        val laneSceneDist = intPreferencesKey("lane_scene_distance")
+        val junctionZoom = booleanPreferencesKey("junction_zoom")
         val ribbons = booleanPreferencesKey("lane_ribbons")
         val over = booleanPreferencesKey("over_speed")
         val overOff = intPreferencesKey("over_speed_offset")
@@ -88,6 +94,8 @@ class SettingsRepository(private val context: Context) {
             avoidLaneChanges = p[K.avoid] ?: d.avoidLaneChanges,
             keepRight = p[K.keepRight] ?: d.keepRight,
             showLaneScene = p[K.laneScene] ?: d.showLaneScene,
+            laneSceneDistance = p[K.laneSceneDist] ?: d.laneSceneDistance,
+            junctionZoom = p[K.junctionZoom] ?: d.junctionZoom,
             laneRibbonsOnMap = p[K.ribbons] ?: d.laneRibbonsOnMap,
             overSpeedWarning = p[K.over] ?: d.overSpeedWarning,
             overSpeedOffset = p[K.overOff] ?: d.overSpeedOffset,
@@ -118,6 +126,8 @@ class SettingsRepository(private val context: Context) {
             p[K.avoid] = s.avoidLaneChanges
             p[K.keepRight] = s.keepRight
             p[K.laneScene] = s.showLaneScene
+            p[K.laneSceneDist] = s.laneSceneDistance
+            p[K.junctionZoom] = s.junctionZoom
             p[K.ribbons] = s.laneRibbonsOnMap
             p[K.over] = s.overSpeedWarning
             p[K.overOff] = s.overSpeedOffset

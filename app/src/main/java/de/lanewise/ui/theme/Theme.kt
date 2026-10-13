@@ -1,8 +1,16 @@
 package de.lanewise.ui.theme
 
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import de.lanewise.R
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
@@ -88,7 +96,32 @@ fun LaneWiseTheme(dark: Boolean, content: @Composable () -> Unit) {
         surfaceVariant = Color(0xFFE9EBF1), onSurfaceVariant = Color(0xFF454A57),
         error = Palette.SignRed,
     )
-    CompositionLocalProvider(LocalLaneColors provides if (dark) DarkLaneColors else LightLaneColors) {
-        MaterialTheme(colorScheme = scheme, content = content)
+    MaterialTheme(colorScheme = scheme, typography = QuicksandTypography) {
+        // Text outside a Surface would otherwise default to black, unreadable in dark mode.
+        CompositionLocalProvider(
+            LocalLaneColors provides if (dark) DarkLaneColors else LightLaneColors,
+            LocalContentColor provides scheme.onBackground,
+            LocalTextStyle provides QuicksandTypography.bodyLarge,
+            content = content,
+        )
     }
+}
+
+/** Quicksand (Google Fonts, SIL OFL 1.1) bundled in res/font — no Play Services font provider needed. */
+val Quicksand = FontFamily(
+    Font(R.font.quicksand_regular, FontWeight.Normal),
+    Font(R.font.quicksand_medium, FontWeight.Medium),
+    Font(R.font.quicksand_semibold, FontWeight.SemiBold),
+    Font(R.font.quicksand_bold, FontWeight.Bold),
+)
+
+private val QuicksandTypography: Typography = Typography().let { t ->
+    fun TextStyle.q() = copy(fontFamily = Quicksand)
+    Typography(
+        displayLarge = t.displayLarge.q(), displayMedium = t.displayMedium.q(), displaySmall = t.displaySmall.q(),
+        headlineLarge = t.headlineLarge.q(), headlineMedium = t.headlineMedium.q(), headlineSmall = t.headlineSmall.q(),
+        titleLarge = t.titleLarge.q(), titleMedium = t.titleMedium.q(), titleSmall = t.titleSmall.q(),
+        bodyLarge = t.bodyLarge.q(), bodyMedium = t.bodyMedium.q(), bodySmall = t.bodySmall.q(),
+        labelLarge = t.labelLarge.q(), labelMedium = t.labelMedium.q(), labelSmall = t.labelSmall.q(),
+    )
 }

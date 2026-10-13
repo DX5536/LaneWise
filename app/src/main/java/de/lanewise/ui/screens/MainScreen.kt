@@ -102,7 +102,10 @@ fun MainScreen(vm: MainViewModel, ui: UiState, settings: AppSettings, dark: Bool
         }
         LaunchedEffect(ui.incidents) { controller.showIncidents(ui.incidents) }
         LaunchedEffect(ui.nav) {
-            ui.nav?.let { controller.updateNavigation(it, settings.laneRibbonsOnMap, settings.mapPitch, topPadPx) }
+            ui.nav?.let {
+                controller.updateNavigation(it, settings.laneRibbonsOnMap, settings.mapPitch, topPadPx,
+                    closeUpDistance = if (settings.junctionZoom) settings.laneSceneDistance.toDouble() else 0.0)
+            }
         }
         LaunchedEffect(ui.fix, ui.mode) {
             val f = ui.fix ?: return@LaunchedEffect
@@ -302,8 +305,8 @@ private fun NavigationOverlay(
             val distToSite = advice?.let { it.site.distanceAlong - nav.distanceAlong } ?: Double.MAX_VALUE
             if (advice != null && distToSite < 900) {
                 Spacer(Modifier.height(8.dp))
-                if (settings.showLaneScene && distToSite < 350 && (advice.site.isManeuver || nav.lanes.pendingChange != null)) {
-                    LaneScene3D(nav.lanes, phrases.distance(distToSite), Modifier.fillMaxWidth().height(220.dp))
+                if (settings.showLaneScene && distToSite <= settings.laneSceneDistance && (advice.site.isManeuver || nav.lanes.pendingChange != null)) {
+                    LaneScene3D(nav.lanes, phrases.distance(distToSite), Modifier.fillMaxWidth(0.82f).height(140.dp).align(Alignment.CenterHorizontally))
                     Spacer(Modifier.height(8.dp))
                 }
                 LaneBar(advice, Modifier.align(Alignment.CenterHorizontally), onLaneTap = vm::overrideLane)
