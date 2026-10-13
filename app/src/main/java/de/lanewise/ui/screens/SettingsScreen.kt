@@ -77,7 +77,11 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, ui: UiState, onBack: () ->
             Toggle("Spurwechsel so weit wie möglich vermeiden",
                 "Plant die Spur über mehrere Kreuzungen voraus, damit Sie seltener wechseln müssen.", s.avoidLaneChanges) { v -> set { it.copy(avoidLaneChanges = v) } }
             Toggle("Rechtsfahrgebot auf Autobahnen", "Bei gleichwertigen Spuren die rechte bevorzugen (§ 7 StVO).", s.keepRight) { v -> set { it.copy(keepRight = v) } }
-            Toggle("3D-Kreuzungsansicht", "Perspektivische Spuransicht vor Abbiegungen.", s.showLaneScene) { v -> set { it.copy(showLaneScene = v) } }
+            Toggle("3D-Kreuzungsansicht", "Perspektivische Spuransicht kurz vor Abbiegungen.", s.showLaneScene) { v -> set { it.copy(showLaneScene = v) } }
+            Toggle("Karte vor Kreuzungen heranzoomen", null, s.junctionZoom) { v -> set { it.copy(junctionZoom = v) } }
+            LabeledSlider("Nahansicht ab", s.laneSceneDistance.toFloat(), 20f..300f, "${s.laneSceneDistance} m vor der Kreuzung") { v ->
+                set { it.copy(laneSceneDistance = (v / 10).toInt() * 10) }
+            }
             Toggle("Spurbänder auf der Karte", "Fahrspuren und empfohlene Spur direkt in der 3D-Karte.", s.laneRibbonsOnMap) { v -> set { it.copy(laneRibbonsOnMap = v) } }
         }
 
@@ -173,8 +177,8 @@ private fun LabeledSlider(label: String, value: Float, range: ClosedFloatingPoin
         Text(label, Modifier.weight(1f), fontSize = 14.sp)
         Text(valueText, fontWeight = FontWeight.Bold, fontSize = 14.sp)
     }
-    Slider(value = value, onValueChange = onChange, valueRange = range,
-        steps = (range.endInclusive - range.start).toInt().coerceAtLeast(1) - 1)
+    // Continuous slider (no tick dots); values are rounded by the callers.
+    Slider(value = value, onValueChange = { onChange(kotlin.math.round(it)) }, valueRange = range)
 }
 
 @Composable

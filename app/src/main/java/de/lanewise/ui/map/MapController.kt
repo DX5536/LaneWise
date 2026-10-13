@@ -217,7 +217,7 @@ class MapController(private val context: Context) {
             Feature.fromGeometry(Point.fromLngLat(position.lon, position.lat)).apply { addNumberProperty("bearing", bearing) })
     }
 
-    fun updateNavigation(snap: NavSnapshot, showRibbons: Boolean, pitch: Float, topPaddingPx: Double) {
+    fun updateNavigation(snap: NavSnapshot, showRibbons: Boolean, pitch: Float, topPaddingPx: Double, closeUpDistance: Double = 50.0) {
         val s = style ?: return
         val along = snap.distanceAlong
         val pos = if (snap.offRoute) snap.fix.position else snap.route.geometry.pointAt(along)
@@ -244,7 +244,7 @@ class MapController(private val context: Context) {
         if (following) {
             val m = map ?: return
             val zoom = when {
-                snap.distanceToNextStep < 250 -> 18.4
+                snap.distanceToNextStep < closeUpDistance -> 18.4
                 snap.roadKind == RoadKind.MOTORWAY -> 16.6
                 snap.roadKind == RoadKind.TRUNK -> 17.0
                 snap.fix.speedKmh > 70 -> 17.0

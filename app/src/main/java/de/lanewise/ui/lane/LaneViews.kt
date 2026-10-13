@@ -87,7 +87,7 @@ fun LaneBar(advice: LaneAdvice, modifier: Modifier = Modifier, onLaneTap: (Int) 
             ) {
                 Canvas(Modifier.size(34.dp)) {
                     val w = size.width; val h = size.height
-                    LaneArrows.draw(this, mask, highlight, on, c.laneArrowIdle, w * 0.13f) { p -> Offset(p.x * w, p.y * h) }
+                    LaneArrows.draw(this, mask, highlight, on, c.laneArrowIdle, w * LaneArrows.SHAFT) { p -> Offset(p.x * w, p.y * h) }
                 }
             }
             if (i < site.laneCount - 1) {
@@ -214,7 +214,8 @@ private fun DrawScope.drawScene(advice: LaneAdvice, state: LaneState, flow: Floa
         val highlight = if (allowed) usedBits(mask, turn) else 0
         val vTop = yStop + (yBot - yStop) * 0.08f
         val vBot = yStop + (yBot - yStop) * 0.42f
-        LaneArrows.draw(this, mask, highlight, on, Color(0x99FFFFFF), laneWidthAt((vTop + vBot) / 2) * 0.1f) { p ->
+        val strokePx = laneWidthAt((vTop + vBot) / 2) * 0.6f * LaneArrows.SHAFT * 1.3f
+        LaneArrows.draw(this, mask, highlight, on, Color(0x99FFFFFF), strokePx) { p ->
             val y = vTop + (vBot - vTop) * p.y
             val lw = laneWidthAt(y)
             Offset(xAt(i.toFloat(), y) + lw * (0.2f + 0.6f * p.x), y)
