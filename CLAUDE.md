@@ -30,7 +30,10 @@ See `docs/ARCHITECTURE.md`. Core lane logic: `app/src/main/java/de/lanewise/lane
 
 ## Tools
 - REA MCP server is installed (reverse engineering). JADX provider is NOT configured (needs `REA_JADX_MCP_JAR`).
-- No local Android SDK on the owner's Windows machine as of 2026-10-14 → rely on CI for compile checks.
+- Local build: `.\build-local.ps1` (JDK 21 at `C:\Program Files\Java\jdk-21`, SDK at `%LOCALAPPDATA%\Android\Sdk`,
+  isolated `GRADLE_USER_HOME=%LOCALAPPDATA%\LaneWise\gradle-home` because the shared `~/.gradle` 8.14.5 cache is
+  corrupt). Do NOT use Android Studio's JBR (Java 25) for Gradle 8.14. Prefer local builds; CI is slow.
+- Never push for the owner — they review and push themselves.
 
 ## Status
 See `docs/ROADMAP.md`. First CI build not yet run at time of writing.
