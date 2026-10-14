@@ -9,6 +9,7 @@ import de.lanewise.core.net.dbl
 import de.lanewise.core.net.get
 import de.lanewise.core.net.str
 import de.lanewise.lane.ArrowGeometry
+import de.lanewise.lane.ChangeSpan
 import de.lanewise.lane.LaneDir
 import de.lanewise.lane.LaneRibbonBuilder.Kind
 import de.lanewise.lane.LaneRibbonBuilder.Shape
@@ -134,9 +135,14 @@ object StreetLanes {
         lines(right, Kind.EDGE, 0.18)
         // Centre line between directions, lane dividers within each direction.
         if (!oneway && fwd > 0 && bwd > 0) lines(0.0, if (lay.minor) Kind.DIVIDER else Kind.DIVIDER_SOLID, 0.15)
+        // Lane dividers, solid where OSM `change:lanes` forbids crossing (lanes counted from the driver's left).
         val fwdStart = if (oneway) left else 0.0
-        for (k in 1 until fwd) lines(fwdStart + k * w, Kind.DIVIDER, 0.15)
-        for (k in 1 until bwd) lines(-k * w, Kind.DIVIDER, 0.15)
+        val changeF = OsmTags.changeLanes(t, true, oneway)
+        val changeB = if (oneway) null else OsmTags.changeLanes(t, false, false)
+        fun divider(perms: List<Int>?, k: Int, n: Int) =
+            if (perms != null && ChangeSpan.solidBoundary(perms, k, n)) Kind.DIVIDER_SOLID else Kind.DIVIDER
+        for (k in 1 until fwd) lines(fwdStart + k * w, divider(changeF, k, fwd), 0.15)
+        for (k in 1 until bwd) lines(-k * w, divider(changeB, k, bwd), 0.15)
 
         // Bike lanes on the right edge of each direction.
         OsmTags.bikeLaneRight(t, forward = true, oneway = oneway)?.let { exclusive ->

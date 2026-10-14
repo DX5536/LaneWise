@@ -25,6 +25,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -277,9 +278,15 @@ private fun DrawScope.drawScene(advice: LaneAdvice, state: LaneState, flow: Floa
 private fun smooth(t: Float) = t * t * (3 - 2 * t)
 
 @Composable
-fun LaneHint(text: String, modifier: Modifier = Modifier) {
+fun LaneHint(text: String, modifier: Modifier = Modifier, countdown: Float? = null) {
+    // Countdown like the manoeuvre banner: the bright lime part shrinks to the last point the change can be made.
+    val fill by androidx.compose.animation.core.animateFloatAsState(
+        countdown?.coerceIn(0f, 1f) ?: 1f, tween(900, easing = LinearEasing), label = "laneHintCountdown",
+    )
     Box(
-        modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFFB8F33A))
+        modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+            .background(if (countdown != null) Color(0xFF7FA82A) else Color(0xFFB8F33A))
+            .drawBehind { drawRect(Color(0xFFB8F33A), size = androidx.compose.ui.geometry.Size(size.width * fill, size.height)) }
             .padding(horizontal = 14.dp, vertical = 8.dp),
     ) {
         Text(text, color = Color(0xFF1A2400), fontWeight = FontWeight.Bold, fontSize = 16.sp)

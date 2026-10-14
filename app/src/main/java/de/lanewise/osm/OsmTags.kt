@@ -92,6 +92,13 @@ object OsmTags {
         }
     }
 
+    /** Lane-change permissions in travel direction (`change:lanes*`), or null if unrestricted / not tagged. */
+    fun changeLanes(tags: Map<String, String>, forward: Boolean, oneway: Boolean): List<Int>? {
+        val v = tags[if (forward) "change:lanes:forward" else "change:lanes:backward"]
+            ?: if (oneway && forward) tags["change:lanes"] else null
+        return v?.let { de.lanewise.lane.ChangeSpan.parse(it) }
+    }
+
     /** Car lanes in travel direction ([forward] = along the OSM way), or null if not tagged. */
     fun lanesInDirection(tags: Map<String, String>, forward: Boolean, oneway: Boolean): Int? {
         val dir = if (forward) "forward" else "backward"

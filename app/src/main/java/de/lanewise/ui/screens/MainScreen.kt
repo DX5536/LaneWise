@@ -427,6 +427,23 @@ private fun RouteRow(r: Route, selected: Boolean, phrases: Phrases, onClick: () 
 
 // --- Navigation ---------------------------------------------------------------------------------
 
+/**
+ * Countdown for the manoeuvre banner: 1 when the countdown starts, 0 at the manoeuvre. It starts at the previous
+ * step or at most 400 m before (1 km on trunk roads, 1.5 km on motorways), so the bar visibly moves in town too.
+ */
+private fun countdownFraction(nav: NavSnapshot): Float {
+    val next = nav.nextStep ?: return 0f
+    val steps = nav.route.steps
+    val prev = steps.getOrNull(steps.indexOf(next) - 1)?.distanceAlong ?: 0.0
+    val cap = when (nav.roadKind) {
+        de.lanewise.lane.RoadKind.MOTORWAY -> 1500.0
+        de.lanewise.lane.RoadKind.TRUNK -> 1000.0
+        else -> 400.0
+    }
+    val start = (next.distanceAlong - prev).coerceIn(50.0, cap)
+    return (nav.distanceToNextStep / start).toFloat().coerceIn(0f, 1f)
+}
+
 @Composable
 private fun NavigationOverlay(
     vm: MainViewModel, ui: UiState, nav: NavSnapshot, settings: AppSettings, phrases: Phrases, following: Boolean,
@@ -451,6 +468,9 @@ private fun NavigationOverlay(
                         }
                     }
                 }
+                val advice = nav.lanes.nextAdvice
+                val distToSite = advice?.let { it.site.distanceAlong - nav.distanceAlong } ?: Double.MAX_VALUE
+                val showLanes = advice != null && distToSite < 900
                 ManeuverBanner(
                     step = next,
                     distanceText = phrases.distance(nav.distanceToNextStep),
@@ -458,26 +478,33 @@ private fun NavigationOverlay(
                     then = then,
                     thenText = then?.let { str.then },
                     modifier = Modifier.weight(1f),
-                )
+                    countdown = next?.let { countdownFraction(nav) },
+                    lanesBelow = showLanes,
+                ) {
+                    if (showLanes && advice != null) {
+                        Spacer(Modifier.height(3.dp))
+                        LaneBar(advice, bikeColor = nav.bikeLane.takeIf { settings.showBikeLanes }?.let { bikeColor },
+                            onLaneTap = vm::overrideLane, docked = true)
+                    }
+                }
             }
             val advice = nav.lanes.nextAdvice
             val distToSite = advice?.let { it.site.distanceAlong - nav.distanceAlong } ?: Double.MAX_VALUE
             val bikeHere = nav.bikeLane.takeIf { settings.showBikeLanes }
             if (advice != null && distToSite < 900) {
-                Spacer(Modifier.height(8.dp))
                 if (settings.showLaneScene && distToSite <= settings.laneSceneDistance && (advice.site.isManeuver || nav.lanes.pendingChange != null)) {
+                    Spacer(Modifier.height(8.dp))
                     LaneScene3D(nav.lanes, phrases.distance(distToSite),
                         Modifier.fillMaxWidth(0.82f).height(140.dp).align(Alignment.CenterHorizontally),
                         bikeColor = bikeHere?.let { bikeColor })
                     Spacer(Modifier.height(8.dp))
                 }
-                LaneBar(advice, Modifier.align(Alignment.CenterHorizontally), bikeColor = bikeHere?.let { bikeColor }, onLaneTap = vm::overrideLane)
             }
             if (bikeHere != null) {
                 Spacer(Modifier.height(6.dp))
                 BikeLaneChip(bikeHere.exclusive, bikeColor, Modifier.align(Alignment.CenterHorizontally))
             }
-            ui.laneHint?.let { Spacer(Modifier.height(8.dp)); LaneHint(it) }
+            ui.laneHint?.let { Spacer(Modifier.height(8.dp)); LaneHint(it, countdown = ui.laneHintCountdown) }
         }
 
         SpeedPanel(nav.fix.speedKmh, nav.speedStatus, Modifier.align(Alignment.CenterStart).padding(start = 12.dp, top = 160.dp))

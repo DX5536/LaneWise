@@ -132,7 +132,9 @@ object LaneRibbonBuilder {
         val sites = route.laneSites.filter { it.distanceAlong in from..(to + 40) }
         fun nearSite(d: Double) = sites.any { d in (it.distanceAlong - 30)..it.distanceAlong }
         for (k in 1 until maxLanes) {
-            runs(samples) { s -> if (s.lanes >= k + 0.85) nearSite(s.d) else null }.forEach { (solid, run) ->
+            // Solid: last 30 m before a junction, or where OSM `change:lanes` forbids crossing this line.
+            fun solidAt(s: S) = nearSite(s.d) || route.laneChangeAt(s.d)?.solidBoundary(k, s.nominal) == true
+            runs(samples) { s -> if (s.lanes >= k + 0.85) solidAt(s) else null }.forEach { (solid, run) ->
                 out += Shape(run.map { it.at(it.left + k * it.w) }, if (solid) Kind.DIVIDER_SOLID else Kind.DIVIDER, false, 0.15)
             }
         }

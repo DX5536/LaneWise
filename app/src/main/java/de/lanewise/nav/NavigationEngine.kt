@@ -103,7 +103,7 @@ class NavigationEngine(
         overActive = status == SpeedStatus.OVER
 
         val kind = route.roadSpanAt(along)?.kind ?: RoadKind.URBAN
-        val lanes = laneGuidance.update(route.laneSites, along, settings.avoidLaneChanges, settings.keepRight)
+        val lanes = laneGuidance.update(route.laneSites, along, settings.avoidLaneChanges, settings.keepRight, route.laneChanges)
         val arrived = remaining < 25
 
         val ahead = route.features.filter { it.distanceAlong > along - 5 && it.distanceAlong - along < 400 }

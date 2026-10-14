@@ -13,6 +13,7 @@ import de.lanewise.core.model.RoadSpan
 import de.lanewise.core.model.Route
 import de.lanewise.core.model.RouteStep
 import de.lanewise.core.model.SpeedLimitSpan
+import de.lanewise.lane.ChangeSpan
 import de.lanewise.lane.LaneDir
 import de.lanewise.lane.LaneSite
 import de.lanewise.osm.OsmTags
@@ -234,6 +235,12 @@ class OfflineRouter(
             else bikes += BikeLaneSpan(t.from, t.to, exclusive)
         }
 
+        // Solid lines (OSM change:lanes) in driving direction.
+        val changes = trav.mapNotNull { t ->
+            val raw = ways.str(if (t.forward) ways.changeLanesForward.getOrElse(t.way) { -1 } else ways.changeLanesBackward.getOrElse(t.way) { -1 })
+            ChangeSpan.parse(raw)?.let { ChangeSpan(t.from, t.to, it) }
+        }
+
         return Route(
             provider = id,
             geometry = line,
@@ -245,6 +252,7 @@ class OfflineRouter(
             roadSpans = spans,
             features = featuresAlong(g, line),
             bikeLanes = bikes,
+            laneChanges = changes,
         )
     }
 

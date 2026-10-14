@@ -83,6 +83,8 @@ data class UiState(
     val offlineGraphReady: Boolean = false,
     val offlineProgress: String? = null,
     val laneHint: String? = null,
+    /** Countdown of the lane-change hint: 1 when it appears, 0 at the last point the change can be made. */
+    val laneHintCountdown: Float? = null,
     /** Speed limit of the current road while not navigating (km/h, 0 = no limit, null = unknown). */
     val browseLimit: Int? = null,
     val places: List<SavedPlace> = emptyList(),
@@ -153,9 +155,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         voice.setLanguage(s.language)
         val (snap, ann) = e.update(fix, s, Phrases(s.language))
         val phrases = Phrases(s.language)
-        val hint = snap.lanes.pendingChange?.takeIf { snap.distanceAlong >= it.startAt - 150 }
-            ?.let { phrases.laneChange(it, it.site.laneCount) }
-        _ui.update { it.copy(nav = snap, laneHint = hint) }
+        val pending = snap.lanes.pendingChange?.takeIf { snap.distanceAlong >= it.startAt - 150 }
+        val hint = pending?.let { phrases.laneChange(it, it.site.laneCount) }
+        val countdown = pending?.let {
+            val from = it.startAt - 150
+            ((it.deadline - snap.distanceAlong) / (it.deadline - from).coerceAtLeast(1.0)).toFloat().coerceIn(0f, 1f)
+        }
+        _ui.update { it.copy(nav = snap, laneHint = hint, laneHintCountdown = countdown) }
         if (s.voice) ann.sortedByDescending { it.priority }.forEach { voice.speak(it) }
         if (s.overSpeedSound && snap.speedStatus == SpeedStatus.OVER && (fix.timeMs / 1000) % 5 == 0L) voice.beep()
         if (snap.arrived) { stopNavigation(); _ui.update { it.copy(message = phrases.instruction(snap.route.steps.last())) }; return }
@@ -331,6 +337,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 features = (base.features.filter { it.distanceAlong < from } + data.features).sortedBy { it.distanceAlong },
                 bikeLanes = (base.bikeLanes.filter { it.to <= from } + data.bikeLanes).sortedBy { it.from },
                 laneCounts = (base.laneCounts.filter { it.to <= from } + data.laneCounts).sortedBy { it.from },
+                laneChanges = (base.laneChanges.filter { it.to <= from } + data.laneChanges).sortedBy { it.from },
             )
             if (_ui.value.mode == Mode.NAVIGATING) {
                 engine = NavigationEngine(updated, laneGuidance).also { it.rehydrate(engine) }
@@ -346,7 +353,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 ?: return@launch
             val updated = route.copy(
                 speedLimits = if (route.provider == "osrm") data.limits else route.speedLimits,
-                features = data.features, bikeLanes = data.bikeLanes, laneCounts = data.laneCounts,
+                features = data.features, bikeLanes = data.bikeLanes, laneCounts = data.laneCounts, laneChanges = data.laneChanges,
             )
             _ui.update { st -> st.copy(routes = st.routes.map { if (it === route) updated else it }) }
         }
@@ -387,7 +394,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun stopNavigation() {
         navJob?.cancel(); trafficJob?.cancel()
         engine = null; currentRoute = null
-        _ui.update { it.copy(mode = Mode.BROWSE, nav = null, simulating = false, routes = emptyList(), destination = null, laneHint = null) }
+        _ui.update { it.copy(mode = Mode.BROWSE, nav = null, simulating = false, routes = emptyList(), destination = null, laneHint = null, laneHintCountdown = null) }
     }
 
     fun overrideLane(index: Int) {

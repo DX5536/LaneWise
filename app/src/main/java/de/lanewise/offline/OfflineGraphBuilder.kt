@@ -110,6 +110,7 @@ class OfflineGraphBuilder {
         val eFrom = IntList(); val eTo = IntList(); val eLen = IntList(); val eWay = IntList(); val eFwd = ByteList()
         val wHw = ByteList(); val wMaxF = IntList(); val wMaxB = IntList(); val wName = IntList(); val wRef = IntList()
         val wTurnF = IntList(); val wTurnB = IntList(); val wFirst = IntList(); val wLast = IntList()
+        val wChangeF = IntList(); val wChangeB = IntList()
         val strings = ArrayList<String>(); val stringIndex = HashMap<String, Int>()
         val wBike = ByteList(); val fLat = IntList(); val fLon = IntList(); val fKind = ByteList()
 
@@ -143,11 +144,14 @@ class OfflineGraphBuilder {
             val maxB = OsmTags.parseMaxspeed(tags["maxspeed:backward"]).takeIf { it != OsmTags.UNKNOWN } ?: maxAll
             val turnF = tags["turn:lanes:forward"] ?: if (oneway != 0) tags["turn:lanes"] else null
             val turnB = tags["turn:lanes:backward"] ?: if (oneway == -1) tags["turn:lanes"] else null
+            val changeF = tags["change:lanes:forward"] ?: if (oneway == 1) tags["change:lanes"] else null
+            val changeB = tags["change:lanes:backward"] ?: if (oneway == -1) tags["change:lanes"] else null
 
             val w = wHw.size
             wHw.add(code.toByte()); wMaxF.add(maxF); wMaxB.add(maxB)
             wName.add(intern(tags["name"])); wRef.add(intern(tags["ref"]))
             wTurnF.add(intern(turnF)); wTurnB.add(intern(turnB))
+            wChangeF.add(intern(changeF)); wChangeB.add(intern(changeB))
             var bike = 0
             OsmTags.bikeLaneRight(tags, forward = true, oneway = oneway != 0)?.let { bike = bike or 1 or (if (it) 2 else 0) }
             if (oneway == 0) OsmTags.bikeLaneRight(tags, forward = false, oneway = false)?.let { bike = bike or 4 or (if (it) 8 else 0) }
@@ -181,6 +185,7 @@ class OfflineGraphBuilder {
                 OfflineGraph.Ways(
                     wHw.toArray(), wMaxF.toArray(), wMaxB.toArray(), wName.toArray(), wRef.toArray(),
                     wTurnF.toArray(), wTurnB.toArray(), wFirst.toArray(), wLast.toArray(), strings.toTypedArray(), wBike.toArray(),
+                    wChangeF.toArray(), wChangeB.toArray(),
                 ),
                 bbox, System.currentTimeMillis(), fLat.toArray(), fLon.toArray(), fKind.toArray(),
             )

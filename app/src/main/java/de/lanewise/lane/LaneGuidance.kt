@@ -14,6 +14,8 @@ data class LaneChangeInstruction(
     val lanes: Int,
     /** Target lane index at [site], left → right. */
     val targetLane: Int,
+    /** Last point (m along route) where the change can still be made: before the site or a solid line. */
+    val deadline: Double = site.distanceAlong,
 )
 
 /** Everything the UI needs about lanes for the current car position. */
@@ -58,6 +60,7 @@ class LaneGuidance(private val planner: LanePlanner = LanePlanner()) {
         carDistance: Double,
         avoidLaneChanges: Boolean,
         keepRight: Boolean,
+        changeSpans: List<ChangeSpan> = emptyList(),
     ): LaneState {
         // Advance the "assumed lane" over sites we have passed.
         val passed = sites.lastOrNull { it.distanceAlong < carDistance }
@@ -80,12 +83,12 @@ class LaneGuidance(private val planner: LanePlanner = LanePlanner()) {
 
         val plan = planner.plan(
             sites,
-            LanePlanner.Options(avoidLaneChanges, keepRight, assumedLateral, carDistance),
+            LanePlanner.Options(avoidLaneChanges, keepRight, assumedLateral, carDistance, changeSpans = changeSpans),
         )
         lastPlan = plan
         if (plan.isEmpty()) return LaneState(null, emptyList(), null, true, assumedLateral)
 
-        val change = firstChange(plan, carDistance)
+        val change = firstChange(plan, carDistance, changeSpans)
         return LaneState(
             nextAdvice = plan.first(),
             plan = plan,
@@ -95,12 +98,20 @@ class LaneGuidance(private val planner: LanePlanner = LanePlanner()) {
         )
     }
 
-    private fun firstChange(plan: List<LaneAdvice>, carDistance: Double): LaneChangeInstruction? {
+    private fun firstChange(plan: List<LaneAdvice>, carDistance: Double, spans: List<ChangeSpan>): LaneChangeInstruction? {
         var prevDist = carDistance
         for (a in plan) {
             if (a.changeFromPrevious != 0) {
                 val gap = a.site.distanceAlong - prevDist
                 val lead = leadDistance(a.site.roadKind, abs(a.changeFromPrevious))
+                val target = a.site.lateral(a.recommended)
+                // Change where the line is dashed: the last legal stretch before the site (solid lines from OSM).
+                val window = legalWindows(spans, target - a.changeFromPrevious, target, prevDist + 10.0, a.site.distanceAlong - 10.0)
+                    .lastOrNull { it.endInclusive - it.start >= 20.0 }
+                if (window != null) {
+                    val start = max(window.start, window.endInclusive - lead)
+                    return LaneChangeInstruction(start, a.site, a.changeFromPrevious, a.recommended, deadline = window.endInclusive)
+                }
                 // Start as late as is comfortable (fewer surprises from traffic), but never before the
                 // previous site and never so late that the change can't be completed.
                 val start = max(prevDist + 10.0, a.site.distanceAlong - min(lead, max(0.0, gap - 10.0)))
@@ -109,6 +120,23 @@ class LaneGuidance(private val planner: LanePlanner = LanePlanner()) {
             prevDist = a.site.distanceAlong
         }
         return null
+    }
+
+    /** Parts of [d0]..[d1] where no solid line forbids moving from lateral [fromLat] to [toLat], in order. */
+    fun legalWindows(spans: List<ChangeSpan>, fromLat: Int, toLat: Int, d0: Double, d1: Double): List<ClosedFloatingPointRange<Double>> {
+        if (d1 <= d0) return emptyList()
+        val blocked = spans.filter { s ->
+            s.to > d0 && s.from < d1 &&
+                if (toLat < fromLat) (toLat + 1..fromLat).any { !s.canMoveRight(it) } else (fromLat until toLat).any { !s.canMoveLeft(it) }
+        }.sortedBy { it.from }
+        val out = ArrayList<ClosedFloatingPointRange<Double>>()
+        var cur = d0
+        for (b in blocked) {
+            if (b.from > cur) out += cur..b.from
+            cur = max(cur, b.to)
+        }
+        if (cur < d1) out += cur..d1
+        return out
     }
 
     /** How far before the site we advise the change (AMAP uses ~300 m on expressways). */

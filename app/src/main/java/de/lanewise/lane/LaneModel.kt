@@ -167,3 +167,52 @@ data class LaneAdvice(
 
     override fun hashCode() = site.hashCode() * 31 + recommended
 }
+
+/**
+ * Where lane changes are allowed along a stretch of the route, from OSM `change:lanes(:forward|:backward)`:
+ * one entry per lane (left → right), bit [LEFT] = may change to the left from this lane, [RIGHT] = to the right.
+ * A solid line between two lanes (Fahrstreifenbegrenzung, Zeichen 295) clears the bits on both sides.
+ */
+data class ChangeSpan(val from: Double, val to: Double, val perms: List<Int>) {
+    /** May the car move one lane to the right from lateral coordinate [lateral] (0 = rightmost through lane)? */
+    fun canMoveRight(lateral: Int): Boolean = perm(lateral)?.let { it and RIGHT != 0 } ?: true
+
+    /** May the car move one lane to the left from [lateral]? */
+    fun canMoveLeft(lateral: Int): Boolean = perm(lateral)?.let { it and LEFT != 0 } ?: true
+
+    /** Lanes counted from the right; pockets (negative laterals) and unknown lanes are unrestricted. */
+    private fun perm(lateral: Int): Int? = perms.getOrNull(perms.size - 1 - lateral)?.takeIf { lateral >= 0 }
+
+    /** Is the line between lane [k]-1 and lane [k] (counted from the left of [laneCount] lanes) solid? */
+    fun solidBoundary(k: Int, laneCount: Int): Boolean = solidBoundary(perms, k, laneCount)
+
+    companion object {
+        const val LEFT = 1
+        const val RIGHT = 2
+
+        /**
+         * Line between lane [k]-1 and lane [k] (from the left) is drawn solid if either side may not cross it.
+         * [perms] are aligned at the right edge when the drawn road has a different number of lanes (pockets).
+         */
+        fun solidBoundary(perms: List<Int>, k: Int, laneCount: Int): Boolean {
+            val off = perms.size - laneCount
+            val a = perms.getOrNull(off + k - 1)
+            val b = perms.getOrNull(off + k)
+            return (a != null && a and RIGHT == 0) || (b != null && b and LEFT == 0)
+        }
+
+        /** Parses `yes|not_left|no` etc.; null if the value has no restriction at all or cannot be read. */
+        fun parse(value: String): List<Int>? {
+            val perms = value.split('|').map { v ->
+                when (v.trim()) {
+                    "yes", "" -> LEFT or RIGHT
+                    "no" -> 0
+                    "not_left", "only_right" -> RIGHT
+                    "not_right", "only_left" -> LEFT
+                    else -> return null
+                }
+            }
+            return perms.takeIf { p -> p.any { it != (LEFT or RIGHT) } }
+        }
+    }
+}

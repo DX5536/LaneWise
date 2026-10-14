@@ -94,7 +94,10 @@ data class Route(
     val bikeLanes: List<BikeLaneSpan> = emptyList(),
     /** Number of car lanes in driving direction, from OSM `lanes(:forward|:backward)` / `turn:lanes`. */
     val laneCounts: List<LaneCountSpan> = emptyList(),
+    /** Where solid lines forbid lane changes (OSM `change:lanes`). */
+    val laneChanges: List<de.lanewise.lane.ChangeSpan> = emptyList(),
 ) {
+    fun laneChangeAt(d: Double): de.lanewise.lane.ChangeSpan? = laneChanges.firstOrNull { d >= it.from && d < it.to }
     fun laneCountAt(d: Double): Int? = laneCounts.firstOrNull { d >= it.from && d < it.to }?.count
     fun bikeLaneAt(d: Double): BikeLaneSpan? = bikeLanes.firstOrNull { d >= it.from && d < it.to }
     fun speedLimitAt(d: Double): SpeedLimitSpan? = speedLimits.firstOrNull { d >= it.from && d < it.to }

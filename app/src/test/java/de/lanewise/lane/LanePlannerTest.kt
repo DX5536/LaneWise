@@ -126,4 +126,58 @@ class LanePlannerTest {
         assertEquals(2, plan.size)
         assertEquals(0, plan[0].recommended)
     }
+
+    @Test
+    fun parsesChangeLanes() {
+        assertEquals(listOf(ChangeSpan.RIGHT, ChangeSpan.LEFT or ChangeSpan.RIGHT, 0), ChangeSpan.parse("not_left|yes|no"))
+        assertNull(ChangeSpan.parse("yes|yes"))          // no restriction at all
+        val span = ChangeSpan(0.0, 100.0, listOf(ChangeSpan.RIGHT, ChangeSpan.LEFT))   // left lane: right only; right lane: left only
+        assertTrue(span.canMoveLeft(0))                 // rightmost lane may go left
+        assertTrue(!span.canMoveRight(0))               // ...but not further right
+        assertTrue(span.canMoveLeft(-1))                // pockets are unrestricted
+    }
+
+    /**
+     * Solid line between the two lanes from junction A up to the left turn at B (common in Hannover before
+     * turn lanes): the change to the left lane must be made *before* A, where the line is still dashed.
+     */
+    @Test
+    fun laneChangeMovesBeforeTheSolidLine() {
+        val a = site(300.0, listOf(S, S), S, maneuver = false)
+        val b = site(600.0, listOf(L, S), L, maneuver = true)
+        val solid = ChangeSpan(300.0, 600.0, listOf(0, 0))
+        val plan = LanePlanner().plan(listOf(a, b), LanePlanner.Options(currentLateral = 0, changeSpans = listOf(solid)))
+        assertEquals(0, plan[0].recommended)            // already in the left lane at A
+        assertEquals(0, plan[1].changeFromPrevious)     // no change across the solid line
+        assertEquals(300.0, LanePlanner().blockedLength(listOf(solid), 0, 1, 300.0, 600.0), 1e-9)
+        assertEquals(0.0, LanePlanner().blockedLength(listOf(solid), 0, 1, 0.0, 300.0), 1e-9)
+    }
+
+    @Test
+    fun solidBoundaryForDrawing() {
+        val perms = ChangeSpan.parse("not_right|not_left|yes")!!       // solid between lane 0 and 1, dashed between 1 and 2
+        assertTrue(ChangeSpan.solidBoundary(perms, 1, 3))
+        assertTrue(!ChangeSpan.solidBoundary(perms, 2, 3))
+        // Drawn road has one lane less (pocket not open yet): aligned at the right edge.
+        assertTrue(!ChangeSpan.solidBoundary(perms, 1, 2))
+    }
+
+    @Test
+    fun changeInstructionIsTimedInTheDashedStretch() {
+        val g = LaneGuidance()
+        val solid = ChangeSpan(400.0, 600.0, listOf(0, 0))
+        val windows = g.legalWindows(listOf(solid), 0, 1, 10.0, 590.0)
+        assertEquals(1, windows.size)
+        assertEquals(400.0, windows[0].endInclusive, 1e-9)
+        val b = site(600.0, listOf(L, S), L, maneuver = true)
+        val state = g.update(listOf(b), 0.0, avoidLaneChanges = true, keepRight = true, changeSpans = listOf(solid))
+        // Car assumed unknown -> no change instruction; give it the right lane and re-plan.
+        g.overrideCurrentLane(b, 1)
+        val st = g.update(listOf(b), 0.0, avoidLaneChanges = true, keepRight = true, changeSpans = listOf(solid))
+        val ch = st.pendingChange!!
+        assertEquals(400.0, ch.deadline, 1e-9)
+        assertTrue(ch.startAt < 400.0)
+        assertNull(state.pendingChange)
+    }
 }
+

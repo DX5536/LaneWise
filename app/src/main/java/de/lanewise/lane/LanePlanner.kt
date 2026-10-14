@@ -19,7 +19,9 @@ import kotlin.math.min
  *    optional German keep-right tie-breaker on motorways (Rechtsfahrgebot, §7 StVO)
  *  - edge cost: CHANGE per lane change between consecutive sites (lateral coordinates, so sites with
  *    different lane counts / turn pockets are comparable), plus a penalty when the gap between the
- *    two sites is too short to make those changes safely.
+ *    two sites is too short to make those changes safely. Stretches where a solid line forbids the
+ *    change (OSM `change:lanes`) do not count as usable gap; a change with no legal stretch at all is
+ *    penalised heavily (§ 295 StVO — crossing a solid line is not an option we recommend).
  *
  * With "avoid lane changes" off, the horizon collapses to the next site (classic behaviour).
  */
@@ -42,6 +44,8 @@ class LanePlanner(private val config: Config = Config()) {
          * change later: turning right straight into the left lane you need 200 m further beats changing there.
          */
         val turnEntryCost: Double = 1.0,
+        /** Per lane change that can only be made across a solid line (no legal stretch in the gap). */
+        val solidLinePenalty: Double = 200.0,
     )
 
     data class Options(
@@ -53,6 +57,8 @@ class LanePlanner(private val config: Config = Config()) {
         val carDistance: Double = 0.0,
         /** Allow choosing the lane you turn into (instead of the strictly corresponding one). */
         val freeTurnEntry: Boolean = true,
+        /** Solid-line stretches (OSM `change:lanes`): changes must happen where the line is dashed. */
+        val changeSpans: List<ChangeSpan> = emptyList(),
     )
 
     /** Moving from lane i of one site to lane j of the next: the lane entered after the junction and the changes after it. */
@@ -133,6 +139,23 @@ class LanePlanner(private val config: Config = Config()) {
         return Transition(e, abs(target - e), config.turnEntryCost * abs(e - corr))
     }
 
+    /**
+     * Length of [d0]..[d1] where a solid line forbids at least one of the single-lane moves needed to get from
+     * lateral [fromLat] to [toLat].
+     */
+    fun blockedLength(spans: List<ChangeSpan>, fromLat: Int, toLat: Int, d0: Double, d1: Double): Double {
+        if (spans.isEmpty() || fromLat == toLat) return 0.0
+        var blocked = 0.0
+        for (s in spans) {
+            val overlap = min(d1, s.to) - max(d0, s.from)
+            if (overlap <= 0) continue
+            val forbidden = if (toLat < fromLat) (toLat + 1..fromLat).any { !s.canMoveRight(it) }
+            else (fromLat until toLat).any { !s.canMoveLeft(it) }
+            if (forbidden) blocked += overlap
+        }
+        return blocked
+    }
+
     /** Minimum distance (m) needed per lane change on this kind of road. */
     fun metersPerChange(kind: RoadKind): Double = when (kind) {
         RoadKind.MOTORWAY -> 150.0
@@ -191,28 +214,30 @@ class LanePlanner(private val config: Config = Config()) {
             }
         }
 
-        fun edgeCost(changes: Int, gap: Double, kind: RoadKind): Double {
+        fun edgeCost(fromLat: Int, toLat: Int, d0: Double, d1: Double, kind: RoadKind): Double {
+            val changes = abs(toLat - fromLat)
             if (changes == 0) return 0.0
+            val gap = d1 - d0
+            val usable = gap - blockedLength(options.changeSpans, fromLat, toLat, d0, d1)
             val per = metersPerChange(kind)
-            val doable = max(0.0, gap / per)
+            val doable = max(0.0, usable / per)
             val shortBy = max(0.0, changes - doable)
-            return config.changeCost * changes + config.shortGapPenalty * shortBy
+            val illegal = if (usable < 1.0 && gap >= 1.0) changes * config.solidLinePenalty else 0.0
+            return config.changeCost * changes + config.shortGapPenalty * shortBy + illegal
         }
 
         // Layer 0: from the car.
         val s0 = sites[0]
-        val gap0 = s0.distanceAlong - options.carDistance
         for (j in 0 until s0.laneCount) {
             val nc = nodeCost(0, j)
             if (nc >= INF) continue
-            val start = options.currentLateral?.let { edgeCost(abs(s0.lateral(j) - it), gap0, s0.roadKind) } ?: 0.0
+            val start = options.currentLateral?.let { edgeCost(it, s0.lateral(j), options.carDistance, s0.distanceAlong, s0.roadKind) } ?: 0.0
             forward[0][j] = nc + start
         }
         // Layers 1..n-1.
         for (k in 1 until n) {
             val prev = sites[k - 1]
             val cur = sites[k]
-            val gap = cur.distanceAlong - prev.distanceAlong
             for (j in 0 until cur.laneCount) {
                 val nc = nodeCost(k, j)
                 if (nc >= INF) continue
@@ -223,7 +248,8 @@ class LanePlanner(private val config: Config = Config()) {
                     if (f >= INF) continue
                     val tr = transition(prev, i, allowed[k - 1], cur, j, options.freeTurnEntry)
                     val c = tr.changes
-                    val v = f + tr.entryCost + edgeCost(c, gap, cur.roadKind) + if (c == 0) 0.0 else TIE_EPS * i
+                    val e = edgeCost(tr.entry, cur.lateral(j), prev.distanceAlong, cur.distanceAlong, cur.roadKind)
+                    val v = f + tr.entryCost + e + if (c == 0) 0.0 else TIE_EPS * i
                     if (v < best - 1e-9) { best = v; arg = i }
                 }
                 if (arg >= 0) {
@@ -238,7 +264,6 @@ class LanePlanner(private val config: Config = Config()) {
         for (k in n - 2 downTo 0) {
             val cur = sites[k]
             val next = sites[k + 1]
-            val gap = next.distanceAlong - cur.distanceAlong
             for (i in 0 until cur.laneCount) {
                 if (!allowed[k][i]) continue
                 var best = INF
@@ -248,7 +273,8 @@ class LanePlanner(private val config: Config = Config()) {
                     val nc = nodeCost(k + 1, j)
                     if (nc >= INF) continue
                     val tr = transition(cur, i, allowed[k], next, j, options.freeTurnEntry)
-                    best = min(best, b + nc + tr.entryCost + edgeCost(tr.changes, gap, next.roadKind))
+                    val e = edgeCost(tr.entry, next.lateral(j), cur.distanceAlong, next.distanceAlong, next.roadKind)
+                    best = min(best, b + nc + tr.entryCost + e)
                 }
                 backward[k][i] = best
             }

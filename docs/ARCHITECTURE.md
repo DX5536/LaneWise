@@ -54,7 +54,7 @@ graph, which is downloaded once per region:
 
 1. `OfflineGraphBuilder` downloads drivable OSM ways for the region bbox via Overpass, streams the
    JSON (`android.util.JsonReader`), and builds a CSR graph with per-way `maxspeed`
-   (`DE:urban` = 50 etc.), `turn:lanes(:forward/:backward)`, names and refs → `filesDir/graph_<region>.lwg`
+   (`DE:urban` = 50 etc.), `turn:lanes(:forward/:backward)`, `change:lanes` (solid lines; format LWG3), names and refs → `filesDir/graph_<region>.lwg`
    (gzip).
 2. `OfflineTiles` downloads MapLibre tile packs (z8–14, both styles) from OpenFreeMap.
 3. `OfflineRouter` runs A* (time-weighted) and reconstructs steps, lane sites (turn lanes apply at the

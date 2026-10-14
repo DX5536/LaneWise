@@ -45,6 +45,16 @@ _Last updated: 2026-10-14 (v0.3: crash fix, rendering fixes, aerial-lane pipelin
       per OSM way (cross-section tracks, dashed vs solid), asset builder, spot-check page + `spot_checks.csv`.
       App side: `osm/AerialLanes.kt` (+ unit tests) applies it only where OSM has no lane data or disagrees (never over
       `turn:lanes`), setting "Spuren aus Luftbildern" (DE/EN/VI). Currently applied to the browse map only.
+- [x] Manoeuvre banner is a countdown: a violet fill shrinks to the manoeuvre (starts at the previous step, at most
+      400 m / 1 km trunk / 1.5 km motorway before it); the lane bar docks under the banner at full width as one card
+- [x] **Solid-line awareness** (was Next #1): OSM `change:lanes(:forward|:backward)` is matched along the route corridor
+      (`ChangeSpan`), and `LanePlanner` only counts stretches where the needed change is allowed as usable gap; a change
+      with no legal stretch costs 200 (vs 10 per change) → the change is planned before the solid line (unit test).
+- [x] Solid lines, part 2: the change instruction is timed in the last dashed stretch before the junction
+      (`LaneChangeInstruction.deadline`); solid dividers drawn from `change:lanes` on the route and the browse map;
+      offline graph format LWG3 stores `change:lanes` per way and the offline router emits `ChangeSpan`s
+      (old LWG1/2 files still load — re-download the region to get solid lines offline)
+- [x] Lane-change hint is a countdown too: bright lime shrinks to the deadline (end of the dashed stretch / junction)
 
 ## Aerial lanes — next sessions
 1. Owner spot-checks `work/spot/index.html` → `spot_checks.csv`; hand-correct 20–50 label tiles → retrain.
@@ -58,8 +68,8 @@ _Last updated: 2026-10-14 (v0.3: crash fix, rendering fixes, aerial-lane pipelin
 - [ ] On-device test drive in Hannover (demo mode works without driving: preview → "Demo").
 
 ## Next
-1. Solid-line awareness: parse OSM `change:lanes` (offline graph + Overpass corridor) and forbid lane
-   changes across `not_left`/`not_right` segments in `LanePlanner` (AMAP: `surfaceSolidLineMinLimitDistance`).
+1. Solid lines, rest: on-device check in Hannover (how well is `change:lanes` tagged?); fall back to the
+   aerial-imagery pipeline (solid vs dashed tracks are already measured there) where OSM has no `change:lanes`.
 2. Lane-count continuity between sites from OSM `lanes`/`lanes:forward` instead of the next-site approximation
    (partly done: pocket length by road kind).
 3. Turn restrictions in the offline router (`type=restriction` relations).
