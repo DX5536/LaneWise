@@ -12,7 +12,7 @@ de.lanewise
 │   ├── LaneModel.kt                  LaneDir bitmask, LaneSite (lateral coords, pockets), LaneAdvice
 │   ├── LanePlanner.kt                DP over lane sites, minimises lane changes
 │   ├── LaneGuidance.kt               runtime: re-plan per fix, assumed lane, timed change instruction
-│   └── LaneRibbonBuilder.kt          3D lane geometry for the map
+│   └── LaneRibbonBuilder.kt          route road (buildRoad, per km) + live highlight (build) on a fixed grid
 ├── routing/                          RoutingProvider, OSRM (FOSSGIS), TomTom, RouteScorer (traffic)
 ├── offline/                          OSM graph builder (Overpass), compact graph, A* router, tile packs
 ├── speed/SpeedLimitProvider.kt       OSM maxspeed along the route corridor (Overpass)
@@ -21,11 +21,14 @@ de.lanewise
 ├── nav/                              NavigationEngine (snap, reroute, speed status, announcements),
 │                                     Phrases (DE/EN/VI, voice segments), VoiceGuide (OmniVoice packs → Android TTS),
 │                                     VoicePack, VoiceInventory (tools/voice_pack)
+├── osm/                              OsmTags, StreetLanes (all streets around the car, clipped at junctions),
+│                                     AerialLanes (lane counts from aerial photos, applied over OSM)
 ├── search/Geocoder.kt                Photon (OSM) search, Germany only
 ├── settings/Settings.kt              DataStore-backed AppSettings
 └── ui/
     ├── MainViewModel.kt              orchestration (state machine BROWSE → PREVIEW → NAVIGATING)
-    ├── map/MapController.kt          MapLibre style, layers, 3D follow camera, car puck
+    ├── map/MapController.kt          MapLibre style, layers (road / live highlight / signal pop-up sources),
+    │                                 AMAP-style or classic camera, car puck on the lane path
     ├── lane/LaneArrows.kt, LaneViews.kt   vector lane glyphs, LaneBar, LaneScene3D, LaneHint
     ├── hud/Hud.kt                    speed border, speed sign, manoeuvre banner, ETA bar, GNSS chip
     ├── screens/                      MainScreen, SettingsScreen
@@ -62,6 +65,14 @@ graph, which is downloaded once per region:
    end of a way), speed limits and road kinds — so lane assist and speed warnings work offline too.
 
 Limitations: no turn restrictions, no live traffic, region-bounded.
+
+## Tools (PC side)
+
+- `tools/gen_map_styles.py`: MapLibre styles (CI checks they are current).
+- `tools/aerial_lanes/`: DOP20 aerial photos → road-marking U-Net → lane counts per OSM way →
+  `assets/aerial_lanes.json` (spot checks in `spot_checks.csv`).
+- `tools/voice_pack/`: OmniVoice voice packs; `inventory/<lang>.txt` (written by `VoiceInventoryTest`) + Hannover
+  street names → Ogg Opus clips + `index.tsv`, played by `nav/VoiceGuide`.
 
 ## Building
 

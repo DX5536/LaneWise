@@ -12,14 +12,26 @@ on fresh open German data instead of their outdated lane data.
 - **Advanced lane assist** — plans your lane across the next junctions (up to 4 km) so you change
   lanes as rarely as possible. Toggle: *Einstellungen → Spurassistent → Spurwechsel so weit wie möglich vermeiden*.
   Optional keep-right rule for the Autobahn (§ 7 StVO). Tap a lane in the lane bar to tell the app which lane you're in.
-- **3D lane view** — tilted 3D map with 3D buildings, the road drawn lane by lane, and a lime ribbon
-  in your recommended lane that bends where you should change; plus a perspective junction close-up.
+- **3D lane view** — tilted 3D map with 3D buildings, the route's road drawn lane by lane (pre-built per
+  kilometre, so it never jitters), a lime strip in your recommended lane over a soft band of all usable lanes,
+  and a raised arrow through each turn. Lanes that open (turn pockets, widening roads) are entered without a
+  "lane change"; at a turn only the turn lanes continue through the junction.
+- **Two view styles** — *Lane map (AMAP style)*: no junction box, the camera closes in at turns and lane changes
+  and pulls back on open road; or the classic view with a perspective junction close-up. Optionally show all
+  streets while driving (*Petal style*) with only the route highlighted.
+- **Junction details** — traffic-light pop-up at the next signalised junction (signals, inferred arrow lights,
+  Grünpfeil, pedestrian lights, push button), solid-line warning before lane changes stop being allowed
+  (OSM `change:lanes`), countdown bars on the manoeuvre banner and the lane-change hint.
 - **Speed limits** — German round sign (incl. de-restricted Autobahn), **light-red screen border**
   when too fast (pulsing) or too slow; both offsets adjustable in Settings.
 - **Official traffic data** — Die Autobahn GmbH (roadworks/closures), TomTom, HERE, Mobilithek (VMZ Niedersachsen).
 - **Offline / satellite-only** — download Region Hannover once; afterwards map, routing, lanes and
   speed limits work with GNSS only (GPS/Galileo/GLONASS/BeiDou), no internet.
-- Light/dark mode, German/English voice, demo drive for testing at your desk.
+- **Voice** — English (default), German, Vietnamese; Android TTS or natural OmniVoice voice packs rendered on a
+  PC (`tools/voice_pack/`).
+- **Lanes from aerial photos** (work in progress) — the official 20 cm LGLN photos and an ML model fill gaps in
+  OSM lane data (`tools/aerial_lanes/`).
+- Light/dark mode, favourites, bike lanes, road signs, demo drive for testing at your desk.
 
 ## Install
 Every push builds APKs in GitHub Actions → *Actions → Build → Artifacts → LaneWise-apks*.
@@ -48,6 +60,12 @@ HERE_API_KEY=...
 ```
 Map styles are generated: `python tools/gen_map_styles.py`.
 
+Opt-in check of the owner's real test route (needs internet; prints rendering and lane-advice problems):
+```bash
+LANEWISE_LIVE=1 ./gradlew testDebugUnitTest --tests '*RouteRenderLiveTest*'
+```
+After changing a spoken phrase, refresh the voice-pack script list: `./gradlew testDebugUnitTest -PupdateVoiceInventory`.
+
 ## Docs
 | File | What |
 | --- | --- |
@@ -56,9 +74,12 @@ Map styles are generated: `python tools/gen_map_styles.py`.
 | [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md) | APIs, keys, attribution |
 | [docs/REVERSE_ENGINEERING.md](docs/REVERSE_ENGINEERING.md) | what was learned from Petal Maps & AMAP |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | status and next steps |
+| [tools/aerial_lanes/README.md](tools/aerial_lanes/README.md) | lane counts from aerial photos (ML pipeline) |
+| [tools/voice_pack/README.md](tools/voice_pack/README.md) | OmniVoice voice packs |
 | [CLAUDE.md](CLAUDE.md) | hand-off notes for AI-assisted sessions |
 
 ## Attribution
 © OpenStreetMap contributors (ODbL) · tiles OpenFreeMap · routing FOSSGIS OSRM · traffic
-Die Autobahn GmbH des Bundes, TomTom, HERE, Mobilithek. LaneWise contains no code, images or
+Die Autobahn GmbH des Bundes, TomTom, HERE, Mobilithek · aerial photos © LGLN 2025/2026 (CC BY 4.0) ·
+voices rendered with OmniVoice (k2-fsa, Apache-2.0). LaneWise contains no code, images or
 data from Petal Maps or AMAP.

@@ -67,17 +67,38 @@ Phones cannot see which lane they are in (that needs HD maps + RTK GNSS — AMAP
 assumes you followed the advice; after a site the assumed lane is the recommended one (mapped
 through turns). Tap a lane in the lane bar to correct it; the plan updates immediately.
 
+## Lanes that open are not lane changes
+
+`LanePlanner.effectiveChanges`: only crossings between lanes that existed all the way since the previous
+junction count. When OSM lane counts (`Route.laneCountAt`) show the road was narrower in between (a turn
+pocket opening, or one lane widening to three before a junction), moving into the new lanes is free and not
+announced. Without lane-count data every crossing counts. OSRM lanes on the intersection ≤ 80 m before a turn
+without its own lane data are re-targeted to that turn (`attachTurnsToLaneSites`); the lane bar never shows the
+lanes of a junction after the next turn.
+
 ## Rendering
 
-`LaneRibbonBuilder` turns the plan into geometry: road surface sized by lane count × lane width,
-dashed dividers, and a lime ribbon whose lateral offset follows key frames with smooth-step
-transitions where changes are advised. MapLibre draws it in the 3D map (widths are metres converted
-to pixels per zoom), and `LaneScene3D` draws a perspective close-up of the next junction.
+`LaneRibbonBuilder` has two parts, both on a fixed 6 m sampling grid along the route, so the same spot of
+the route always gives the same geometry (no jitter):
+
+* `buildRoad(from, to)` is the route's road: surface sized by lane count × lane width, dashed/solid dividers,
+  edges, stop lines, painted arrows, bike lanes. Through lanes keep their place and turn pockets grow outward
+  (two-way roads: a left pocket takes the median). Lanes that end at a junction stop at the stop line; at a turn
+  only the turn lanes continue as a connector into the new road (left side for left turns, right side for right
+  turns), without markings inside the junction. Offset lines drop points that would run backwards, so nothing
+  folds on the inside of tight turns. `MapController` builds it per 1 km and keeps it.
+* `build(state, car)` is the live highlight: lime strip in the recommended lane (key frames with smooth-step
+  transitions where changes are advised, smoothed ±20 m), a soft band over every usable lane up to each site,
+  a raised turn arrow through the next turn, and `lanePath` (the car puck and camera drive on it).
+
+The classic view adds `LaneScene3D`, a perspective close-up of the next junction; the AMAP-style view drops it
+and moves the camera instead.
 
 ## Known limitations
 
 * OSM lane data is only as good as the tagging (`turn:lanes` coverage in Hannover is high on main
   roads, lower on side streets). Sites without lane tags are simply absent from the plan.
-* Solid lines (no lane change allowed) are not yet modelled — OSM `change:lanes` would allow it.
-  See ROADMAP.
-* Lane counts between sites are approximated from the next site (pockets open ~120 m before it).
+* Solid lines come from OSM `change:lanes`; where it is not tagged, every divider is assumed crossable.
+* Where OSM has no lane counts, lane counts between sites are approximated from the next site (pockets open
+  35 m before it in town, 80 m rural, 150 m trunk, 250 m motorway).
+* A turn whose junction has no lane data gets no lane bar.

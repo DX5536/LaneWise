@@ -1,6 +1,6 @@
 # Status & roadmap
 
-_Last updated: 2026-10-14 (v0.3: crash fix, rendering fixes, aerial-lane pipeline)._
+_Last updated: 2026-10-14 (v0.3: crash fix, AMAP-style view, pre-built route road, voice packs, aerial-lane pipeline)._
 
 ## Done (v0.1)
 - [x] Reverse-engineering notes for Petal Maps 4.7 and AMAP 17.00 lane guidance (`docs/REVERSE_ENGINEERING.md`)
@@ -103,9 +103,14 @@ _Last updated: 2026-10-14 (v0.3: crash fix, rendering fixes, aerial-lane pipelin
 4. Turn arrows from the mask → `turn:lanes` suggestions; solid lines → `change:lanes` (ties into "Next" 1).
 5. Optional: 2× bicubic input to the network for 1-px lines (no generative upscaler — it would invent paint).
 
+- [x] AMAP-style camera zooms out only moderately on open road (urban 17.1 / fast 16.4, was 16.3 / 15.6).
+
 ## Not yet verified
-- [ ] **First CI build** — code was written without a local Android SDK; expect a round of compile fixes.
-- [ ] On-device test drive in Hannover (demo mode works without driving: preview → "Demo").
+- [ ] **CI build** of the current code (local builds and 29 unit tests pass; the owner pushes and runs CI).
+- [ ] Real drive (so far demo drives on the owner's phone): turn-lane connector, signal pop-up, solid-line chip,
+      Petal-style streets while driving, OmniVoice English test packs (only the Hbf-north streets are rendered).
+- [ ] Voice packs: German / Vietnamese voices not picked yet; full renders (~2.4 h each) and the `voices-v1`
+      GitHub release not done.
 
 ## Next
 0. In-app lane corrections (owner's own observations, stored on the phone, applied over OSM), and/or

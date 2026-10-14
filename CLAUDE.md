@@ -38,6 +38,8 @@ See `docs/ARCHITECTURE.md`. Core lane logic: `app/src/main/java/de/lanewise/lane
 - Versions: AGP 8.13.2, Gradle 8.14.3, Kotlin 2.2.21, Compose BOM 2026.02.01, MapLibre 11.13.5, compileSdk 36, minSdk 26.
 
 ## Tools
+- Python tools: `tools/aerial_lanes` (DOP20 + U-Net, venv `.venv` with torch cu124) and `tools/voice_pack`
+  (OmniVoice, venv `.venv` with torch 2.8 cu128); see their READMEs. GPU: RTX 3070 Ti 8 GB.
 - REA MCP server is installed (reverse engineering). JADX provider is NOT configured (needs `REA_JADX_MCP_JAR`).
 - Local build: `.\build-local.ps1` (JDK 21 at `C:\Program Files\Java\jdk-21`, SDK at `%LOCALAPPDATA%\Android\Sdk`,
   isolated `GRADLE_USER_HOME=%LOCALAPPDATA%\LaneWise\gradle-home` because the shared `~/.gradle` 8.14.5 cache is
@@ -45,4 +47,17 @@ See `docs/ARCHITECTURE.md`. Core lane logic: `app/src/main/java/de/lanewise/lane
 - Never push for the owner — they review and push themselves.
 
 ## Status
-See `docs/ROADMAP.md`. First CI build not yet run at time of writing.
+See `docs/ROADMAP.md` (v0.3, 2026-10-14). Builds locally, runs on the owner's phone (Samsung S24 Ultra,
+Android 16, package `de.lanewise.app.debug`); the CI build/release APK is the owner's job.
+
+## Things learned (read before changing these areas)
+- MapLibre 11.13.5 `TileSet.setBounds(Float, Float, Float, Float)` recurses forever: use the `Array<Float>` overload.
+- The app sandbox (Claude desktop) redirects `%LOCALAPPDATA%` writes; Python venvs/data live in git-ignored
+  `tools/*/.venv` and `tools/*/work`.
+- Owner's test route: Brüderstraße 4 → Hauptstraße 3 Langenhagen (Asia Haus), 2nd route option.
+  `LANEWISE_LIVE=1 gradlew testDebugUnitTest --tests '*RouteRenderLiveTest*'` checks it (Overpass may time out).
+- Wrong lane counts so far were OSM tagging errors (Brüderstraße way 41589961 `lanes=2`, Celler Straße way
+  1053732103), not the imagery (DOP20 flown 2025-03-06). The owner fixes OSM; never scrape Google (ToS) or copy
+  GPL code (e.g. Vela) into LaneWise.
+- Owner prefers: only the route's own lanes while driving by default (Petal-style streets is an opt-in setting),
+  AMAP-style camera, English default UI. Install APKs on the phone only when the owner asks.
