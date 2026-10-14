@@ -28,6 +28,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -55,7 +57,9 @@ private fun usedBits(mask: Int, turn: Int): Int {
  * which lane you are in.
  */
 @Composable
-fun LaneBar(advice: LaneAdvice, modifier: Modifier = Modifier, onLaneTap: (Int) -> Unit = {}) {
+fun LaneBar(
+    advice: LaneAdvice, modifier: Modifier = Modifier, bikeColor: Color? = null, onLaneTap: (Int) -> Unit = {},
+) {
     val c = LocalLaneColors.current
     val site = advice.site
     Row(
@@ -97,6 +101,19 @@ fun LaneBar(advice: LaneAdvice, modifier: Modifier = Modifier, onLaneTap: (Int) 
                 }
             }
         }
+        if (bikeColor != null) {
+            // Painted bike lane right of the car lanes.
+            Canvas(Modifier.width(2.dp).height(40.dp)) {
+                drawLine(Color.White, Offset(size.width / 2, 0f), Offset(size.width / 2, size.height), strokeWidth = size.width)
+            }
+            val bikeImg = androidx.compose.runtime.remember(bikeColor) {
+                de.lanewise.ui.hud.RoadSignArt.bike(72, bikeColor.toArgb()).asImageBitmap()
+            }
+            Box(
+                Modifier.size(width = 30.dp, height = 52.dp).clip(RoundedCornerShape(8.dp)).background(bikeColor),
+                contentAlignment = Alignment.Center,
+            ) { androidx.compose.foundation.Image(bikeImg, null, Modifier.size(24.dp)) }
+        }
     }
 }
 
@@ -107,14 +124,14 @@ fun LaneBar(advice: LaneAdvice, modifier: Modifier = Modifier, onLaneTap: (Int) 
  * then into the turn; flowing chevrons show the direction of travel.
  */
 @Composable
-fun LaneScene3D(state: LaneState, distanceText: String, modifier: Modifier = Modifier) {
+fun LaneScene3D(state: LaneState, distanceText: String, modifier: Modifier = Modifier, bikeColor: Color? = null) {
     val advice = state.nextAdvice ?: return
     val c = LocalLaneColors.current
     val flow by rememberInfiniteTransition(label = "flow").animateFloat(
         0f, 1f, infiniteRepeatable(tween(1400, easing = LinearEasing), RepeatMode.Restart), label = "flowAnim",
     )
     Box(modifier.clip(RoundedCornerShape(20.dp)).background(if (c.isDark) Color(0xFF0E1015) else Color(0xFFDDE3D2))) {
-        Canvas(Modifier.fillMaxSize()) { drawScene(advice, state, flow) }
+        Canvas(Modifier.fillMaxSize()) { drawScene(advice, state, flow, bikeColor) }
         Text(
             distanceText,
             Modifier.align(Alignment.TopStart).padding(12.dp)
@@ -124,7 +141,7 @@ fun LaneScene3D(state: LaneState, distanceText: String, modifier: Modifier = Mod
     }
 }
 
-private fun DrawScope.drawScene(advice: LaneAdvice, state: LaneState, flow: Float) {
+private fun DrawScope.drawScene(advice: LaneAdvice, state: LaneState, flow: Float, bikeColor: Color?) {
     val site = advice.site
     val n = site.laneCount.coerceAtLeast(1)
     val w = size.width
@@ -146,6 +163,14 @@ private fun DrawScope.drawScene(advice: LaneAdvice, state: LaneState, flow: Floa
         lineTo(xAt(n.toFloat(), yBot), yBot); lineTo(xAt(0f, yBot), yBot); close()
     }
     drawPath(road, asphalt)
+    if (bikeColor != null) {
+        // Bike lane strip right of the outermost car lane (≈ 0.45 lane widths).
+        val bike = Path().apply {
+            moveTo(xAt(n.toFloat(), yStop), yStop); lineTo(xAt(n + 0.45f, yStop), yStop)
+            lineTo(xAt(n + 0.45f, yBot), yBot); lineTo(xAt(n.toFloat(), yBot), yBot); close()
+        }
+        drawPath(bike, bikeColor.copy(alpha = 0.9f))
+    }
 
     // Recommended-lane ribbon: from the car's lane at the bottom into the recommended lane, then the turn.
     val rec = advice.recommended

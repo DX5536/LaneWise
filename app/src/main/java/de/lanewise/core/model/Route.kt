@@ -88,7 +88,12 @@ data class Route(
     /** Extra time (s) attributed to traffic/incidents by the scorer. */
     val trafficPenalty: Double = 0.0,
     val incidents: List<TrafficIncident> = emptyList(),
+    /** Traffic lights and road signs on the route, sorted by distance. */
+    val features: List<RoadFeature> = emptyList(),
+    /** On-street bike lanes on the right-hand side in driving direction. */
+    val bikeLanes: List<BikeLaneSpan> = emptyList(),
 ) {
+    fun bikeLaneAt(d: Double): BikeLaneSpan? = bikeLanes.firstOrNull { d >= it.from && d < it.to }
     fun speedLimitAt(d: Double): SpeedLimitSpan? = speedLimits.firstOrNull { d >= it.from && d < it.to }
     fun roadSpanAt(d: Double): RoadSpan? = roadSpans.firstOrNull { d >= it.from && d < it.to }
     val effectiveDuration get() = duration + trafficPenalty
@@ -109,3 +114,17 @@ data class TrafficIncident(
     /** True if the road is fully blocked. */
     val blocked: Boolean = false,
 )
+
+/**
+ * Point features from OpenStreetMap shown on the map and in the HUD.
+ * Speed cameras are intentionally absent: using camera warnings while driving is illegal in Germany (§ 23 Abs. 1c StVO).
+ */
+enum class FeatureKind { TRAFFIC_SIGNALS, STOP, GIVE_WAY, CROSSING, RAILWAY_CROSSING }
+
+data class RoadFeature(val kind: FeatureKind, val position: LatLon, val distanceAlong: Double)
+
+/**
+ * Painted bike lane next to the car lanes on the right in driving direction.
+ * [exclusive] = Radfahrstreifen (solid line, Zeichen 237), false = Schutzstreifen / advisory or shared lane.
+ */
+data class BikeLaneSpan(val from: Double, val to: Double, val exclusive: Boolean)

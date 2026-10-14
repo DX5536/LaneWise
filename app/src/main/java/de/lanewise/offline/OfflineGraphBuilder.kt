@@ -4,13 +4,12 @@ import android.util.JsonReader
 import android.util.JsonToken
 import de.lanewise.core.geo.Geo
 import de.lanewise.core.geo.LatLon
-import de.lanewise.core.net.Http
+import de.lanewise.core.net.Overpass
 import de.lanewise.osm.OsmTags
+import de.lanewise.ui.i18n.Strings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
-import okhttp3.FormBody
-import okhttp3.Request
 import java.io.File
 import java.io.IOException
 import java.io.InputStreamReader
@@ -20,54 +19,55 @@ import java.util.Locale
  * Downloads the drivable road network of a region from the Overpass API (fresh OSM data) and
  * converts it into an [OfflineGraph]. Runs once while online; afterwards routing works with GNSS only.
  */
-class OfflineGraphBuilder(private val overpassUrl: String = OVERPASS_URL) {
+class OfflineGraphBuilder {
 
     data class Region(val id: String, val name: String, val south: Double, val west: Double, val north: Double, val east: Double)
 
-    suspend fun build(region: Region, target: File, progress: (String) -> Unit): OfflineGraph = withContext(Dispatchers.IO) {
+    suspend fun build(region: Region, target: File, strings: Strings, progress: (String) -> Unit): OfflineGraph = withContext(Dispatchers.IO) {
         val bbox = String.format(Locale.US, "%.4f,%.4f,%.4f,%.4f", region.south, region.west, region.north, region.east)
         val classes = OsmTags.HIGHWAY_CLASSES.joinToString("|")
         val query = """
             [out:json][timeout:600][maxsize:1073741824];
+            (
             way["highway"~"^($classes)$"]["access"!~"^(no|private|delivery|agricultural|forestry)$"]["motor_vehicle"!~"^(no|private)$"]($bbox);
+            ${OsmTags.featureNodeQuery("($bbox)")}
+            );
             out body geom qt;
         """.trimIndent()
 
-        progress("Lade Straßennetz von OpenStreetMap …")
-        val req = Request.Builder().url(overpassUrl).post(FormBody.Builder().add("data", query).build()).build()
+        progress(strings.dlRoads)
         val acc = Accumulator()
-        Http.client.newBuilder().readTimeout(15, java.util.concurrent.TimeUnit.MINUTES).build()
-            .newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) throw IOException("Overpass HTTP ${resp.code}")
-                val body = resp.body ?: throw IOException("Overpass: empty body")
-                JsonReader(InputStreamReader(body.byteStream(), Charsets.UTF_8)).use { r ->
-                    r.beginObject()
-                    while (r.hasNext()) {
-                        if (r.nextName() == "elements") {
-                            r.beginArray()
-                            while (r.hasNext()) {
-                                readWay(r, acc)
-                                if (acc.wayCount % 5000 == 0) {
-                                    coroutineContext.ensureActive()
-                                    progress("${acc.wayCount} Straßenabschnitte gelesen …")
-                                }
-                            }
-                            r.endArray()
-                        } else r.skipValue()
-                    }
-                    r.endObject()
+        Overpass.stream(query) { resp ->
+            val body = resp.body ?: throw IOException("Overpass: empty body")
+            JsonReader(InputStreamReader(body.byteStream(), Charsets.UTF_8)).use { r ->
+                r.beginObject()
+                while (r.hasNext()) {
+                    if (r.nextName() == "elements") {
+                        r.beginArray()
+                        var n = 0
+                        while (r.hasNext()) {
+                            readElement(r, acc)
+                            if (++n % 5000 == 0) progress(String.format(strings.dlRead, acc.wayCount))
+                        }
+                        r.endArray()
+                    } else r.skipValue()
                 }
+                r.endObject()
             }
-        progress("Baue Routing-Graph (${acc.wayCount} Wege, ${acc.nodeCount} Knoten) …")
+        }
+        coroutineContext.ensureActive()
+        progress(strings.dlBuild)
         val graph = acc.toGraph(doubleArrayOf(region.south, region.west, region.north, region.east))
-        progress("Speichere …")
+        progress(strings.dlSave)
         target.parentFile?.mkdirs()
         graph.save(target)
         graph
     }
 
-    private fun readWay(r: JsonReader, acc: Accumulator) {
+    private fun readElement(r: JsonReader, acc: Accumulator) {
         var type = ""
+        var lat = Double.NaN
+        var lon = Double.NaN
         val nodeIds = ArrayList<Long>()
         val geom = ArrayList<LatLon>()
         val tags = HashMap<String, String>()
@@ -75,6 +75,8 @@ class OfflineGraphBuilder(private val overpassUrl: String = OVERPASS_URL) {
         while (r.hasNext()) {
             when (r.nextName()) {
                 "type" -> type = r.nextString()
+                "lat" -> lat = r.nextDouble()
+                "lon" -> lon = r.nextDouble()
                 "nodes" -> { r.beginArray(); while (r.hasNext()) nodeIds += r.nextLong(); r.endArray() }
                 "geometry" -> {
                     r.beginArray()
@@ -98,6 +100,7 @@ class OfflineGraphBuilder(private val overpassUrl: String = OVERPASS_URL) {
         }
         r.endObject()
         if (type == "way" && nodeIds.size >= 2 && nodeIds.size == geom.size) acc.addWay(nodeIds, geom, tags)
+        if (type == "node" && !lat.isNaN() && !lon.isNaN()) OsmTags.featureKind(tags)?.let { acc.addFeature(lat, lon, it.ordinal) }
     }
 
     /** Growable primitive buffers so a city-sized network fits comfortably in memory. */
@@ -108,6 +111,11 @@ class OfflineGraphBuilder(private val overpassUrl: String = OVERPASS_URL) {
         val wHw = ByteList(); val wMaxF = IntList(); val wMaxB = IntList(); val wName = IntList(); val wRef = IntList()
         val wTurnF = IntList(); val wTurnB = IntList(); val wFirst = IntList(); val wLast = IntList()
         val strings = ArrayList<String>(); val stringIndex = HashMap<String, Int>()
+        val wBike = ByteList(); val fLat = IntList(); val fLon = IntList(); val fKind = ByteList()
+
+        fun addFeature(lat: Double, lon: Double, kind: Int) {
+            fLat.add((lat * 1e7).toInt()); fLon.add((lon * 1e7).toInt()); fKind.add(kind.toByte())
+        }
         var wayCount = 0
         val nodeCount get() = lat.size
 
@@ -140,6 +148,10 @@ class OfflineGraphBuilder(private val overpassUrl: String = OVERPASS_URL) {
             wHw.add(code.toByte()); wMaxF.add(maxF); wMaxB.add(maxB)
             wName.add(intern(tags["name"])); wRef.add(intern(tags["ref"]))
             wTurnF.add(intern(turnF)); wTurnB.add(intern(turnB))
+            var bike = 0
+            OsmTags.bikeLaneRight(tags, forward = true, oneway = oneway != 0)?.let { bike = bike or 1 or (if (it) 2 else 0) }
+            if (oneway == 0) OsmTags.bikeLaneRight(tags, forward = false, oneway = false)?.let { bike = bike or 4 or (if (it) 8 else 0) }
+            wBike.add(bike.toByte())
 
             val nodes = IntArray(ids.size) { node(ids[it], geom[it]) }
             wFirst.add(nodes.first()); wLast.add(nodes.last())
@@ -168,9 +180,9 @@ class OfflineGraphBuilder(private val overpassUrl: String = OVERPASS_URL) {
                 lat.toArray(), lon.toArray(), start, to, len, way, fwd,
                 OfflineGraph.Ways(
                     wHw.toArray(), wMaxF.toArray(), wMaxB.toArray(), wName.toArray(), wRef.toArray(),
-                    wTurnF.toArray(), wTurnB.toArray(), wFirst.toArray(), wLast.toArray(), strings.toTypedArray(),
+                    wTurnF.toArray(), wTurnB.toArray(), wFirst.toArray(), wLast.toArray(), strings.toTypedArray(), wBike.toArray(),
                 ),
-                bbox, System.currentTimeMillis(),
+                bbox, System.currentTimeMillis(), fLat.toArray(), fLon.toArray(), fKind.toArray(),
             )
         }
     }
@@ -192,7 +204,6 @@ class OfflineGraphBuilder(private val overpassUrl: String = OVERPASS_URL) {
     }
 
     companion object {
-        const val OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 
         val REGIONS = listOf(
             Region("hannover", "Region Hannover", 52.20, 9.45, 52.58, 10.10),

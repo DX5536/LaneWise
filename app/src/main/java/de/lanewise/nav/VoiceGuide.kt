@@ -5,14 +5,14 @@ import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.speech.tts.TextToSpeech
-import de.lanewise.settings.VoiceLanguage
+import de.lanewise.settings.AppLanguage
 import java.util.Locale
 
 /** Android TextToSpeech wrapper; works offline when the device has the German/English voice installed. */
 class VoiceGuide(context: Context) : TextToSpeech.OnInitListener {
     private val tts = TextToSpeech(context.applicationContext, this)
     private var ready = false
-    private var language: VoiceLanguage = VoiceLanguage.GERMAN
+    private var language: AppLanguage = AppLanguage.GERMAN
     private val tone = runCatching { ToneGenerator(AudioManager.STREAM_NOTIFICATION, 60) }.getOrNull()
 
     override fun onInit(status: Int) {
@@ -28,13 +28,17 @@ class VoiceGuide(context: Context) : TextToSpeech.OnInitListener {
         }
     }
 
-    fun setLanguage(lang: VoiceLanguage) {
+    fun setLanguage(lang: AppLanguage) {
         if (lang != language) { language = lang; applyLanguage() }
     }
 
     private fun applyLanguage() {
         if (!ready) return
-        tts.language = if (language == VoiceLanguage.GERMAN) Locale.GERMANY else Locale.UK
+        tts.language = when (language) {
+            AppLanguage.GERMAN -> Locale.GERMANY
+            AppLanguage.ENGLISH -> Locale.UK
+            AppLanguage.VIETNAMESE -> Locale.forLanguageTag("vi-VN")
+        }
     }
 
     fun speak(a: Announcement) {

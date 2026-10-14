@@ -1,6 +1,8 @@
 package de.lanewise.nav
 
+import de.lanewise.core.model.BikeLaneSpan
 import de.lanewise.core.model.ManeuverType
+import de.lanewise.core.model.RoadFeature
 import de.lanewise.core.model.Route
 import de.lanewise.core.model.RouteStep
 import de.lanewise.lane.LaneGuidance
@@ -31,6 +33,10 @@ data class NavSnapshot(
     val roadKind: RoadKind,
     val offRoute: Boolean,
     val arrived: Boolean,
+    /** Next traffic lights / signs within 400 m with their distance from the car. */
+    val upcoming: List<Pair<RoadFeature, Double>> = emptyList(),
+    /** Painted bike lane next to the car lanes here (or within the next 50 m). */
+    val bikeLane: BikeLaneSpan? = null,
 )
 
 /** Something to say. [key] de-duplicates so each announcement is spoken once. */
@@ -95,8 +101,13 @@ class NavigationEngine(
         val lanes = laneGuidance.update(route.laneSites, along, settings.avoidLaneChanges, settings.keepRight)
         val arrived = remaining < 25
 
+        val upcoming = route.features.asSequence()
+            .filter { it.distanceAlong > along - 5 && it.distanceAlong - along < 400 }
+            .take(2).map { it to (it.distanceAlong - along) }.toList()
+        val bike = route.bikeLaneAt(along) ?: route.bikeLaneAt(along + 50)
+
         val snap = NavSnapshot(route, fix, along, remaining, remainingSec, next, distNext, after, limit, noLimit,
-            status, lanes, kind, offRoute, arrived)
+            status, lanes, kind, offRoute, arrived, upcoming, bike)
         return snap to announcements(snap, phrases)
     }
 

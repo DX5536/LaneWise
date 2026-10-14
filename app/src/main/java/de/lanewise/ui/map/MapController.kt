@@ -7,12 +7,15 @@ import android.graphics.Paint
 import android.graphics.Path
 import de.lanewise.core.geo.Geo
 import de.lanewise.core.geo.LatLon
+import de.lanewise.core.model.FeatureKind
 import de.lanewise.core.model.IncidentKind
+import de.lanewise.core.model.RoadFeature
 import de.lanewise.core.model.Route
 import de.lanewise.core.model.TrafficIncident
 import de.lanewise.lane.LaneRibbonBuilder
 import de.lanewise.lane.RoadKind
 import de.lanewise.nav.NavSnapshot
+import de.lanewise.ui.hud.RoadSignArt
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
@@ -46,6 +49,9 @@ class MapController(private val context: Context) {
     var onUserPannedMap: (() -> Unit)? = null
     var onMapLongPress: ((LatLon) -> Unit)? = null
     private var lastLat = 52.37
+    private var bikeColor: Int = 0xFFE5484D.toInt()
+    private var lastFeatures: List<RoadFeature> = emptyList()
+    private var featuresVisible = true
 
     fun attach(view: MapView, darkMode: Boolean) {
         view.getMapAsync { m ->
@@ -77,6 +83,7 @@ class MapController(private val context: Context) {
         m.setStyle(Style.Builder().fromUri(styleUri(isDark))) { s ->
             style = s
             setupLayers(s, isDark)
+            showFeatures(lastFeatures, featuresVisible)
         }
     }
 
@@ -87,7 +94,8 @@ class MapController(private val context: Context) {
     private fun setupLayers(s: Style, isDark: Boolean) {
         s.addImage(IMG_CAR, carBitmap(if (isDark) 0xFF9A82FF.toInt() else 0xFF6C4CF5.toInt()))
         s.addImage(IMG_DEST, pinBitmap())
-        listOf(SRC_ROUTE, SRC_ALT, SRC_LANES, SRC_CAR, SRC_DEST, SRC_INC).forEach { s.addSource(GeoJsonSource(it)) }
+        FeatureKind.entries.forEach { s.addImage("lw-feat-${it.name}", RoadSignArt.feature(it, 64)) }
+        listOf(SRC_ROUTE, SRC_ALT, SRC_LANES, SRC_CAR, SRC_DEST, SRC_INC, SRC_FEAT).forEach { s.addSource(GeoJsonSource(it)) }
 
         val below = "building-3d"
         fun add(l: Layer) { if (s.getLayer(below) != null) s.addLayerBelow(l, below) else s.addLayer(l) }
@@ -117,6 +125,10 @@ class MapController(private val context: Context) {
             PropertyFactory.lineWidth(metres), PropertyFactory.lineOpacity(0.96f),
             PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
         ))
+        add(LineLayer("lane-bike", SRC_LANES).withFilter(kind("BIKE")).withProperties(
+            PropertyFactory.lineColor(bikeColor), PropertyFactory.lineOpacity(0.92f),
+            PropertyFactory.lineWidth(metres), PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
+        ))
         add(LineLayer("lane-allowed", SRC_LANES).withFilter(kind("ALLOWED")).withProperties(
             PropertyFactory.lineColor("#B8F33A"), PropertyFactory.lineOpacity(0.28f),
             PropertyFactory.lineWidth(metres), PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
@@ -145,6 +157,14 @@ class MapController(private val context: Context) {
             PropertyFactory.circleStrokeColor("#FFFFFF"), PropertyFactory.circleStrokeWidth(2f),
             PropertyFactory.circlePitchAlignment(Property.CIRCLE_PITCH_ALIGNMENT_MAP),
         ))
+        s.addLayer(SymbolLayer("features", SRC_FEAT).withProperties(
+            PropertyFactory.iconImage(Expression.concat(Expression.literal("lw-feat-"), Expression.get("kind"))),
+            PropertyFactory.iconAnchor(Property.ICON_ANCHOR_BOTTOM),
+            PropertyFactory.iconAllowOverlap(true), PropertyFactory.iconIgnorePlacement(true),
+            PropertyFactory.iconPitchAlignment(Property.ICON_PITCH_ALIGNMENT_VIEWPORT),
+            PropertyFactory.iconSize(Expression.interpolate(Expression.linear(), Expression.zoom(),
+                Expression.stop(13, 0.35f), Expression.stop(17, 0.6f), Expression.stop(19, 0.85f))),
+        ).apply { minZoom = 13f })
         s.addLayer(SymbolLayer("dest", SRC_DEST).withProperties(
             PropertyFactory.iconImage(IMG_DEST), PropertyFactory.iconAnchor(Property.ICON_ANCHOR_BOTTOM),
             PropertyFactory.iconAllowOverlap(true), PropertyFactory.iconIgnorePlacement(true),
@@ -189,6 +209,21 @@ class MapController(private val context: Context) {
         if (main == null) clearLanes()
     }
 
+    /** Traffic lights and road signs along the route. */
+    fun showFeatures(list: List<RoadFeature>, visible: Boolean) {
+        lastFeatures = list; featuresVisible = visible
+        val s = style ?: return
+        (s.getSource(SRC_FEAT) as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(
+            if (!visible) emptyList() else list.map {
+                Feature.fromGeometry(Point.fromLngLat(it.position.lon, it.position.lat)).apply { addStringProperty("kind", it.kind.name) }
+            }))
+    }
+
+    fun setBikeColor(argb: Int) {
+        bikeColor = argb
+        (style?.getLayer("lane-bike") as? LineLayer)?.setProperties(PropertyFactory.lineColor(argb))
+    }
+
     fun showIncidents(list: List<TrafficIncident>) {
         val s = style ?: return
         (s.getSource(SRC_INC) as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(list.map {
@@ -217,7 +252,10 @@ class MapController(private val context: Context) {
             Feature.fromGeometry(Point.fromLngLat(position.lon, position.lat)).apply { addNumberProperty("bearing", bearing) })
     }
 
-    fun updateNavigation(snap: NavSnapshot, showRibbons: Boolean, pitch: Float, topPaddingPx: Double, closeUpDistance: Double = 50.0) {
+    fun updateNavigation(
+        snap: NavSnapshot, showRibbons: Boolean, pitch: Float, topPaddingPx: Double,
+        closeUpDistance: Double = 50.0, showBikeLanes: Boolean = true,
+    ) {
         val s = style ?: return
         val along = snap.distanceAlong
         val pos = if (snap.offRoute) snap.fix.position else snap.route.geometry.pointAt(along)
@@ -226,13 +264,13 @@ class MapController(private val context: Context) {
 
         if (kotlin.math.abs(pos.lat - lastLat) > 0.5) {
             lastLat = pos.lat
-            listOf("lane-surface", "lane-allowed", "lane-recommended").forEach {
+            listOf("lane-surface", "lane-allowed", "lane-recommended", "lane-bike").forEach {
                 (s.getLayer(it) as? LineLayer)?.setProperties(PropertyFactory.lineWidth(metresToPixels()))
             }
         }
 
         if (showRibbons && !snap.offRoute) {
-            val lines = LaneRibbonBuilder.build(snap.route, snap.lanes, along)
+            val lines = LaneRibbonBuilder.build(snap.route, snap.lanes, along, showBikeLanes = showBikeLanes)
             (s.getSource(SRC_LANES) as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(lines.map { l ->
                 Feature.fromGeometry(line(l.points)).apply {
                     addStringProperty("k", l.kind.name)
@@ -317,6 +355,7 @@ class MapController(private val context: Context) {
         private const val SRC_CAR = "lw-car"
         private const val SRC_DEST = "lw-dest"
         private const val SRC_INC = "lw-incidents"
+        private const val SRC_FEAT = "lw-features"
         private const val IMG_CAR = "lw-car-img"
         private const val IMG_DEST = "lw-dest-img"
     }

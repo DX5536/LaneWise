@@ -18,7 +18,7 @@ import kotlin.math.min
 object LaneRibbonBuilder {
 
     data class Line(val points: List<LatLon>, val widthM: Double, val kind: Kind)
-    enum class Kind { SURFACE, EDGE, DIVIDER, RECOMMENDED, ALLOWED }
+    enum class Kind { SURFACE, EDGE, DIVIDER, RECOMMENDED, ALLOWED, BIKE }
 
     fun laneWidth(kind: RoadKind) = when (kind) {
         RoadKind.MOTORWAY -> 3.75
@@ -35,7 +35,10 @@ object LaneRibbonBuilder {
 
     private class Sample(val d: Double, val p: LatLon, val lanes: Int, val rightPockets: Int, val w: Double, val twoWay: Boolean)
 
-    fun build(route: Route, state: LaneState, carDistance: Double, ahead: Double = 1200.0, behind: Double = 60.0): List<Line> {
+    fun build(
+        route: Route, state: LaneState, carDistance: Double, ahead: Double = 1200.0, behind: Double = 60.0,
+        showBikeLanes: Boolean = true,
+    ): List<Line> {
         val line: Polyline = route.geometry
         val from = max(0.0, carDistance - behind)
         val to = min(line.length, carDistance + ahead)
@@ -86,6 +89,28 @@ object LaneRibbonBuilder {
                 }
             }
             runStart = k
+        }
+
+        // On-street bike lanes: a strip right of the outermost car lane (Radfahrstreifen 1.6 m, Schutzstreifen 1.3 m).
+        if (showBikeLanes && route.bikeLanes.isNotEmpty()) {
+            var k = 0
+            while (k < samples.size) {
+                val span = route.bikeLaneAt(samples[k].d)
+                if (span == null) { k++; continue }
+                var e = k
+                while (e + 1 < samples.size && route.bikeLaneAt(samples[e + 1].d) == span) e++
+                if (e > k) {
+                    val width = if (span.exclusive) 1.6 else 1.3
+                    val idx = (k..e).toList()
+                    val strip = Polyline.offset(idx.map { pts[it] }) { j ->
+                        val s = samples[idx[j]]
+                        val rightEdge = if (s.twoWay) s.lanes * s.w else s.lanes * s.w / 2.0
+                        rightEdge + 0.3 + width / 2
+                    }
+                    out += Line(strip, width, Kind.BIKE)
+                }
+                k = e + 1
+            }
         }
 
         // Recommended lane: lateral coordinate over distance, with smooth transitions at change points.

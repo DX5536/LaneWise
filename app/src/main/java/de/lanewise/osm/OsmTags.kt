@@ -1,5 +1,6 @@
 package de.lanewise.osm
 
+import de.lanewise.core.model.FeatureKind
 import de.lanewise.lane.RoadKind
 
 /** Helpers for interpreting OpenStreetMap tags with German conventions. */
@@ -35,6 +36,47 @@ object OsmTags {
         highway.startsWith("trunk") -> RoadKind.TRUNK
         maxspeedKmh != null && maxspeedKmh >= 70 -> RoadKind.RURAL
         else -> RoadKind.URBAN
+    }
+
+    /**
+     * Overpass statements selecting the point features LaneWise shows (traffic lights, stop/give way,
+     * crossings) inside [area], e.g. "(52.3,9.6,52.4,9.8)" or "(around:20,lat,lon,...)".
+     */
+    fun featureNodeQuery(area: String): String =
+        "node$area[\"highway\"~\"^(traffic_signals|stop|give_way|crossing)$\"];" +
+            "node$area[\"railway\"=\"level_crossing\"];" +
+            "node$area[\"traffic_sign\"~\"DE:20[56]\"];"
+
+    /** Classify an OSM node's tags; null if it is not a feature LaneWise shows. */
+    fun featureKind(tags: Map<String, String>): FeatureKind? {
+        val hw = tags["highway"]
+        val sign = tags["traffic_sign"].orEmpty()
+        return when {
+            hw == "traffic_signals" -> FeatureKind.TRAFFIC_SIGNALS
+            hw == "crossing" && tags["crossing"] == "traffic_signals" -> FeatureKind.TRAFFIC_SIGNALS
+            hw == "stop" || sign.contains("DE:206") -> FeatureKind.STOP
+            hw == "give_way" || sign.contains("DE:205") -> FeatureKind.GIVE_WAY
+            tags["railway"] == "level_crossing" -> FeatureKind.RAILWAY_CROSSING
+            hw == "crossing" && (tags["crossing"] in setOf("zebra", "marked", "uncontrolled") || tags["crossing_ref"] == "zebra") ->
+                FeatureKind.CROSSING
+            else -> null
+        }
+    }
+
+    /**
+     * Bike lane on the right-hand side of travel. [forward] = travelling in the OSM way direction.
+     * Returns null if none, true for an exclusive lane (Radfahrstreifen), false for advisory/shared.
+     * Separate tracks (`track`, `separate`) are not on the carriageway and are ignored.
+     */
+    fun bikeLaneRight(tags: Map<String, String>, forward: Boolean, oneway: Boolean): Boolean? {
+        val side = if (forward) "right" else "left"
+        val v = tags["cycleway:$side"] ?: tags["cycleway:both"]
+            ?: tags["cycleway"]?.takeIf { oneway || it == "lane" || it == "shared_lane" }
+        return when (v) {
+            "lane" -> (tags["cycleway:$side:lane"] ?: tags["cycleway:both:lane"] ?: tags["cycleway:lane"]) != "advisory"
+            "shared_lane" -> false
+            else -> null
+        }
     }
 
     const val NO_LIMIT = 0

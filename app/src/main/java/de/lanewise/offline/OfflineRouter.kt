@@ -3,7 +3,10 @@ package de.lanewise.offline
 import de.lanewise.core.geo.Geo
 import de.lanewise.core.geo.LatLon
 import de.lanewise.core.geo.Polyline
+import de.lanewise.core.model.BikeLaneSpan
+import de.lanewise.core.model.FeatureKind
 import de.lanewise.core.model.Maneuver
+import de.lanewise.core.model.RoadFeature
 import de.lanewise.core.model.ManeuverType
 import de.lanewise.core.model.Modifier
 import de.lanewise.core.model.RoadSpan
@@ -16,6 +19,7 @@ import de.lanewise.osm.OsmTags
 import de.lanewise.routing.RouteRequest
 import de.lanewise.routing.RoutingException
 import de.lanewise.routing.RoutingProvider
+import de.lanewise.ui.i18n.Strings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
@@ -27,19 +31,22 @@ import kotlin.math.min
  *
  * Limitations (documented in docs/ARCHITECTURE.md): no turn restrictions, no live traffic.
  */
-class OfflineRouter(private val graphProvider: () -> OfflineGraph?) : RoutingProvider {
+class OfflineRouter(
+    private val graphProvider: () -> OfflineGraph?,
+    private val strings: () -> Strings,
+) : RoutingProvider {
     override val id = "offline"
     override val requiresNetwork = false
 
     override suspend fun route(request: RouteRequest): List<Route> = withContext(Dispatchers.Default) {
-        val g = graphProvider() ?: throw RoutingException("Keine Offline-Karte geladen. Bitte in den Einstellungen herunterladen.")
+        val g = graphProvider() ?: throw RoutingException(strings().offNoGraph)
         if (!g.contains(request.origin) || !g.contains(request.destination)) {
-            throw RoutingException("Start oder Ziel liegt außerhalb der Offline-Region.")
+            throw RoutingException(strings().offOutside)
         }
         val s = g.nearestNode(request.origin)
         val t = g.nearestNode(request.destination, requireOutgoing = false)
-        if (s < 0 || t < 0) throw RoutingException("Keine Straße in der Nähe gefunden.")
-        val edges = astar(g, s, t, request) ?: throw RoutingException("Keine Route gefunden (offline).")
+        if (s < 0 || t < 0) throw RoutingException(strings().offNoRoad)
+        val edges = astar(g, s, t, request) ?: throw RoutingException(strings().offNoRoute)
         listOf(buildRoute(g, edges, request))
     }
 
@@ -215,6 +222,18 @@ class OfflineRouter(private val graphProvider: () -> OfflineGraph?) : RoutingPro
         steps += RouteStep(line.length, 0.0, 0.0, Maneuver(ManeuverType.ARRIVE, Modifier.STRAIGHT, pts.last(), 0.0, 0.0),
             "", null, null, null)
 
+        // On-street bike lanes on the right in driving direction, merged across traversals.
+        val bikes = ArrayList<BikeLaneSpan>()
+        for (t in trav) {
+            val bits = ways.bike.getOrElse(t.way) { 0 }.toInt()
+            val present = if (t.forward) bits and 1 != 0 else bits and 4 != 0
+            if (!present) continue
+            val exclusive = if (t.forward) bits and 2 != 0 else bits and 8 != 0
+            val last = bikes.lastOrNull()
+            if (last != null && last.exclusive == exclusive && kotlin.math.abs(last.to - t.from) < 1) bikes[bikes.size - 1] = last.copy(to = t.to)
+            else bikes += BikeLaneSpan(t.from, t.to, exclusive)
+        }
+
         return Route(
             provider = id,
             geometry = line,
@@ -224,7 +243,30 @@ class OfflineRouter(private val graphProvider: () -> OfflineGraph?) : RoutingPro
             laneSites = sites,
             speedLimits = speed,
             roadSpans = spans,
+            features = featuresAlong(g, line),
+            bikeLanes = bikes,
         )
+    }
+
+    /** Traffic lights / signs within 15 m of the route, one per 30 m and kind. */
+    private fun featuresAlong(g: OfflineGraph, line: Polyline): List<RoadFeature> {
+        if (g.featKind.isEmpty()) return emptyList()
+        val pad = 0.001
+        val minLat = line.points.minOf { it.lat } - pad; val maxLat = line.points.maxOf { it.lat } + pad
+        val minLon = line.points.minOf { it.lon } - pad; val maxLon = line.points.maxOf { it.lon } + pad
+        val kinds = FeatureKind.entries
+        val hits = ArrayList<RoadFeature>()
+        for (i in g.featKind.indices) {
+            val p = LatLon(g.featLat[i] / 1e7, g.featLon[i] / 1e7)
+            if (p.lat !in minLat..maxLat || p.lon !in minLon..maxLon) continue
+            val proj = line.project(p) ?: continue
+            if (abs(proj.signedOffset) > 15) continue
+            hits += RoadFeature(kinds[g.featKind[i].toInt()], p, proj.distanceAlong)
+        }
+        hits.sortBy { it.distanceAlong }
+        val out = ArrayList<RoadFeature>()
+        for (f in hits) if (out.none { it.kind == f.kind && abs(it.distanceAlong - f.distanceAlong) < 30 }) out += f
+        return out
     }
 
     private fun hasReverse(g: OfflineGraph, e: Int): Boolean {

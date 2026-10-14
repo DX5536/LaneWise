@@ -29,6 +29,10 @@ class OfflineGraph(
     val ways: Ways,
     val bbox: DoubleArray, // south, west, north, east
     val createdAt: Long,
+    /** Traffic lights / signs (see [de.lanewise.core.model.FeatureKind] ordinal). */
+    val featLat: IntArray = IntArray(0),
+    val featLon: IntArray = IntArray(0),
+    val featKind: ByteArray = ByteArray(0),
 ) {
     class Ways(
         val highway: ByteArray,
@@ -42,6 +46,8 @@ class OfflineGraph(
         val firstNode: IntArray,
         val lastNode: IntArray,
         val strings: Array<String>,
+        /** Bike lane bits: 1 = right side forward, 2 = forward exclusive, 4 = right side backward, 8 = backward exclusive. */
+        val bike: ByteArray = ByteArray(highway.size),
     ) {
         val size get() = highway.size
         fun str(i: Int): String = if (i < 0) "" else strings[i]
@@ -102,7 +108,7 @@ class OfflineGraph(
     fun save(file: File) {
         val tmp = File(file.parentFile, file.name + ".tmp")
         DataOutputStream(BufferedOutputStream(GZIPOutputStream(tmp.outputStream()), 1 shl 16)).use { out ->
-            out.writeInt(MAGIC)
+            out.writeInt(MAGIC_V2)
             out.writeLong(createdAt)
             bbox.forEach { out.writeDouble(it) }
             out.writeIntArr(nodeLat); out.writeIntArr(nodeLon)
@@ -114,17 +120,22 @@ class OfflineGraph(
             out.writeIntArr(ways.turnLanesForward); out.writeIntArr(ways.turnLanesBackward)
             out.writeIntArr(ways.firstNode); out.writeIntArr(ways.lastNode)
             out.writeInt(ways.strings.size); ways.strings.forEach { out.writeUTF(it) }
+            out.writeInt(ways.bike.size); out.write(ways.bike)
+            out.writeIntArr(featLat); out.writeIntArr(featLon)
+            out.writeInt(featKind.size); out.write(featKind)
         }
         if (file.exists()) file.delete()
         tmp.renameTo(file)
     }
 
     companion object {
-        private const val MAGIC = 0x4C574731 // "LWG1"
+        private const val MAGIC_V1 = 0x4C574731 // "LWG1"
+        private const val MAGIC_V2 = 0x4C574732 // "LWG2": + bike lanes, traffic lights/signs
 
         fun load(file: File): OfflineGraph =
             DataInputStream(BufferedInputStream(GZIPInputStream(file.inputStream()), 1 shl 16)).use { inp ->
-                require(inp.readInt() == MAGIC) { "Not a LaneWise graph file" }
+                val magic = inp.readInt()
+                require(magic == MAGIC_V1 || magic == MAGIC_V2) { "Not a LaneWise graph file" }
                 val created = inp.readLong()
                 val bbox = DoubleArray(4) { inp.readDouble() }
                 val lat = inp.readIntArr(); val lon = inp.readIntArr()
@@ -136,7 +147,15 @@ class OfflineGraph(
                 val tf = inp.readIntArr(); val tb = inp.readIntArr()
                 val fn = inp.readIntArr(); val ln = inp.readIntArr()
                 val strings = Array(inp.readInt()) { inp.readUTF() }
-                OfflineGraph(lat, lon, es, et, el, ew, ef, Ways(hw, mf, mb, nm, rf, tf, tb, fn, ln, strings), bbox, created)
+                if (magic == MAGIC_V1) {
+                    OfflineGraph(lat, lon, es, et, el, ew, ef, Ways(hw, mf, mb, nm, rf, tf, tb, fn, ln, strings), bbox, created)
+                } else {
+                    val bike = ByteArray(inp.readInt()).also { inp.readFully(it) }
+                    val fLat = inp.readIntArr(); val fLon = inp.readIntArr()
+                    val fKind = ByteArray(inp.readInt()).also { inp.readFully(it) }
+                    OfflineGraph(lat, lon, es, et, el, ew, ef, Ways(hw, mf, mb, nm, rf, tf, tb, fn, ln, strings, bike),
+                        bbox, created, fLat, fLon, fKind)
+                }
             }
 
         private fun DataOutputStream.writeIntArr(a: IntArray) {

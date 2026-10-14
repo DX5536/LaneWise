@@ -40,7 +40,7 @@ import de.lanewise.offline.OfflineGraphBuilder
 import de.lanewise.settings.AppSettings
 import de.lanewise.settings.RoutingSource
 import de.lanewise.settings.ThemeMode
-import de.lanewise.settings.VoiceLanguage
+import de.lanewise.settings.AppLanguage
 import de.lanewise.ui.MainViewModel
 import de.lanewise.ui.UiState
 
@@ -132,8 +132,8 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, ui: UiState, onBack: () ->
 
         Section("Sprachansagen") {
             Toggle("Sprachansagen", null, s.voice) { v -> set { it.copy(voice = v) } }
-            VoiceLanguage.entries.forEach { l ->
-                Radio(if (l == VoiceLanguage.GERMAN) "Deutsch" else "English", s.voiceLanguage == l) { set { it.copy(voiceLanguage = l) } }
+            AppLanguage.entries.forEach { l ->
+                Radio(if (l == AppLanguage.GERMAN) "Deutsch" else "English", s.language == l) { set { it.copy(language = l) } }
             }
         }
         Spacer(Modifier.height(24.dp))

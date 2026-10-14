@@ -15,23 +15,28 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
@@ -62,15 +67,24 @@ import de.lanewise.core.model.IncidentKind
 import de.lanewise.core.model.Route
 import de.lanewise.nav.NavSnapshot
 import de.lanewise.nav.Phrases
+import de.lanewise.nav.SpeedStatus
+import de.lanewise.osm.OsmTags
+import de.lanewise.search.Place
 import de.lanewise.settings.AppSettings
+import de.lanewise.settings.PlaceKind
+import de.lanewise.settings.SavedPlace
 import de.lanewise.ui.MainViewModel
 import de.lanewise.ui.Mode
 import de.lanewise.ui.UiState
+import de.lanewise.ui.hud.BikeLaneChip
 import de.lanewise.ui.hud.EtaBar
+import de.lanewise.ui.hud.FeatureChip
 import de.lanewise.ui.hud.GnssBadge
 import de.lanewise.ui.hud.ManeuverBanner
 import de.lanewise.ui.hud.SpeedBorderOverlay
+import de.lanewise.ui.hud.SpeedLimitSign
 import de.lanewise.ui.hud.SpeedPanel
+import de.lanewise.ui.i18n.LocalStrings
 import de.lanewise.ui.lane.LaneBar
 import de.lanewise.ui.lane.LaneHint
 import de.lanewise.ui.lane.LaneScene3D
@@ -86,7 +100,7 @@ fun MainScreen(vm: MainViewModel, ui: UiState, settings: AppSettings, dark: Bool
     val context = LocalContext.current
     val controller = remember { MapController(context) }
     var following by remember { mutableStateOf(true) }
-    val phrases = remember(settings.voiceLanguage) { Phrases(settings.voiceLanguage) }
+    val phrases = remember(settings.language) { Phrases(settings.language) }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val topPadPx = with(LocalDensity.current) { (maxHeight * 0.42f).toPx().toDouble() }
@@ -95,16 +109,21 @@ fun MainScreen(vm: MainViewModel, ui: UiState, settings: AppSettings, dark: Bool
 
         // Keep map data in sync with state.
         LaunchedEffect(dark) { controller.setDark(dark) }
-        LaunchedEffect(ui.routes, ui.selected, ui.mode, ui.destination) {
+        LaunchedEffect(settings.bikeLaneColor) { controller.setBikeColor(settings.bikeLaneColor) }
+        LaunchedEffect(ui.routes, ui.selected, ui.mode, ui.destination, settings.showSigns) {
             val main = ui.selectedRoute
             controller.showRoutes(main, ui.routes.filterIndexed { i, _ -> i != ui.selected }, ui.destination?.position)
+            controller.showFeatures(main?.features.orEmpty(), settings.showSigns)
             if (ui.mode == Mode.PREVIEW && main != null) controller.overview(main, 420, 900)
         }
         LaunchedEffect(ui.incidents) { controller.showIncidents(ui.incidents) }
         LaunchedEffect(ui.nav) {
             ui.nav?.let {
-                controller.updateNavigation(it, settings.laneRibbonsOnMap, settings.mapPitch, topPadPx,
-                    closeUpDistance = if (settings.junctionZoom) settings.laneSceneDistance.toDouble() else 0.0)
+                controller.updateNavigation(
+                    it, settings.laneRibbonsOnMap, settings.mapPitch, topPadPx,
+                    closeUpDistance = if (settings.junctionZoom) settings.laneSceneDistance.toDouble() else 0.0,
+                    showBikeLanes = settings.showBikeLanes,
+                )
             }
         }
         LaunchedEffect(ui.fix, ui.mode) {
@@ -127,7 +146,7 @@ fun MainScreen(vm: MainViewModel, ui: UiState, settings: AppSettings, dark: Bool
             }
         }
 
-        SpeedBorderOverlay(ui.nav?.speedStatus ?: de.lanewise.nav.SpeedStatus.UNKNOWN)
+        SpeedBorderOverlay(ui.nav?.speedStatus ?: SpeedStatus.UNKNOWN)
 
         ui.message?.let { msg ->
             Box(
@@ -173,6 +192,12 @@ private fun MapLayer(controller: MapController, dark: Boolean, onPanned: () -> U
 @Composable
 private fun BrowseOverlay(vm: MainViewModel, ui: UiState, onOpenSettings: () -> Unit, onRecenter: () -> Unit) {
     val c = LocalLaneColors.current
+    val str = LocalStrings.current
+    var showFavorites by remember { mutableStateOf(false) }
+    var hint by remember { mutableStateOf<String?>(null) }
+    val home = ui.places.firstOrNull { it.kind == PlaceKind.HOME }
+    val work = ui.places.firstOrNull { it.kind == PlaceKind.WORK }
+
     Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
         Column(Modifier.fillMaxWidth().padding(12.dp)) {
             Row(
@@ -182,7 +207,7 @@ private fun BrowseOverlay(vm: MainViewModel, ui: UiState, onOpenSettings: () -> 
                 Icon(painterResource(R.drawable.ic_search), null, tint = c.onChip.copy(alpha = 0.7f))
                 TextField(
                     value = ui.query, onValueChange = vm::onQuery, modifier = Modifier.weight(1f),
-                    placeholder = { Text("Wohin? (z. B. Hannover Messe)") }, singleLine = true,
+                    placeholder = { Text(str.searchHint) }, singleLine = true,
                     colors = TextFieldDefaults.colors(
                         focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent,
                         focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
@@ -193,8 +218,21 @@ private fun BrowseOverlay(vm: MainViewModel, ui: UiState, onOpenSettings: () -> 
                 Box(
                     Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onOpenSettings),
                     contentAlignment = Alignment.Center,
-                ) { Icon(painterResource(R.drawable.ic_tune), "Einstellungen", tint = c.onChip) }
+                ) { Icon(painterResource(R.drawable.ic_tune), str.settings, tint = c.onChip) }
             }
+
+            // Shortcuts: Home, Work, Favourites.
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ShortcutChip("⌂  " + str.home, set = home != null) {
+                    if (home != null) vm.goTo(home) else hint = str.setHomeHint
+                }
+                ShortcutChip("▣  " + str.work, set = work != null) {
+                    if (work != null) vm.goTo(work) else hint = str.setWorkHint
+                }
+                ShortcutChip("★  " + str.favorites, set = ui.places.any { it.kind == PlaceKind.FAVORITE }) { showFavorites = true }
+            }
+
             if (ui.results.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
                 LazyColumn(
@@ -208,18 +246,90 @@ private fun BrowseOverlay(vm: MainViewModel, ui: UiState, onOpenSettings: () -> 
                         if (i < ui.results.size - 1) HorizontalDivider(color = c.onChip.copy(alpha = 0.08f))
                     }
                 }
+            } else {
+                // Speed limit of the road you are on (top left), also without a route.
+                Spacer(Modifier.height(10.dp))
+                ui.browseLimit?.let { SpeedLimitSign(limit = it.takeIf { v -> v > 0 }, noLimit = it == OsmTags.NO_LIMIT) }
             }
         }
         GnssBadge(ui.gnss, ui.online, Modifier.align(Alignment.BottomStart).padding(16.dp))
         Box(
             Modifier.align(Alignment.BottomEnd).padding(16.dp).size(56.dp).clip(CircleShape).background(c.chip).clickable(onClick = onRecenter),
             contentAlignment = Alignment.Center,
-        ) { Icon(painterResource(R.drawable.ic_locate), "Position", tint = MaterialTheme.colorScheme.primary) }
+        ) { Icon(painterResource(R.drawable.ic_locate), str.myPosition, tint = MaterialTheme.colorScheme.primary) }
         ui.offlineProgress?.let {
             Text(it, Modifier.align(Alignment.BottomCenter).padding(bottom = 84.dp).clip(RoundedCornerShape(12.dp))
                 .background(c.chip).padding(10.dp), color = c.onChip, fontSize = 13.sp)
         }
     }
+
+    hint?.let { h ->
+        AlertDialog(onDismissRequest = { hint = null }, confirmButton = { TextButton({ hint = null }) { Text("OK") } }, text = { Text(h) })
+    }
+    if (showFavorites) FavoritesDialog(ui.places, onGo = { showFavorites = false; vm.goTo(it) }, onDelete = vm::deletePlace) { showFavorites = false }
+}
+
+@Composable
+private fun ShortcutChip(label: String, set: Boolean, onClick: () -> Unit) {
+    val c = LocalLaneColors.current
+    Text(
+        label,
+        Modifier.clip(RoundedCornerShape(18.dp)).background(c.chip).clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        color = if (set) c.onChip else c.onChip.copy(alpha = 0.55f), fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+    )
+}
+
+@Composable
+private fun FavoritesDialog(places: List<SavedPlace>, onGo: (SavedPlace) -> Unit, onDelete: (String) -> Unit, onDismiss: () -> Unit) {
+    val str = LocalStrings.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onDismiss) { Text("OK") } },
+        title = { Text(str.favorites) },
+        text = {
+            if (places.isEmpty()) Text(str.noFavorites)
+            else LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                items(places.sortedBy { it.kind.ordinal }) { p ->
+                    Row(Modifier.fillMaxWidth().clickable { onGo(p) }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(when (p.kind) { PlaceKind.HOME -> "⌂"; PlaceKind.WORK -> "▣"; PlaceKind.FAVORITE -> "★" },
+                            fontSize = 18.sp, modifier = Modifier.width(28.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(p.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(p.address, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        TextButton({ onDelete(p.id) }) { Text(str.delete) }
+                    }
+                }
+            }
+        },
+    )
+}
+
+/** Save the current destination as Home, Work or a named favourite. */
+@Composable
+private fun SavePlaceDialog(place: Place, onSave: (PlaceKind, String) -> Unit, onDismiss: () -> Unit) {
+    val str = LocalStrings.current
+    var kind by remember { mutableStateOf(PlaceKind.FAVORITE) }
+    var name by remember { mutableStateOf(place.title) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(str.savePlace) },
+        text = {
+            Column {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FilterChip(kind == PlaceKind.HOME, { kind = PlaceKind.HOME }, { Text(str.home) })
+                    FilterChip(kind == PlaceKind.WORK, { kind = PlaceKind.WORK }, { Text(str.work) })
+                    FilterChip(kind == PlaceKind.FAVORITE, { kind = PlaceKind.FAVORITE }, { Text(str.favorite) })
+                }
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(name, { name = it }, label = { Text(str.name) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            }
+        },
+        confirmButton = { Button({ onSave(kind, name) }) { Text(str.save) } },
+        dismissButton = { TextButton(onDismiss) { Text(str.cancel) } },
+    )
 }
 
 // --- Route preview ------------------------------------------------------------------------------
@@ -227,39 +337,51 @@ private fun BrowseOverlay(vm: MainViewModel, ui: UiState, onOpenSettings: () -> 
 @Composable
 private fun PreviewOverlay(vm: MainViewModel, ui: UiState, phrases: Phrases) {
     val c = LocalLaneColors.current
+    val str = LocalStrings.current
+    var saving by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
         Column(
             Modifier.align(Alignment.BottomCenter).fillMaxWidth().clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
                 .background(c.chip).padding(18.dp),
         ) {
-            Text(ui.destination?.title ?: "", color = c.onChip, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            ui.destination?.subtitle?.takeIf { it.isNotBlank() }?.let { Text(it, color = c.onChip.copy(alpha = 0.65f), fontSize = 13.sp) }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(ui.destination?.title ?: "", color = c.onChip, fontSize = 20.sp, fontWeight = FontWeight.Bold,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    ui.destination?.subtitle?.takeIf { it.isNotBlank() }?.let { Text(it, color = c.onChip.copy(alpha = 0.65f), fontSize = 13.sp) }
+                }
+                TextButton({ saving = true }) { Text("★ " + str.save) }
+            }
             Spacer(Modifier.height(12.dp))
             if (ui.routing) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
                     Spacer(Modifier.width(10.dp))
-                    Text("Berechne Route mit Spurdaten …", color = c.onChip)
+                    Text(str.computingRoute, color = c.onChip)
                 }
             }
             ui.routes.forEachIndexed { i, r -> RouteRow(r, i == ui.selected, phrases) { vm.selectRoute(i) } }
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(onClick = vm::cancelPreview) { Text("Abbrechen") }
-                OutlinedButton(onClick = { vm.startNavigation(simulate = true) }, enabled = ui.routes.isNotEmpty()) { Text("Demo") }
+                OutlinedButton(onClick = vm::cancelPreview) { Text(str.cancel) }
+                OutlinedButton(onClick = { vm.startNavigation(simulate = true) }, enabled = ui.routes.isNotEmpty()) { Text(str.demo) }
                 Button(
                     onClick = { vm.startNavigation(simulate = false) }, enabled = ui.routes.isNotEmpty(), modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                ) { Text("Los geht's", fontWeight = FontWeight.Bold) }
+                ) { Text(str.go, fontWeight = FontWeight.Bold) }
             }
         }
+    }
+    val dest = ui.destination
+    if (saving && dest != null) {
+        SavePlaceDialog(dest, onSave = { kind, name -> vm.savePlace(kind, name, dest); saving = false }) { saving = false }
     }
 }
 
 @Composable
 private fun RouteRow(r: Route, selected: Boolean, phrases: Phrases, onClick: () -> Unit) {
     val c = LocalLaneColors.current
-    val laneSites = r.laneSites.size
+    val str = LocalStrings.current
     Row(
         Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(16.dp))
             .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else Color.Transparent)
@@ -270,11 +392,13 @@ private fun RouteRow(r: Route, selected: Boolean, phrases: Phrases, onClick: () 
             Text(formatDuration(r.effectiveDuration), color = c.onChip, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             val closures = r.incidents.count { it.blocked || it.kind == IncidentKind.CLOSURE }
             val works = r.incidents.count { it.kind == IncidentKind.ROADWORKS }
+            val lights = r.features.count { it.kind == de.lanewise.core.model.FeatureKind.TRAFFIC_SIGNALS }
             val extra = buildList {
                 add(phrases.distance(r.distance))
-                add("$laneSites Spur-Knoten")
-                if (works > 0) add("$works Baustellen")
-                if (closures > 0) add("$closures Sperrungen")
+                add("${r.laneSites.size} ${str.laneNodes}")
+                if (lights > 0) add("$lights × ${str.trafficLight}")
+                if (works > 0) add("$works ${str.roadworks}")
+                if (closures > 0) add("$closures ${str.closures}")
                 add(r.provider.uppercase())
             }
             Text(extra.joinToString(" · "), color = c.onChip.copy(alpha = 0.7f), fontSize = 13.sp)
@@ -290,42 +414,59 @@ private fun NavigationOverlay(
     vm: MainViewModel, ui: UiState, nav: NavSnapshot, settings: AppSettings, phrases: Phrases, following: Boolean,
     onRecenter: () -> Unit, onOverview: () -> Unit,
 ) {
+    val str = LocalStrings.current
+    val bikeColor = Color(settings.bikeLaneColor)
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 10.dp, vertical = 6.dp)) {
             val next = nav.nextStep
             val then = nav.stepAfter?.takeIf { next != null && it.distanceAlong - next.distanceAlong < 250 }
-            ManeuverBanner(
-                step = next,
-                distanceText = phrases.distance(nav.distanceToNextStep),
-                instruction = next?.let { phrases.instruction(it) } ?: "",
-                then = then,
-                thenText = then?.let { "Dann" },
-            )
+            Row(verticalAlignment = Alignment.Top) {
+                // Top left: speed limit sign (if known) above the upcoming traffic lights / signs.
+                if (nav.speedLimit != null || nav.noSpeedLimit || (settings.showSigns && nav.upcoming.isNotEmpty())) {
+                    Column(Modifier.padding(end = 8.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        SpeedLimitSign(nav.speedLimit, nav.noSpeedLimit)
+                        if (settings.showSigns) nav.upcoming.forEach { (f, d) -> FeatureChip(f, phrases.distance(d)) }
+                    }
+                }
+                ManeuverBanner(
+                    step = next,
+                    distanceText = phrases.distance(nav.distanceToNextStep),
+                    instruction = next?.let { phrases.instruction(it) } ?: "",
+                    then = then,
+                    thenText = then?.let { str.then },
+                    modifier = Modifier.weight(1f),
+                )
+            }
             val advice = nav.lanes.nextAdvice
             val distToSite = advice?.let { it.site.distanceAlong - nav.distanceAlong } ?: Double.MAX_VALUE
+            val bikeHere = nav.bikeLane.takeIf { settings.showBikeLanes }
             if (advice != null && distToSite < 900) {
                 Spacer(Modifier.height(8.dp))
                 if (settings.showLaneScene && distToSite <= settings.laneSceneDistance && (advice.site.isManeuver || nav.lanes.pendingChange != null)) {
-                    LaneScene3D(nav.lanes, phrases.distance(distToSite), Modifier.fillMaxWidth(0.82f).height(140.dp).align(Alignment.CenterHorizontally))
+                    LaneScene3D(nav.lanes, phrases.distance(distToSite),
+                        Modifier.fillMaxWidth(0.82f).height(140.dp).align(Alignment.CenterHorizontally),
+                        bikeColor = bikeHere?.let { bikeColor })
                     Spacer(Modifier.height(8.dp))
                 }
-                LaneBar(advice, Modifier.align(Alignment.CenterHorizontally), onLaneTap = vm::overrideLane)
+                LaneBar(advice, Modifier.align(Alignment.CenterHorizontally), bikeColor = bikeHere?.let { bikeColor }, onLaneTap = vm::overrideLane)
+            }
+            if (bikeHere != null) {
+                Spacer(Modifier.height(6.dp))
+                BikeLaneChip(bikeHere.exclusive, bikeColor, Modifier.align(Alignment.CenterHorizontally))
             }
             ui.laneHint?.let { Spacer(Modifier.height(8.dp)); LaneHint(it) }
         }
 
-        SpeedPanel(
-            nav.speedLimit, nav.noSpeedLimit, nav.fix.speedKmh, nav.speedStatus,
-            Modifier.align(Alignment.CenterStart).padding(start = 12.dp, top = 120.dp),
-        )
+        SpeedPanel(nav.fix.speedKmh, nav.speedStatus, Modifier.align(Alignment.CenterStart).padding(start = 12.dp, top = 160.dp))
         if (!following) {
             OutlinedButton(
                 onClick = onRecenter,
                 modifier = Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 16.dp, bottom = 110.dp),
-            ) { Text("Zentrieren") }
+            ) { Text(str.recenter) }
         }
         if (ui.simulating) {
-            Text("DEMO", Modifier.align(Alignment.CenterEnd).padding(end = 12.dp).clip(RoundedCornerShape(8.dp))
+            Text(str.demoBadge, Modifier.align(Alignment.CenterEnd).padding(end = 12.dp).clip(RoundedCornerShape(8.dp))
                 .background(Color(0xFF6C4CF5)).padding(horizontal = 8.dp, vertical = 3.dp), color = Color.White, fontSize = 12.sp)
         }
         EtaBar(

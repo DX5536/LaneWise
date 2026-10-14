@@ -25,6 +25,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
+import de.lanewise.core.model.RoadFeature
+import de.lanewise.ui.i18n.LocalStrings
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -71,45 +77,81 @@ fun SpeedBorderOverlay(status: SpeedStatus, modifier: Modifier = Modifier) {
     )
 }
 
-/** German-style round speed limit sign plus the current speed underneath. */
+/** German round speed-limit sign (Zeichen 274), or the end-of-limits sign (Zeichen 282) on de-restricted Autobahn. */
 @Composable
-fun SpeedPanel(limit: Int?, noLimit: Boolean, speedKmh: Float, status: SpeedStatus, modifier: Modifier = Modifier) {
+fun SpeedLimitSign(limit: Int?, noLimit: Boolean, modifier: Modifier = Modifier, size: androidx.compose.ui.unit.Dp = 60.dp) {
+    if (limit == null && !noLimit) return
     val c = LocalLaneColors.current
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        if (limit != null || noLimit) {
-            Box(
-                Modifier.size(64.dp).clip(CircleShape).background(Color.White)
-                    .border(if (noLimit) 0.dp else 7.dp, c.speedRing, CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (noLimit) {
-                    // End-of-limit sign (Zeichen 282): white disc, black diagonal stripes.
-                    Canvas(Modifier.fillMaxSize()) {
-                        for (k in -2..2) {
-                            val o = k * 5.dp.toPx()
-                            drawLine(Color(0xFF222222), Offset(size.width * 0.2f + o, size.height * 0.85f + o),
-                                Offset(size.width * 0.85f + o, size.height * 0.2f + o), strokeWidth = 2.dp.toPx())
-                        }
-                    }
-                } else {
-                    Text("$limit", color = Color(0xFF111111), fontSize = if (limit!! >= 100) 22.sp else 26.sp, fontWeight = FontWeight.Bold)
+    Box(
+        modifier.size(size).clip(CircleShape).background(Color.White)
+            .border(if (noLimit) 1.dp else size * 0.11f, if (noLimit) Color(0xFF9AA0AE) else c.speedRing, CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (noLimit) {
+            Canvas(Modifier.fillMaxSize()) {
+                for (k in -2..2) {
+                    val o = k * size.toPx() * 0.08f
+                    drawLine(Color(0xFF222222), Offset(size.toPx() * 0.2f + o, size.toPx() * 0.85f + o),
+                        Offset(size.toPx() * 0.85f + o, size.toPx() * 0.2f + o), strokeWidth = size.toPx() * 0.035f)
                 }
             }
-            Spacer(Modifier.height(6.dp))
+        } else {
+            val v = limit ?: 0
+            Text("$v", color = Color(0xFF111111), fontWeight = FontWeight.Bold,
+                fontSize = (size.value * if (v >= 100) 0.34f else 0.42f).sp)
         }
-        val bg = when (status) {
-            SpeedStatus.OVER -> c.overSpeed
-            SpeedStatus.UNDER -> c.underSpeed
-            else -> c.chip
-        }
-        val fg = if (status == SpeedStatus.OVER || status == SpeedStatus.UNDER) Color.White else c.onChip
-        Column(
-            Modifier.clip(RoundedCornerShape(16.dp)).background(bg).padding(horizontal = 12.dp, vertical = 4.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text("${speedKmh.toInt()}", color = fg, fontSize = 26.sp, fontWeight = FontWeight.Bold)
-            Text("km/h", color = fg.copy(alpha = 0.8f), fontSize = 11.sp)
-        }
+    }
+}
+
+/** Current speed bubble; turns light red when over/under the limit. */
+@Composable
+fun SpeedPanel(speedKmh: Float, status: SpeedStatus, modifier: Modifier = Modifier) {
+    val c = LocalLaneColors.current
+    val str = LocalStrings.current
+    val bg = when (status) {
+        SpeedStatus.OVER -> c.overSpeed
+        SpeedStatus.UNDER -> c.underSpeed
+        else -> c.chip
+    }
+    val fg = if (status == SpeedStatus.OVER || status == SpeedStatus.UNDER) Color.White else c.onChip
+    Column(
+        modifier.clip(RoundedCornerShape(16.dp)).background(bg).padding(horizontal = 12.dp, vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("${speedKmh.toInt()}", color = fg, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+        Text(str.kmh, color = fg.copy(alpha = 0.8f), fontSize = 11.sp)
+    }
+}
+
+/** Upcoming traffic light / road sign with distance. */
+@Composable
+fun FeatureChip(feature: RoadFeature, distanceText: String, modifier: Modifier = Modifier) {
+    val c = LocalLaneColors.current
+    val str = LocalStrings.current
+    val img = remember(feature.kind) { RoadSignArt.feature(feature.kind, 96).asImageBitmap() }
+    Row(
+        modifier.clip(RoundedCornerShape(14.dp)).background(c.chip.copy(alpha = 0.95f)).padding(horizontal = 8.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Image(img, str.feature(feature.kind), Modifier.size(26.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(distanceText, color = c.onChip, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+/** Shown while a painted bike lane runs next to the car lanes. */
+@Composable
+fun BikeLaneChip(exclusive: Boolean, color: Color, modifier: Modifier = Modifier) {
+    val str = LocalStrings.current
+    val argb = color.toArgb()
+    val img = remember(argb) { RoadSignArt.bike(96, argb).asImageBitmap() }
+    Row(
+        modifier.clip(RoundedCornerShape(14.dp)).background(color).padding(start = 4.dp, end = 10.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Image(img, null, Modifier.size(26.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(if (exclusive) str.bikeLaneExclusive else str.bikeLane, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -201,7 +243,7 @@ fun GnssBadge(info: GnssInfo, online: Boolean, modifier: Modifier = Modifier) {
     ) {
         val good = info.satellitesUsed >= 6
         Box(Modifier.size(9.dp).clip(CircleShape).background(if (good) Color(0xFF5E8C00) else Color(0xFFE0A400)))
-        Text("${info.satellitesUsed}/${info.satellitesVisible} Sat", color = c.onChip, fontSize = 12.sp)
-        if (!online) Text("offline", color = c.onChip.copy(alpha = 0.7f), fontSize = 12.sp)
+        Text("${info.satellitesUsed}/${info.satellitesVisible} ${LocalStrings.current.satellites}", color = c.onChip, fontSize = 12.sp)
+        if (!online) Text(LocalStrings.current.offline, color = c.onChip.copy(alpha = 0.7f), fontSize = 12.sp)
     }
 }

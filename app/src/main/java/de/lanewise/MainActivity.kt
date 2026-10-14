@@ -63,10 +63,14 @@ class MainActivity : ComponentActivity() {
             }
 
             LaneWiseTheme(dark) {
-                // The map stays composed underneath settings so it is not torn down and reloaded.
-                Box(Modifier.fillMaxSize()) {
-                    MainScreen(vm, ui, settings, dark, onOpenSettings = { showSettings = true })
-                    if (showSettings) SettingsScreen(vm, settings, ui, onBack = { showSettings = false })
+                androidx.compose.runtime.CompositionLocalProvider(
+                    de.lanewise.ui.i18n.LocalStrings provides de.lanewise.ui.i18n.Strings.of(settings.language),
+                ) {
+                    // The map stays composed underneath settings so it is not torn down and reloaded.
+                    Box(Modifier.fillMaxSize()) {
+                        MainScreen(vm, ui, settings, dark, onOpenSettings = { showSettings = true })
+                        if (showSettings) SettingsScreen(vm, settings, ui, onBack = { showSettings = false })
+                    }
                 }
             }
         }

@@ -15,7 +15,7 @@ import kotlinx.coroutines.flow.map
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 enum class RoutingSource { AUTO, OSRM, TOMTOM, OFFLINE }
-enum class VoiceLanguage { GERMAN, ENGLISH }
+enum class AppLanguage { GERMAN, ENGLISH, VIETNAMESE }
 
 data class AppSettings(
     val theme: ThemeMode = ThemeMode.SYSTEM,
@@ -28,6 +28,10 @@ data class AppSettings(
     /** Zoom the map camera in when approaching a junction. */
     val junctionZoom: Boolean = true,
     val laneRibbonsOnMap: Boolean = true,
+    val showBikeLanes: Boolean = true,
+    /** ARGB colour of the on-street bike lane strip (default: German red bike-lane paint). */
+    val bikeLaneColor: Int = BIKE_COLORS.first(),
+    val showSigns: Boolean = true,
     // Speed warnings
     val overSpeedWarning: Boolean = true,
     /** Tolerance above the limit before the red border shows (km/h). */
@@ -49,10 +53,13 @@ data class AppSettings(
     val avoidMotorways: Boolean = false,
     // Guidance
     val voice: Boolean = true,
-    val voiceLanguage: VoiceLanguage = VoiceLanguage.GERMAN,
+    val language: AppLanguage = AppLanguage.GERMAN,
     val offlineRegion: String = "hannover",
     val mapPitch: Float = 60f,
 )
+
+/** Selectable bike-lane colours: red, orange, blue, green, magenta. */
+val BIKE_COLORS = listOf(0xFFE5484D.toInt(), 0xFFF2A93B.toInt(), 0xFF2F80ED.toInt(), 0xFF2EB67D.toInt(), 0xFFD63AF9.toInt())
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
 
@@ -66,6 +73,9 @@ class SettingsRepository(private val context: Context) {
         val laneSceneDist = intPreferencesKey("lane_scene_distance")
         val junctionZoom = booleanPreferencesKey("junction_zoom")
         val ribbons = booleanPreferencesKey("lane_ribbons")
+        val bikes = booleanPreferencesKey("bike_lanes")
+        val bikeColor = intPreferencesKey("bike_lane_color")
+        val signs = booleanPreferencesKey("signs")
         val over = booleanPreferencesKey("over_speed")
         val overOff = intPreferencesKey("over_speed_offset")
         val under = booleanPreferencesKey("under_speed")
@@ -97,6 +107,9 @@ class SettingsRepository(private val context: Context) {
             laneSceneDistance = p[K.laneSceneDist] ?: d.laneSceneDistance,
             junctionZoom = p[K.junctionZoom] ?: d.junctionZoom,
             laneRibbonsOnMap = p[K.ribbons] ?: d.laneRibbonsOnMap,
+            showBikeLanes = p[K.bikes] ?: d.showBikeLanes,
+            bikeLaneColor = p[K.bikeColor] ?: d.bikeLaneColor,
+            showSigns = p[K.signs] ?: d.showSigns,
             overSpeedWarning = p[K.over] ?: d.overSpeedWarning,
             overSpeedOffset = p[K.overOff] ?: d.overSpeedOffset,
             underSpeedWarning = p[K.under] ?: d.underSpeedWarning,
@@ -113,7 +126,7 @@ class SettingsRepository(private val context: Context) {
             avoidTolls = p[K.tolls] ?: d.avoidTolls,
             avoidMotorways = p[K.motorways] ?: d.avoidMotorways,
             voice = p[K.voice] ?: d.voice,
-            voiceLanguage = p[K.voiceLang]?.let { runCatching { VoiceLanguage.valueOf(it) }.getOrNull() } ?: d.voiceLanguage,
+            language = p[K.voiceLang]?.let { runCatching { AppLanguage.valueOf(it) }.getOrNull() } ?: d.language,
             offlineRegion = p[K.region] ?: d.offlineRegion,
             mapPitch = p[K.pitch] ?: d.mapPitch,
         )
@@ -129,6 +142,9 @@ class SettingsRepository(private val context: Context) {
             p[K.laneSceneDist] = s.laneSceneDistance
             p[K.junctionZoom] = s.junctionZoom
             p[K.ribbons] = s.laneRibbonsOnMap
+            p[K.bikes] = s.showBikeLanes
+            p[K.bikeColor] = s.bikeLaneColor
+            p[K.signs] = s.showSigns
             p[K.over] = s.overSpeedWarning
             p[K.overOff] = s.overSpeedOffset
             p[K.under] = s.underSpeedWarning
@@ -145,7 +161,7 @@ class SettingsRepository(private val context: Context) {
             p[K.tolls] = s.avoidTolls
             p[K.motorways] = s.avoidMotorways
             p[K.voice] = s.voice
-            p[K.voiceLang] = s.voiceLanguage.name
+            p[K.voiceLang] = s.language.name
             p[K.region] = s.offlineRegion
             p[K.pitch] = s.mapPitch
         }
