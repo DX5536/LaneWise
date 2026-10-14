@@ -103,6 +103,11 @@ data class Route(
 ) {
     fun laneChangeAt(d: Double): de.lanewise.lane.ChangeSpan? = laneChanges.firstOrNull { d >= it.from && d < it.to }
     fun laneCountAt(d: Double): Int? = laneCounts.firstOrNull { d >= it.from && d < it.to }?.count
+
+    /** With OSM lane counts; lane sites are re-checked for turn lanes that run the whole way ([markFullLengthLanes]). */
+    fun withLaneCounts(counts: List<LaneCountSpan>): Route = copy(laneCounts = counts).let { r ->
+        r.copy(laneSites = de.lanewise.lane.markFullLengthLanes(r.laneSites, r::laneCountAt))
+    }
     fun bikeLaneAt(d: Double): BikeLaneSpan? = bikeLanes.firstOrNull { d >= it.from && d < it.to }
     fun speedLimitAt(d: Double): SpeedLimitSpan? = speedLimits.firstOrNull { d >= it.from && d < it.to }
     fun roadSpanAt(d: Double): RoadSpan? = roadSpans.firstOrNull { d >= it.from && d < it.to }

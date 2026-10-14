@@ -90,11 +90,21 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, ui: UiState, onBack: () ->
 
         Section(str.appearance) {
             ThemeMode.entries.forEach { m ->
-                Radio(when (m) { ThemeMode.SYSTEM -> str.themeSystem; ThemeMode.LIGHT -> str.themeLight; ThemeMode.DARK -> str.themeDark },
+                Radio(when (m) { ThemeMode.AUTO -> str.themeAuto; ThemeMode.SYSTEM -> str.themeSystem; ThemeMode.LIGHT -> str.themeLight; ThemeMode.DARK -> str.themeDark },
                     s.theme == m) { set { it.copy(theme = m) } }
             }
             Toggle(str.satellite, str.satelliteSub, s.satellite) { v -> set { it.copy(satellite = v) } }
             LabeledSlider(str.cameraPitch, s.mapPitch, 0f..70f, "${s.mapPitch.toInt()}°") { v -> set { it.copy(mapPitch = v) } }
+            Toggle(str.car3d, str.car3dSub, s.car3d) { v -> set { it.copy(car3d = v) } }
+            LabeledSlider(str.carSize, s.carScale, 0.5f..2f, "×%.1f".format(s.carScale)) { v ->
+                set { it.copy(carScale = Math.round(v * 10) / 10f) }
+            }
+            Toggle(str.autoZoom, str.autoZoomSub, s.autoZoom) { v -> set { it.copy(autoZoom = v) } }
+            if (!s.autoZoom) {
+                LabeledSlider(str.fixedZoom, s.fixedZoom, 15.5f..19f, "%.1f".format(s.fixedZoom)) { v ->
+                    set { it.copy(fixedZoom = Math.round(v * 10) / 10f) }
+                }
+            }
         }
 
         Section(str.laneAssist) {

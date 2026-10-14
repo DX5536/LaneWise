@@ -13,12 +13,13 @@ import de.lanewise.BuildConfig
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
-enum class ThemeMode { SYSTEM, LIGHT, DARK }
+/** AUTO = dark from sunset to sunrise at the car's position ([de.lanewise.core.geo.Sun]). */
+enum class ThemeMode { AUTO, SYSTEM, LIGHT, DARK }
 enum class RoutingSource { AUTO, OSRM, TOMTOM, OFFLINE }
 enum class AppLanguage { GERMAN, ENGLISH, VIETNAMESE }
 
 data class AppSettings(
-    val theme: ThemeMode = ThemeMode.SYSTEM,
+    val theme: ThemeMode = ThemeMode.AUTO,
     // Lane assist
     val avoidLaneChanges: Boolean = true,
     val keepRight: Boolean = true,
@@ -66,6 +67,14 @@ data class AppSettings(
     val language: AppLanguage = AppLanguage.ENGLISH,
     val offlineRegion: String = "hannover",
     val mapPitch: Float = 60f,
+    /** Navigation camera zooms out on open road and in before turns; off = [fixedZoom] all the time. */
+    val autoZoom: Boolean = true,
+    /** Map zoom level while navigating with [autoZoom] off (MapLibre zoom; 17.5 ≈ 300 m ahead visible). */
+    val fixedZoom: Float = 17.5f,
+    /** 3D car instead of the flat arrow puck. */
+    val car3d: Boolean = true,
+    /** Size of the car / arrow on the map (× default). */
+    val carScale: Float = 1f,
 )
 
 /** Selectable bike-lane colours: red, orange, blue, green, magenta. */
@@ -82,6 +91,10 @@ class SettingsRepository(private val context: Context) {
         val laneScene = booleanPreferencesKey("lane_scene")
         val laneSceneDist = intPreferencesKey("lane_scene_distance")
         val junctionZoom = booleanPreferencesKey("junction_zoom")
+        val autoZoom = booleanPreferencesKey("auto_zoom")
+        val fixedZoom = floatPreferencesKey("fixed_zoom")
+        val car3d = booleanPreferencesKey("car_3d")
+        val carScale = floatPreferencesKey("car_scale")
         val ribbons = booleanPreferencesKey("lane_ribbons")
         val bikes = booleanPreferencesKey("bike_lanes")
         val bikeColor = intPreferencesKey("bike_lane_color")
@@ -149,6 +162,10 @@ class SettingsRepository(private val context: Context) {
             language = p[K.voiceLang]?.let { runCatching { AppLanguage.valueOf(it) }.getOrNull() } ?: d.language,
             offlineRegion = p[K.region] ?: d.offlineRegion,
             mapPitch = p[K.pitch] ?: d.mapPitch,
+            autoZoom = p[K.autoZoom] ?: d.autoZoom,
+            fixedZoom = p[K.fixedZoom] ?: d.fixedZoom,
+            car3d = p[K.car3d] ?: d.car3d,
+            carScale = p[K.carScale] ?: d.carScale,
         )
     }
 
@@ -189,6 +206,10 @@ class SettingsRepository(private val context: Context) {
             p[K.voiceLang] = s.language.name
             p[K.region] = s.offlineRegion
             p[K.pitch] = s.mapPitch
+            p[K.autoZoom] = s.autoZoom
+            p[K.fixedZoom] = s.fixedZoom
+            p[K.car3d] = s.car3d
+            p[K.carScale] = s.carScale
         }
     }
 }

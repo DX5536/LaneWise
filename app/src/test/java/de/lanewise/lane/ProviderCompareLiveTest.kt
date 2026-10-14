@@ -35,7 +35,7 @@ class ProviderCompareLiveTest {
         val key = BuildConfig.TOMTOM_API_KEY
         assumeTrue("TOMTOM_API_KEY missing in local.properties", key.isNotBlank())
 
-        // Owner's test drive: Brüderstraße 4 → Hauptstraße 3, Langenhagen.
+        // Owner's test drive (Musterstraße 1, Hannover → Musterweg 3, Langenhagen).
         val req = RouteRequest(LatLon(52.3784754, 9.7340973), LatLon(52.4380884, 9.7052888), alternatives = true)
         val osrmAll = OsrmRoutingProvider().route(req)
         val ttAll = TomTomRoutingProvider(key).route(req)
@@ -110,7 +110,7 @@ class ProviderCompareLiveTest {
     private suspend fun withCorridor(r: Route): Route {
         val c = runCatching { SpeedLimitProvider().corridor(r.geometry, 0.0, r.distance) }
             .onFailure { println("OSM corridor for ${r.provider} unavailable (${it.message})") }.getOrNull() ?: return r
-        return r.copy(laneCounts = c.laneCounts, laneChanges = c.laneChanges, bikeLanes = c.bikeLanes)
+        return r.copy(laneChanges = c.laneChanges, bikeLanes = c.bikeLanes).withLaneCounts(c.laneCounts)
     }
 
     private fun fmt(s: LaneSite): String {

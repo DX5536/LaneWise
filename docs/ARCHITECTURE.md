@@ -6,6 +6,7 @@ Kotlin, Jetpack Compose, MapLibre Native (OpenGL), no Google Play Services. Pack
 de.lanewise
 ├── LaneWiseApp / MainActivity        app + permission + theme + keep-screen-on
 ├── core/geo/Geo.kt                   LatLon, distances, bearings, Polyline (projection, slice, offset)
+├── core/geo/Sun.kt                   sun elevation → automatic light/dark theme
 ├── core/model/Route.kt               Route, RouteStep, Maneuver, SpeedLimitSpan, RoadSpan, TrafficIncident
 ├── core/net/Http.kt                  OkHttp client + JsonElement helpers
 ├── lane/                             ★ the lane assist
@@ -30,7 +31,9 @@ de.lanewise
 └── ui/
     ├── MainViewModel.kt              orchestration (state machine BROWSE → PREVIEW → NAVIGATING)
     ├── map/MapController.kt          MapLibre style, layers (road / live highlight / signal pop-up sources),
-    │                                 AMAP-style or classic camera, car puck on the lane path
+    │                                 AMAP-style or classic camera (auto or fixed zoom), car puck on the lane path,
+    │                                 dead-reckoned every display frame between fixes
+    ├── map/CarModel.kt               3D car as fill-extrusion blocks (body, cabin, wheels, lights)
     ├── lane/LaneArrows.kt, LaneViews.kt   vector lane glyphs, LaneBar, LaneScene3D, LaneHint
     ├── hud/Hud.kt                    speed border, speed sign, manoeuvre banner, ETA bar, GNSS chip
     ├── screens/                      MainScreen, SettingsScreen

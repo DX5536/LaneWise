@@ -1,6 +1,6 @@
 # Status & roadmap
 
-_Last updated: 2026-10-14 (v0.4: turn restrictions offline, guidance with the screen off, lane reports; v0.3.1 video fixes)._
+_Last updated: 2026-10-15 (v0.4.3: automatic light/dark by the sun, 3D car + car size, Bilibili UI review; v0.4.2: Schulenburger Landstraße lane, smooth camera, auto zoom)._
 
 ## Done (v0.1)
 - [x] Reverse-engineering notes for Petal Maps 4.7 and AMAP 17.00 lane guidance (`docs/REVERSE_ENGINEERING.md`)
@@ -83,7 +83,7 @@ _Last updated: 2026-10-14 (v0.4: turn restrictions offline, guidance with the sc
       arrow signals (inferred from turn-only lanes, dashed outline = unconfirmed), Grünpfeil (Zeichen 720),
       pedestrian lights × count, push button. Source: OSM (`highway=traffic_signals`, `crossing`, `button_operated`,
       `red_turn:right`, `traffic_sign=DE:720`) — there is no national signal database in Germany.
-- [x] Owner's test route (Brüderstraße 4 → Hauptstraße 3 Langenhagen) as an opt-in live check
+- [x] Owner's test route (Musterstraße 1 → Musterweg 3, Langenhagen) as an opt-in live check
       (`LANEWISE_LIVE=1`, `RouteRenderLiveTest`): highlight inside the road, no folded lines, lane advice per turn.
 - [x] Turn junctions: only the turn lanes continue as a connector into the new road (left turns join its left side,
       right turns its right side); the other lanes end at the stop line, no markings inside the junction.
@@ -96,7 +96,7 @@ _Last updated: 2026-10-14 (v0.4: turn restrictions offline, guidance with the sc
       OSM streets within 450 m, refetched every 250 m) replaces the route-only road; the route highlight stays on top.
 - [x] Lane-change hint is a countdown too: bright lime shrinks to the deadline (end of the dashed stretch / junction)
 
-## Done (v0.3.1, 2026-10-14) — owner's demo video (Brüderstraße 4 → Hauptstraße 3 Langenhagen)
+## Done (v0.3.1, 2026-10-14) — owner's demo video (Musterstraße 1 → Musterweg 3, Langenhagen)
 - [x] **Wrong lane highlight before left turns** (video 0:30–0:45, Celler Straße → Herschelstraße): the highlight stayed
       in the middle straight-only lane and "move one lane to the left" came only ~50 m before the turn. Two causes:
       (1) "lanes that open are free" was judged from the *car* to the junction, so once the car had passed the point where
@@ -136,7 +136,7 @@ _Last updated: 2026-10-14 (v0.4: turn restrictions offline, guidance with the sc
 - [x] Browse map (no route) shows traffic lights / signs too: they came only from a route before. Signal and sign
       nodes are fetched with the nearby streets in the same Overpass query (`StreetLanes.fetchNearby`).
 - [x] Search box hint shortened to "Where to?" / "Wohin?" / "Đi đâu?" (one line).
-- Note (owner, Hildesheimer Straße × Grazer Straße): no arrows because OSM has only `lanes=2` there, no `turn:lanes`
+- Note (owner, a Hildesheimer Straße junction): no arrows because OSM has only `lanes=2` there, no `turn:lanes`
   (ways 29702218, 29702219, 45977791, 45977795, 1435846363) — fix in OSM, or later from the aerial arrows
   (aerial lanes item 4).
 
@@ -175,17 +175,82 @@ _Last updated: 2026-10-14 (v0.4: turn restrictions offline, guidance with the sc
       junction (other heads within 40 m are skipped; never where a lane site already has one). `stopLineAtTrafficLightWithoutLanes`.
 - [x] **Start point**: "From: My position" in the route preview; tap to search any start (Demo then drives from there).
       "Let's go" from elsewhere re-routes from the GPS position once you drive. DE/EN/VI.
-- [x] Search finds "grazerstr 2" / "Cellerstraße 10": adjective street names are also searched split ("Grazer Straße"),
-      as OSM writes them — Photon only returned Grazerstraße 2 in Austria (filtered out). Start picker shows
+- [x] Search finds "musterstädterstr 1" / "Bremerstraße 1": adjective street names are also searched split ("Musterstädter Straße"),
+      as OSM writes them — Photon only returned a same-named street in Austria (filtered out). Start picker shows
       "Searching …" / "Nothing found". `GeocoderTest`.
-- [x] **ETA +3 h fixed** (owner: Miss Saigon → Asia Haus showed 3 h 26 min, "6 closures"): since the TomTom key, TomTom
+- [x] **ETA +3 h fixed** (owner: a short city trip showed 3 h 26 min, "6 closures"): since the TomTom key, TomTom
       road closures (icon category 8) came in, and any closure with an end point within 35 m of the route added 30 min —
       closed side streets crossing the route at junctions. An incident now counts only if ≥ 30 m of it runs along the
       route (within 20 m, parallel); TomTom incidents add nothing to a TomTom traffic ETA (already included).
       `RouteScorerTest`.
 - [x] `RouteRenderLiveTest` takes `LANEWISE_FROM` / `LANEWISE_TO` (`lat,lon`) to check any route.
 
+## Done (v0.4.2, 2026-10-14) — owner's video Musterstraße 1 → Musterweg 3, Langenhagen (13 km, demo ×4, classic view)
+- [x] **Wrong lane on Schulenburger Landstraße → right into Beneckeallee** (video 3:35–3:55): after the junction with
+      `left | through | through;right` the road has two lanes (OSM) for 350 m, then `through | right`. The right-only
+      lane was treated as a turn pocket (lateral −1), so the plan kept the car in the *left* lane and asked "move one
+      lane to the right" 160 m before the turn. Now `markFullLengthLanes` (run when OSM lane counts arrive,
+      `Route.withLaneCounts`) marks a site whose lanes all run on from the previous site's through lanes
+      (`LaneSite.fullLength`): its turn-only edge lanes are ordinary lanes. Real pockets (one lane more than the through
+      lanes before) stay pockets even when OSM counts them along the whole way. Live trace: right lane all the way, no
+      change. Test `turnOnlyLaneThatRunsTheWholeWayIsNotAPocket`.
+- [x] **Smoother car + camera** (the recording itself runs at ~96 fps without frozen frames; the "lag" was motion):
+      (1) the car puck's GeoJSON source was updated asynchronously each frame and landed a frame or two after the
+      camera, so the puck jittered sideways → `setGeoJsonSync`; (2) the tween restarted at every fix (4/s) with a new
+      linear speed and stopped dead when a fix came late → dead reckoning at the measured route speed, gently pulled
+      towards the predicted position, never backwards; (3) bearing / zoom / tilt easing is time-based (same feel at
+      60 and 120 Hz) instead of per frame.
+- [x] **Less UI-thread work per fix**: the live highlight (1.2 km of polygons handed to MapLibre on the UI thread) was
+      rebuilt at every fix; now only when the lane plan changes or the car has moved 25 m (`MapController.GEOM_STEP`).
+- [x] Classic view: the 3D junction close-up fades/expands in and out (250 ms) instead of popping in one frame.
+- [x] **Setting "Auto zoom while driving"** (Appearance, on by default; DE/EN/VI): off = fixed zoom level from a slider
+      (15.5–19, default 17.5), tilt stays as set. Auto zoom in the classic view zooms out less (motorway 16.8, trunk /
+      > 70 km/h 17.2, was 16.6 / 17.0).
+
+## Done (v0.4.3, 2026-10-15)
+- [x] **Automatic light/dark mode** (new default theme "Automatic (sunrise/sunset)", DE/EN/VI): dark while the sun is
+      below −3° at the car's position (Hannover before the first fix), re-checked every minute; no internet or system
+      setting needed (`core/geo/Sun.kt`, NOAA formulas, `SunTest`). System / Light / Dark still selectable.
+- [x] **3D car** (setting "3D car", on by default): a low-poly car — body with rounded corners, dark glass cabin, roof,
+      wheels, head and tail lights — built from MapLibre `fill-extrusion` blocks (MapLibre Native has no glTF model
+      layer), rotating with the heading, with a violet glow underneath (`ui/map/CarModel.kt`, `CarModelTest`). Drawn
+      2.4 × life size (a real car is ~6 dp long at zoom 17). Off = the flat arrow puck.
+- [x] **Car / arrow size** slider (×0.5 … ×2, Appearance) for both the 3D car and the arrow.
+- [x] Map style switch (light ↔ dark, now also at sunset while driving) re-sends road + highlight to the new style
+      (sources start empty; the 25 m rebuild step would otherwise leave the road missing until the plan changed).
+
+## Bilibili UI review (2026-10-15) — Baidu Maps V22 and Baidu vs AMAP motorway exit (BV1LQaz6XErV, BV1aU6pBJEzm)
+What they do (all lane-level, light theme by day):
+- Banner styled as a **road guide sign** (green on motorways in China — for Germany: blue Autobahn / yellow
+  Bundesstraße), turn arrow + distance + name; the **lane arrows sit directly under it in the same card**, white
+  arrows, recommended lanes bright. (LaneWise already docks the lane bar under the banner.)
+- **3D car** (white SUV/sedan) with a soft blue ring around it, roughly one lane wide — done in v0.4.3.
+- **Recommended-lane carpet**: teal/green gradient that starts at the car and fades out ~200 m ahead, with animated
+  chevrons inside it showing the direction of travel; the route's turn is a blue arrow ribbon on the road.
+- **Road furniture in 3D**: toll plaza with per-lane booths and ETC labels painted on the lanes, traffic-light poles
+  at junctions, zebra crossings, painted lane arrows and painted road text, curbs and sidewalks, parked cars;
+  buildings white/translucent so the road stays readable.
+- **Closed lanes** shown as red ✕ markers on the lane surface; lane-level traffic colouring.
+- Camera: high tilt, car in the lower third, zooms out on straight motorway (~1 km visible) and in for
+  interchanges — like LaneWise's AMAP-style view.
+- HUD: speed in a circle top-left; **section-control panel** (current / average speed, km left); vertical
+  **route progress bar** on the right edge; current road name + speed-limit chip just below the car; bottom bar
+  with distance · time · tolls · arrival, "overview" and "exit" buttons; voice/feedback button on the left.
+Candidates for LaneWise (ordered by value / effort):
+1. Fade the lime strip out ~250 m ahead of the car and add moving chevrons (direction cue) — cheap, highlight only.
+2. Banner colour by road class (blue Autobahn, yellow Bundesstraße, white otherwise) — German guide-sign colours.
+3. Current road name + speed limit chip under the car (OSM `name`, `maxspeed`).
+4. Closed lanes from Autobahn GmbH roadworks (`/roadworks` texts often name the lanes) and TomTom `LANE_CLOSED`
+   incidents as red ✕ on the lane surface.
+5. Zebra crossings and stop-line traffic-light poles from OSM nodes on the route road (data is already fetched).
+6. Lighter / translucent 3D buildings in navigation (style), so the road dominates.
+
 ## Video review — still open
+- [ ] Owner: check the 3D car (size, colours, behaviour in tunnels / under bridges) and the automatic theme on the phone.
+- [ ] Re-check on the phone: puck/camera smoothness with the new dead reckoning (demo ×4 and a real drive), and that
+      the highlight never lags behind the car with the 25 m rebuild step.
+- [ ] Philipsbornstraße (video 2:45): only the route line, no lane surface — OSM has no lane data on most of it;
+      street-name labels are drawn on top of the route line there (label placement over the route).
 - [ ] `RouteRenderLiveTest` Schiffgraben → Berliner Allee: one road edge folds back at the `CONTINUE LEFT` bend
       (route 1371 m) — check the offset-line pruning on tight bends.
 - [ ] Re-check the whole test route on the phone with the fixes (the video was before them).

@@ -73,11 +73,11 @@ class MapController(private val context: Context) {
     private var tweenRoute: Route? = null
     /** Lane centre line from the last ribbon build; the car drives on it instead of the road's centre line. */
     private var ribbon: LaneRibbonBuilder.Ribbon? = null
-    private var tweenFrom = 0.0
-    private var tweenTo = 0.0
-    private var tweenStart = 0L
-    private var tweenDuration = 1000L
-    private var lastSnapAt = 0L
+    /** Route position and time of the last navigation update; the car is dead-reckoned from here at [speedMps]. */
+    private var fixAlong = 0.0
+    private var fixAt = 0L
+    private var speedMps = 0.0
+    private var lastFrameNanos = 0L
     private var shownAlong = Double.NaN
     private var shownBearing = Double.NaN
     private var shownZoom = Double.NaN
@@ -97,8 +97,10 @@ class MapController(private val context: Context) {
     private val choreographer by lazy { Choreographer.getInstance() }
     private val frame = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) {
-            if (tweenRoute == null && offRoutePos == null) { frameRunning = false; return }
-            stepTween()
+            if (tweenRoute == null && offRoutePos == null) { frameRunning = false; lastFrameNanos = 0L; return }
+            val dt = if (lastFrameNanos == 0L) 1.0 / 60 else ((frameTimeNanos - lastFrameNanos) / 1e9).coerceIn(0.001, 0.1)
+            lastFrameNanos = frameTimeNanos
+            stepTween(dt)
             choreographer.postFrameCallback(this)
         }
     }
@@ -132,6 +134,8 @@ class MapController(private val context: Context) {
         style = null
         m.setStyle(Style.Builder().fromUri(styleUri(isDark))) { s ->
             style = s
+            // New style = empty sources: force the next navigation update to hand over road + highlight again.
+            geomKey = null; shownChunks = emptySet()
             setupLayers(s, isDark)
             showFeatures(lastFeatures, featuresVisible)
             setSatellite(satelliteOn)
@@ -146,7 +150,7 @@ class MapController(private val context: Context) {
         s.addImage(IMG_CAR, carBitmap(if (isDark) 0xFF9A82FF.toInt() else 0xFF6C4CF5.toInt()))
         s.addImage(IMG_DEST, pinBitmap())
         FeatureKind.entries.forEach { s.addImage("lw-feat-${it.name}", RoadSignArt.feature(it, 64)) }
-        listOf(SRC_ROUTE, SRC_ALT, SRC_LANES, SRC_LANES_DYN, SRC_CAR, SRC_DEST, SRC_INC, SRC_FEAT, SRC_SIGNAL).forEach { s.addSource(GeoJsonSource(it)) }
+        listOf(SRC_ROUTE, SRC_ALT, SRC_LANES, SRC_LANES_DYN, SRC_CAR, SRC_CAR3D, SRC_DEST, SRC_INC, SRC_FEAT, SRC_SIGNAL).forEach { s.addSource(GeoJsonSource(it)) }
 
         val below = "building-3d"
         fun add(l: Layer) { if (s.getLayer(below) != null) s.addLayerBelow(l, below) else s.addLayer(l) }
@@ -254,9 +258,50 @@ class MapController(private val context: Context) {
             PropertyFactory.iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP),
             PropertyFactory.iconPitchAlignment(Property.ICON_PITCH_ALIGNMENT_MAP),
             PropertyFactory.iconAllowOverlap(true), PropertyFactory.iconIgnorePlacement(true),
-            PropertyFactory.iconSize(Expression.interpolate(Expression.linear(), Expression.zoom(),
-                Expression.stop(12, 0.5f), Expression.stop(18, 1.0f))),
         ))
+        // 3D car (setting): violet glow under it, then the extruded body, cabin, wheels and lights.
+        val part = Expression.get("part")
+        s.addLayer(FillLayer("car-shadow", SRC_CAR3D).withFilter(Expression.eq(part, Expression.literal("SHADOW"))).withProperties(
+            PropertyFactory.fillColor(col("#6C4CF5")), PropertyFactory.fillOpacity(if (isDark) 0.55f else 0.4f),
+            PropertyFactory.fillAntialias(true),
+        ))
+        s.addLayer(FillExtrusionLayer("car-3d", SRC_CAR3D).withFilter(Expression.neq(part, Expression.literal("SHADOW"))).withProperties(
+            PropertyFactory.fillExtrusionColor(Expression.match(part, col("#F4F4F8"),
+                Expression.stop("WHEEL", col("#16161A")), Expression.stop("GLASS", col("#232A38")),
+                Expression.stop("ROOF", col("#FFFFFF")), Expression.stop("HEADLIGHT", col("#FFF4C2")),
+                Expression.stop("TAILLIGHT", col("#E5484D")))),
+            PropertyFactory.fillExtrusionBase(Expression.get("base")),
+            PropertyFactory.fillExtrusionHeight(Expression.get("top")),
+            PropertyFactory.fillExtrusionOpacity(1f),
+            PropertyFactory.fillExtrusionVerticalGradient(true),
+        ))
+        applyCarAppearance(s)
+    }
+
+    // --- car appearance (setting): arrow puck or 3D car, size ------------------------------------------------------
+    private var car3d = true
+    private var carScale = 1.0
+    private var lastCarPos: LatLon? = null
+    private var lastCarBearing = 0.0
+
+    /** Arrow puck or [threeD] car, drawn [scale] × the default size. */
+    fun setCarAppearance(threeD: Boolean, scale: Double) {
+        if (threeD == car3d && scale == carScale) return
+        car3d = threeD; carScale = scale
+        style?.let { applyCarAppearance(it) }
+    }
+
+    private fun applyCarAppearance(s: Style) {
+        val sc = carScale.toFloat()
+        (s.getLayer("car") as? SymbolLayer)?.setProperties(
+            PropertyFactory.visibility(if (car3d) Property.NONE else Property.VISIBLE),
+            PropertyFactory.iconSize(Expression.interpolate(Expression.linear(), Expression.zoom(),
+                Expression.stop(12, 0.5f * sc), Expression.stop(18, 1.0f * sc))),
+        )
+        val v = if (car3d) Property.VISIBLE else Property.NONE
+        s.getLayer("car-shadow")?.setProperties(PropertyFactory.visibility(v))
+        s.getLayer("car-3d")?.setProperties(PropertyFactory.visibility(v))
+        lastCarPos?.let { updateCar(it, lastCarBearing) }
     }
 
     private fun col(hex: String) = Expression.color(android.graphics.Color.parseColor(hex))
@@ -402,8 +447,19 @@ class MapController(private val context: Context) {
         return want to features(want.sorted().flatMap { roadChunks[it].orEmpty() })
     }
 
-    /** Builds highlight (+ road) on a worker, then hands the result to the map on the UI thread. */
+    /** What the shown highlight was built for; a new build is needed only when this changes or the car moved on. */
+    private var geomKey: List<Any?>? = null
+    private var geomAlong = Double.NaN
+
+    /**
+     * Builds highlight (+ road) on a worker, then hands the result to the map on the UI thread. The highlight covers
+     * 60 m behind to 1.2 km ahead of the car on a fixed grid, so it is rebuilt only when the lane plan changes or the
+     * car has moved [GEOM_STEP] — not at every fix (the hand-over of ~1 km of polygons to MapLibre runs on the UI thread).
+     */
     private fun requestGeometry(snap: NavSnapshot, along: Double, showRibbons: Boolean, showBikeLanes: Boolean, streetsMode: Boolean) {
+        val key = listOf(snap.route, snap.lanes, showRibbons, showBikeLanes, streetsMode, geomGeneration)
+        if (key == geomKey && abs(along - geomAlong) < GEOM_STEP) return
+        geomKey = key; geomAlong = along
         val work = {
             val gen = geomGeneration
             val shown = if (streetsMode) emptySet() else shownChunks
@@ -434,7 +490,20 @@ class MapController(private val context: Context) {
 
     fun updateCar(position: LatLon, bearing: Double) {
         val s = style ?: return
-        (s.getSource(SRC_CAR) as? GeoJsonSource)?.setGeoJson(
+        lastCarPos = position; lastCarBearing = bearing
+        if (car3d) {
+            val blocks = CarModel.blocks(position, bearing, CarModel.DEFAULT_EXAGGERATION * carScale)
+            (s.getSource(SRC_CAR3D) as? GeoJsonSource)?.setGeoJsonSync(FeatureCollection.fromFeatures(blocks.map { b ->
+                Feature.fromGeometry(Polygon.fromLngLats(listOf(b.ring.map { Point.fromLngLat(it.lon, it.lat) }))).apply {
+                    addStringProperty("part", b.part.name)
+                    addNumberProperty("base", b.base)
+                    addNumberProperty("top", b.top)
+                }
+            }))
+            return
+        }
+        // Synchronous: the async update landed a frame or two after the camera moved, so the puck jittered sideways.
+        (s.getSource(SRC_CAR) as? GeoJsonSource)?.setGeoJsonSync(
             Feature.fromGeometry(Point.fromLngLat(position.lon, position.lat)).apply { addNumberProperty("bearing", bearing) })
     }
 
@@ -446,6 +515,8 @@ class MapController(private val context: Context) {
         snap: NavSnapshot, showRibbons: Boolean, pitch: Float, topPaddingPx: Double,
         closeUpDistance: Double = 50.0, showBikeLanes: Boolean = true, immersive: Boolean = false,
         streetsMode: Boolean = false,
+        /** Fixed camera zoom (setting "Auto zoom" off); null = zoom with the situation. */
+        fixedZoom: Double? = null,
     ) {
         val s = style ?: return
         val now = SystemClock.uptimeMillis()
@@ -459,16 +530,22 @@ class MapController(private val context: Context) {
         } else {
             offRoutePos = null
             val jump = shownAlong.isNaN() || tweenRoute !== route || abs(along - shownAlong) > 300
-            if (jump) { shownAlong = along; tweenRoute = route }
-            tweenFrom = shownAlong
-            tweenTo = along
-            tweenStart = now
-            tweenDuration = (now - lastSnapAt).coerceIn(200L, 1500L)
+            val dt = (now - fixAt) / 1000.0
+            if (jump) {
+                shownAlong = along; tweenRoute = route; speedMps = snap.fix.speedKmh / 3.6
+            } else if (dt > 0.05) {
+                // Speed along the route from consecutive updates (the demo runs faster than the shown speed).
+                val measured = ((along - fixAlong) / dt).coerceIn(0.0, 150.0)
+                speedMps += (measured - speedMps) * 0.5
+            }
+            fixAlong = along
+            fixAt = now
         }
-        lastSnapAt = now
         tweenPitch = pitch.toDouble()
         tweenTopPad = topPaddingPx
-        if (immersive) {
+        if (fixedZoom != null) {
+            targetZoom = fixedZoom
+        } else if (immersive) {
             // AMAP-style: the map is the junction view. Far from any decision the camera rises to show ~1 km ahead;
             // approaching a turn or a lane change it closes in and looks down more steeply.
             val fast = snap.roadKind == RoadKind.MOTORWAY || snap.roadKind == RoadKind.TRUNK
@@ -484,9 +561,8 @@ class MapController(private val context: Context) {
             tweenPitch = pitch.toDouble() - 15.0 * t
         } else targetZoom = when {
             snap.distanceToNextStep < closeUpDistance -> 18.4
-            snap.roadKind == RoadKind.MOTORWAY -> 16.6
-            snap.roadKind == RoadKind.TRUNK -> 17.0
-            snap.fix.speedKmh > 70 -> 17.0
+            snap.roadKind == RoadKind.MOTORWAY -> 16.8
+            snap.roadKind == RoadKind.TRUNK || snap.fix.speedKmh > 70 -> 17.2
             else -> 17.6
         }
 
@@ -512,12 +588,16 @@ class MapController(private val context: Context) {
         geomGeneration++; geomPending = null
         tweenRoute = null; offRoutePos = null; ribbon = null
         (style?.getSource(SRC_LANES_DYN) as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(emptyList()))
-        roadRoute = null; shownChunks = emptySet()
+        roadRoute = null; shownChunks = emptySet(); geomKey = null
         shownAlong = Double.NaN; shownBearing = Double.NaN; shownZoom = Double.NaN; shownPitch = Double.NaN
     }
 
-    /** One display frame: interpolate along the route, ease bearing and zoom, move car and camera. */
-    private fun stepTween() {
+    /**
+     * One display frame ([dt] s): the car moves on at the measured speed and is pulled gently towards where the last
+     * update predicts it to be — no restart (and no speed jump or stop) at every update; bearing, zoom and tilt are
+     * eased with time constants, so the motion is the same at 60 and 120 Hz.
+     */
+    private fun stepTween(dt: Double) {
         val m = map ?: return
         val off = offRoutePos
         val pos: LatLon
@@ -526,8 +606,10 @@ class MapController(private val context: Context) {
             pos = off; targetBearing = offRouteBearing
         } else {
             val route = tweenRoute ?: return
-            val t = ((SystemClock.uptimeMillis() - tweenStart).toDouble() / tweenDuration).coerceIn(0.0, 1.0)
-            shownAlong = tweenFrom + (tweenTo - tweenFrom) * t
+            val since = ((SystemClock.uptimeMillis() - fixAt) / 1000.0).coerceIn(0.0, 1.5)
+            val predicted = fixAlong + speedMps * since
+            val step = speedMps * dt + (predicted - shownAlong) * ease(dt, 0.6)
+            shownAlong += step.coerceAtLeast(0.0)  // never backwards: an overshoot is absorbed by slowing down
             val line = route.geometry
             val lane = ribbon
             pos = lane?.pointAt(shownAlong) ?: line.pointAt(shownAlong)
@@ -536,9 +618,9 @@ class MapController(private val context: Context) {
             targetBearing = if (ahead == pos) shownBearing.takeUnless { it.isNaN() } ?: 0.0 else Geo.bearing(pos, ahead)
         }
         shownBearing = if (shownBearing.isNaN()) targetBearing
-        else (shownBearing + Geo.bearingDelta(shownBearing, targetBearing) * 0.12 + 360) % 360
-        shownZoom = if (shownZoom.isNaN()) targetZoom else shownZoom + (targetZoom - shownZoom) * 0.04
-        shownPitch = if (shownPitch.isNaN()) tweenPitch else shownPitch + (tweenPitch - shownPitch) * 0.04
+        else (shownBearing + Geo.bearingDelta(shownBearing, targetBearing) * ease(dt, 0.15) + 360) % 360
+        shownZoom = if (shownZoom.isNaN()) targetZoom else shownZoom + (targetZoom - shownZoom) * ease(dt, 0.8)
+        shownPitch = if (shownPitch.isNaN()) tweenPitch else shownPitch + (tweenPitch - shownPitch) * ease(dt, 0.8)
 
         updateCar(pos, shownBearing)
         if (following) {
@@ -552,6 +634,9 @@ class MapController(private val context: Context) {
             m.moveCamera(CameraUpdateFactory.newCameraPosition(cam))
         }
     }
+
+    /** Share of the remaining distance covered in [dt] s by exponential easing with time constant [tau] s. */
+    private fun ease(dt: Double, tau: Double) = 1.0 - kotlin.math.exp(-dt / tau)
 
     fun followCar(position: LatLon, bearing: Double?, pitch: Float) {
         val m = map ?: return
@@ -602,6 +687,8 @@ class MapController(private val context: Context) {
 
     companion object {
         fun styleUri(dark: Boolean) = if (dark) "asset://styles/lanewise_dark.json" else "asset://styles/lanewise_light.json"
+        /** Car movement (m) after which the live highlight is rebuilt even if the lane plan is unchanged. */
+        private const val GEOM_STEP = 25.0
 
         private const val SRC_ROUTE = "lw-route"
         private const val SRC_ALT = "lw-alt"
@@ -612,6 +699,7 @@ class MapController(private val context: Context) {
         /** The route's road is built and kept in pieces of this length (m). */
         private const val ROAD_CHUNK = 1000.0
         private const val SRC_CAR = "lw-car"
+        private const val SRC_CAR3D = "lw-car3d"
         private const val SRC_DEST = "lw-dest"
         private const val SRC_INC = "lw-incidents"
         private const val SRC_FEAT = "lw-features"

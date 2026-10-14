@@ -51,7 +51,17 @@ class MainActivity : ComponentActivity() {
         setContent {
             val settings by vm.settings.collectAsStateWithLifecycle()
             val ui by vm.ui.collectAsStateWithLifecycle()
+            // Automatic theme: sun elevation at the car (or Hannover before the first fix), re-checked every minute.
+            val sunDark by androidx.compose.runtime.produceState(
+                de.lanewise.core.geo.Sun.isDark(sunPosition(), System.currentTimeMillis()), settings.theme,
+            ) {
+                while (settings.theme == ThemeMode.AUTO) {
+                    value = de.lanewise.core.geo.Sun.isDark(sunPosition(), System.currentTimeMillis())
+                    kotlinx.coroutines.delay(60_000)
+                }
+            }
             val dark = when (settings.theme) {
+                ThemeMode.AUTO -> sunDark
                 ThemeMode.SYSTEM -> isSystemInDarkTheme()
                 ThemeMode.LIGHT -> false
                 ThemeMode.DARK -> true
@@ -77,4 +87,6 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    private fun sunPosition() = vm.ui.value.fix?.position ?: de.lanewise.core.geo.LatLon(52.3759, 9.7320)
 }

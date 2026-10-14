@@ -113,6 +113,7 @@ fun MainScreen(vm: MainViewModel, ui: UiState, settings: AppSettings, dark: Bool
         LaunchedEffect(ui.mode) { if (ui.mode == Mode.NAVIGATING) { controller.recenter(); following = true } }
         // Keep map data in sync with state.
         LaunchedEffect(dark) { controller.setDark(dark) }
+        LaunchedEffect(settings.car3d, settings.carScale) { controller.setCarAppearance(settings.car3d, settings.carScale.toDouble()) }
         LaunchedEffect(settings.bikeLaneColor) { controller.setBikeColor(settings.bikeLaneColor) }
         LaunchedEffect(settings.satellite, dark) { controller.setSatellite(settings.satellite) }
         LaunchedEffect(ui.routes, ui.selected, ui.mode, ui.destination, settings.showSigns, ui.nearbyFeatures) {
@@ -145,6 +146,7 @@ fun MainScreen(vm: MainViewModel, ui: UiState, settings: AppSettings, dark: Bool
                     closeUpDistance = if (settings.junctionZoom) settings.laneSceneDistance.toDouble() else 0.0,
                     showBikeLanes = settings.showBikeLanes, immersive = settings.immersiveView,
                     streetsMode = settings.streetsWhileDriving,
+                    fixedZoom = settings.fixedZoom.toDouble().takeUnless { settings.autoZoom },
                 )
             }
         }
@@ -562,11 +564,21 @@ private fun NavigationOverlay(
             val advice = nav.lanes.nextAdvice
             val distToSite = advice?.let { it.site.distanceAlong - nav.distanceAlong } ?: Double.MAX_VALUE
             val bikeHere = nav.bikeLane.takeIf { settings.showBikeLanes }
-            if (advice != null && distToSite < 900) {
-                if (!settings.immersiveView && settings.showLaneScene && distToSite <= settings.laneSceneDistance && (advice.site.isManeuver || nav.lanes.pendingChange != null)) {
+            // Junction close-up fades in and out (it popped in a single frame, which read as a stutter in the video).
+            val showScene = advice != null && distToSite < 900 && !settings.immersiveView && settings.showLaneScene &&
+                distToSite <= settings.laneSceneDistance && (advice.site.isManeuver || nav.lanes.pendingChange != null)
+            androidx.compose.animation.AnimatedVisibility(
+                visible = showScene,
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+                enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(250)) +
+                    androidx.compose.animation.expandVertically(androidx.compose.animation.core.tween(250)),
+                exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(250)) +
+                    androidx.compose.animation.shrinkVertically(androidx.compose.animation.core.tween(250)),
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Spacer(Modifier.height(8.dp))
-                    LaneScene3D(nav.lanes, phrases.distance(distToSite),
-                        Modifier.fillMaxWidth(0.82f).height(140.dp).align(Alignment.CenterHorizontally),
+                    LaneScene3D(nav.lanes, phrases.distance(distToSite.coerceAtMost(9_999.0)),
+                        Modifier.fillMaxWidth(0.82f).height(140.dp),
                         bikeColor = bikeHere?.let { bikeColor })
                     Spacer(Modifier.height(8.dp))
                 }

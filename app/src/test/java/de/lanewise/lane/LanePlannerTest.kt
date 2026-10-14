@@ -282,5 +282,34 @@ class LanePlannerTest {
         // Far away (> 80 m) or with a site at the turn itself: unchanged.
         assertEquals(S, attachTurnsToLaneSites(listOf(before), listOf(2700.0 to L)).single().turn)
     }
-}
 
+    /**
+     * Owner's video (2026-10-14, Schulenburger Landstraße → right into Beneckeallee): `left | through | through;right`,
+     * then two lanes (OSM) for 350 m, then `through | right`. The right lane is the old through;right lane, not a pocket:
+     * keep right, no lane change. Before the fix the plan kept the car in the left lane and asked to move right 160 m
+     * before the turn.
+     */
+    @Test
+    fun turnOnlyLaneThatRunsTheWholeWayIsNotAPocket() {
+        val a = site(300.0, listOf(L, S, S or R), S)
+        val b = site(650.0, listOf(S, R), R, maneuver = true)
+        val counts: (Double) -> Int? = { d -> if (d < 300.0) 3 else 2 }
+        val sites = markFullLengthLanes(listOf(a, b), counts)
+        assertTrue(sites[1].fullLength)
+        assertEquals(0, sites[1].lateral(1))
+        val g = LaneGuidance()
+        for (car in listOf(250.0, 320.0, 450.0, 550.0, 620.0)) {
+            val st = g.update(sites, car, avoidLaneChanges = true, keepRight = true, laneCountAt = counts)
+            val adv = st.plan.last()
+            assertEquals("car $car", 1, adv.recommended)
+            assertEquals("car $car", 0, adv.changeFromPrevious)
+            assertNull("car $car", st.pendingChange)
+        }
+        // A real pocket (three lanes at the junction after two through lanes) stays a pocket, even when OSM counts it
+        // along the whole way.
+        val c = site(650.0, listOf(S, S, R), R, maneuver = true)
+        assertTrue(!markFullLengthLanes(listOf(a, c)) { 3 }[1].fullLength)
+        // Unknown lane counts: unchanged.
+        assertTrue(!markFullLengthLanes(listOf(a, b)) { null }[1].fullLength)
+    }
+}

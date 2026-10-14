@@ -75,7 +75,10 @@ through turns). Tap a lane in the lane bar to correct it; the plan updates immed
 junction count. When OSM lane counts (`Route.laneCountAt`) show the road was narrower in between (a turn
 pocket opening, or one lane widening to three before a junction), moving into the new lanes is free and not
 announced. "In between" starts where the assumed lane was established (`assumedSince`), not at the car: a lane that
-opened behind the car is still entered for free. Without lane-count data every crossing counts. OSRM lanes on the intersection ≤ 80 m before a turn
+opened behind the car is still entered for free. Without lane-count data every crossing counts. Turn-only lanes at a site are pockets only if they open there: when the route passes the previous site straight on,
+that site has as many through lanes as this one has lanes, and OSM counts that many lanes all the way in between
+(`markFullLengthLanes`, `LaneSite.fullLength`), each lane simply continues — e.g. `through;right` → two lanes →
+`through | right`: the right lane is the old through;right lane, no change. OSRM lanes on the intersection ≤ 80 m before a turn
 without its own lane data are re-targeted to that turn (`attachTurnsToLaneSites`); the lane bar never shows the
 lanes of a junction after the next turn.
 

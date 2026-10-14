@@ -47,17 +47,19 @@ See `docs/ARCHITECTURE.md`. Core lane logic: `app/src/main/java/de/lanewise/lane
 - Never push for the owner — they review and push themselves.
 
 ## Status
-See `docs/ROADMAP.md` (v0.4, 2026-10-14). Builds locally, runs on the owner's phone (Samsung S24 Ultra,
+See `docs/ROADMAP.md` (v0.4.3, 2026-10-15). Builds locally, runs on the owner's phone (Samsung S24 Ultra,
 Android 16, package `de.lanewise.app.debug`); the CI build/release APK is the owner's job.
 
 ## Things learned (read before changing these areas)
 - MapLibre 11.13.5 `TileSet.setBounds(Float, Float, Float, Float)` recurses forever: use the `Array<Float>` overload.
 - The app sandbox (Claude desktop) redirects `%LOCALAPPDATA%` writes; Python venvs/data live in git-ignored
   `tools/*/.venv` and `tools/*/work`.
-- Owner's test route: Brüderstraße 4 → Hauptstraße 3 Langenhagen (Asia Haus), 2nd route option.
+- Owner's test route: home in Hannover → a restaurant in Langenhagen (coordinates in `RouteRenderLiveTest`), 2nd route option.
+- Privacy: never write the owner's real addresses or places (start/destination) in docs, code, tests or UI text —
+  use placeholders like "Musterstraße 1" / "Musterweg 3"; street names of lane bugs (not house numbers) are fine.
   `LANEWISE_LIVE=1 gradlew testDebugUnitTest --tests '*RouteRenderLiveTest*'` checks it (Overpass may time out;
   `LANEWISE_ALT=0|1` picks the route option, `LANEWISE_TRACE=1` prints the lane advice every 20 m).
-- Wrong lane counts so far were OSM tagging errors (Brüderstraße way 41589961 `lanes=2`, Celler Straße way
+- Wrong lane counts so far were OSM tagging errors (way 41589961 `lanes=2`, Celler Straße way
   1053732103), not the imagery (DOP20 flown 2025-03-06). The owner fixes OSM; never scrape Google (ToS) or copy
   GPL code (e.g. Vela) into LaneWise.
 - Owner prefers: only the route's own lanes while driving by default (Petal-style streets is an opt-in setting),

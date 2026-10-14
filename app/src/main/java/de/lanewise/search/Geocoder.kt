@@ -19,8 +19,8 @@ class Geocoder(private val baseUrl: String = "https://photon.komoot.io") {
 
     suspend fun search(query: String, near: LatLon?): List<Place> {
         if (query.isBlank()) return emptyList()
-        // "Grazerstr 2" / "Cellerstraße" are written "Grazer Straße" in OSM and Photon does not find them (it returned
-        // Grazerstraße 2 in Austria only). Search the split spelling too, its hits first.
+        // "Musterstädterstr 1" / "Bremerstraße" are written "Musterstädter Straße" in OSM and Photon does not find them
+        // (it returned a same-named street in Austria only). Search the split spelling too, its hits first.
         val alt = normalize(query)
         if (alt == query) return searchOnce(query, near)
         val a = runCatching { searchOnce(alt, near) }
@@ -52,7 +52,7 @@ class Geocoder(private val baseUrl: String = "https://photon.komoot.io") {
     companion object {
         private val ER_STREET = Regex("""(?i)\b(\p{L}{2,}er)(str\.?|straße|strasse)(?=\s|\d|$)""")
 
-        /** "grazerstr 2" → "grazer Straße 2" (adjective street names); anything else unchanged. */
+        /** "musterstädterstr 1" → "musterstädter Straße 1" (adjective street names); anything else unchanged. */
         fun normalize(q: String): String = ER_STREET.replace(q.trim()) { m -> m.groupValues[1] + " Straße" }
     }
 }

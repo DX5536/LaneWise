@@ -392,10 +392,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 else base.speedLimits,
                 features = (base.features.filter { it.distanceAlong < from } + data.features).sortedBy { it.distanceAlong },
                 bikeLanes = (base.bikeLanes.filter { it.to <= from } + data.bikeLanes).sortedBy { it.from },
-                laneCounts = (base.laneCounts.filter { it.to <= from } + data.laneCounts).sortedBy { it.from },
                 laneChanges = de.lanewise.lane.ChangeSpan.merge(
                     (base.laneChanges.filter { it.to <= from && it !in base.tomtomLaneLines } + data.laneChanges).sortedBy { it.from }, base.tomtomLaneLines),
-            )
+            ).withLaneCounts((base.laneCounts.filter { it.to <= from } + data.laneCounts).sortedBy { it.from })
             if (_ui.value.mode == Mode.NAVIGATING) {
                 engine = NavigationEngine(updated, laneGuidance).also { it.rehydrate(engine) }
                 currentRoute = updated
@@ -410,9 +409,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 ?: return@launch
             val updated = route.copy(
                 speedLimits = if (route.provider == "osrm") data.limits else route.speedLimits,
-                features = data.features, bikeLanes = data.bikeLanes, laneCounts = data.laneCounts,
+                features = data.features, bikeLanes = data.bikeLanes,
                 laneChanges = de.lanewise.lane.ChangeSpan.merge(data.laneChanges, route.tomtomLaneLines),
-            )
+            ).withLaneCounts(data.laneCounts)
             _ui.update { st -> st.copy(routes = st.routes.map { if (it === route) updated else it }) }
         }
     }

@@ -103,6 +103,11 @@ data class LaneSite(
     /** True if the route makes an actual manoeuvre here, false if it only passes through. */
     val isManeuver: Boolean,
     val roadKind: RoadKind,
+    /**
+     * Every lane here runs all the way from the previous junction (OSM lane counts, see [markFullLengthLanes]):
+     * turn-only lanes at the edges are then ordinary lanes, not pockets that open before the junction.
+     */
+    val fullLength: Boolean = false,
 ) {
     val laneCount get() = lanes.size
 
@@ -125,6 +130,7 @@ data class LaneSite(
 
     /** Number of turn-pocket lanes on the left edge that only serve left turns / U-turns. */
     fun leftPockets(): Int {
+        if (fullLength) return 0
         var n = 0
         while (n < lanes.size - 1) {
             val m = lanes[n]
@@ -135,6 +141,7 @@ data class LaneSite(
 
     /** Number of turn-pocket lanes on the right edge that only serve right turns. */
     fun rightPockets(): Int {
+        if (fullLength) return 0
         var n = 0
         while (n < lanes.size - 1 - leftPockets()) {
             val m = lanes[lanes.size - 1 - n]
@@ -265,4 +272,32 @@ fun attachTurnsToLaneSites(sites: List<LaneSite>, turns: List<Pair<Double, Int>>
         out[i] = s.copy(turn = bit, isManeuver = true, providerValid = null)
     }
     return out
+}
+
+/**
+ * Marks sites whose edge turn lanes are not pockets (see [LaneSite.fullLength]): the route passes the previous site
+ * straight on, that site has exactly as many through lanes as this one has lanes, and OSM counts at least that many
+ * lanes all the way in between. Then each lane is the continuation of a through lane — e.g. Schulenburger Landstraße:
+ * `left | through | through;right`, then two lanes, then `through | right` at Beneckeallee: the right lane *is* the
+ * old through;right lane, so turning right needs no lane change. Without the mark the right-only lane counted as a
+ * pocket opening to the right, and the planner kept the car in the left lane and asked for a late change.
+ * A real pocket (one more lane than through lanes before) is never marked, even if OSM counts it along the whole way.
+ */
+fun markFullLengthLanes(sites: List<LaneSite>, laneCountAt: (Double) -> Int?): List<LaneSite> {
+    val sorted = sites.sortedBy { it.distanceAlong }
+    return sorted.mapIndexed { k, raw ->
+        val s = if (raw.fullLength) raw.copy(fullLength = false) else raw
+        if (k == 0 || (s.leftPockets() == 0 && s.rightPockets() == 0)) return@mapIndexed s
+        val prev = sorted[k - 1]
+        if (prev.isManeuver && prev.turn != LaneDir.STRAIGHT) return@mapIndexed s
+        if (prev.lanes.count { LaneDir.permits(it, LaneDir.STRAIGHT) } != s.laneCount) return@mapIndexed s
+        var d = prev.distanceAlong + 15
+        if (d >= s.distanceAlong - 5) return@mapIndexed s
+        while (d < s.distanceAlong - 5) {
+            val n = laneCountAt(d) ?: return@mapIndexed s
+            if (n < s.laneCount) return@mapIndexed s
+            d += 10
+        }
+        s.copy(fullLength = true)
+    }
 }

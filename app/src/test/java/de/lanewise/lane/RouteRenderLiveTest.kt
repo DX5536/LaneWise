@@ -22,7 +22,7 @@ class RouteRenderLiveTest {
     @Test
     fun ownersRouteRendersCleanly() = runBlocking {
         assumeTrue(System.getenv("LANEWISE_LIVE") == "1")
-        // Owner's test drive: Brüderstraße 4 → Hauptstraße 3, Langenhagen (Asia Haus), second route option.
+        // Owner's test drive (Musterstraße 1, Hannover → Musterweg 3, Langenhagen), second route option.
         // LANEWISE_FROM / LANEWISE_TO = "lat,lon" check any other route.
         fun env(k: String, d: LatLon) = System.getenv(k)?.split(',')?.let { LatLon(it[0].trim().toDouble(), it[1].trim().toDouble()) } ?: d
         val req = RouteRequest(env("LANEWISE_FROM", LatLon(52.3784754, 9.7340973)), env("LANEWISE_TO", LatLon(52.4380884, 9.7052888)),
@@ -32,7 +32,7 @@ class RouteRenderLiveTest {
         var route: Route = routes.getOrElse(System.getenv("LANEWISE_ALT")?.toIntOrNull() ?: 1) { routes.first() }
         val c = runCatching { SpeedLimitProvider().corridor(route.geometry, 0.0, route.distance) }
             .onFailure { println("corridor unavailable (${it.message}) - checking without OSM lane counts") }.getOrNull()
-        if (c != null) route = route.copy(laneCounts = c.laneCounts, laneChanges = c.laneChanges, bikeLanes = c.bikeLanes)
+        if (c != null) route = route.copy(laneChanges = c.laneChanges, bikeLanes = c.bikeLanes).withLaneCounts(c.laneCounts)
         println("route ${route.distance.toInt()} m, ${route.laneSites.size} lane sites, ${route.laneCounts.size} lane-count spans")
         route.steps.forEach { st -> println("  step @${st.distanceAlong.toInt()} ${st.maneuver.type} ${st.maneuver.modifier} ${st.name}") }
         route.laneSites.forEach { println("  site @${it.distanceAlong.toInt()} lanes=${it.lanes} turn=${it.turn} maneuver=${it.isManeuver} valid=${it.providerValid}") }
