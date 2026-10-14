@@ -2,6 +2,15 @@
 
 Read this first when resuming work in a new chat.
 
+## Copy-paste prompt for a new chat
+
+> You are continuing work on **LaneWise**, my Android navigation app (Kotlin, Jetpack Compose, MapLibre) for
+> Germany with focus on Hannover/Niedersachsen. Before doing anything, read `CLAUDE.md`, `README.md` and
+> everything in `docs/` (especially `docs/ROADMAP.md` for status, `docs/LANE_ALGORITHM.md`, `docs/ARCHITECTURE.md`
+> and `docs/DATA_SOURCES.md`). Build locally with `.\build-local.ps1` (add `-Install` to put it on my USB-connected
+> phone); the build also runs the unit tests. Never commit or push — I review and push myself. Keep the app's
+> three languages (DE/EN/VI) in sync when adding UI text. When done, update `docs/ROADMAP.md`. My next request is:
+
 ## Project
 Android (Kotlin/Compose/MapLibre) driving app for Germany, focus Region Hannover, centred on
 **3D lane assist that minimises lane changes**. Owner: Hai Lam Dang (GitHub DX5536). UI and voice are German-first.
