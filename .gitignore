@@ -50,3 +50,8 @@ desktop.ini
 
 # Downloaded CI APKs
 build-apk/
+
+# Aerial-lane pipeline (imagery, masks, model weights, venv)
+tools/aerial_lanes/work/
+tools/aerial_lanes/.venv/
+__pycache__/

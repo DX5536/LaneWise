@@ -107,6 +107,7 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, ui: UiState, onBack: () ->
 
         Section(str.bikeLanes) {
             Toggle(str.showBikeLanes, str.showBikeLanesSub, s.showBikeLanes) { v -> set { it.copy(showBikeLanes = v) } }
+            Toggle(str.aerialLanes, str.aerialLanesSub, s.aerialLanes) { v -> set { it.copy(aerialLanes = v) } }
             Text(str.bikeLaneColor, fontSize = 14.sp)
             Spacer(Modifier.height(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {

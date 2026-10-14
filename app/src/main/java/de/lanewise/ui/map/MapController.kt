@@ -64,6 +64,8 @@ class MapController(private val context: Context) {
 
     // --- tween state --------------------------------------------------------------------------------
     private var tweenRoute: Route? = null
+    /** Lane centre line from the last ribbon build; the car drives on it instead of the road's centre line. */
+    private var ribbon: LaneRibbonBuilder.Ribbon? = null
     private var tweenFrom = 0.0
     private var tweenTo = 0.0
     private var tweenStart = 0L
@@ -139,7 +141,9 @@ class MapController(private val context: Context) {
         s.addSource(RasterSource(SRC_SAT, TileSet("2.2.0", DOP20_WMS).apply {
             attribution = "Luftbild: LGLN (2026), CC BY 4.0"
             minZoom = 10f; maxZoom = 20f
-            setBounds(6.6f, 51.29f, 11.6f, 53.9f)
+            // NOT setBounds(Float, Float, Float, Float): in MapLibre 11.13.5 that overload calls itself
+            // (StackOverflowError in onDidFinishLoadingStyle -> app crashes on start). Array overload is fine.
+            setBounds(arrayOf(6.6f, 51.29f, 11.6f, 53.9f))
         }, 256))
         add(RasterLayer("satellite", SRC_SAT).withProperties(PropertyFactory.visibility(Property.NONE)))
 
@@ -360,15 +364,15 @@ class MapController(private val context: Context) {
             (s.getLayer("lane-stop") as? LineLayer)?.setProperties(PropertyFactory.lineWidth(metresToPixels()))
         }
 
-        if (showRibbons && !snap.offRoute) {
-            setLaneShapes(LaneRibbonBuilder.build(route, snap.lanes, along, showBikeLanes = showBikeLanes))
-        } else clearLanes()
+        val r = if (snap.offRoute) null else LaneRibbonBuilder.build(route, snap.lanes, along, showBikeLanes = showBikeLanes)
+        ribbon = r
+        if (showRibbons && r != null) setLaneShapes(r.shapes) else clearLanes()
 
         if (!frameRunning) { frameRunning = true; choreographer.postFrameCallback(frame) }
     }
 
     fun stopTween() {
-        tweenRoute = null; offRoutePos = null
+        tweenRoute = null; offRoutePos = null; ribbon = null
         shownAlong = Double.NaN; shownBearing = Double.NaN; shownZoom = Double.NaN
     }
 
@@ -385,9 +389,10 @@ class MapController(private val context: Context) {
             val t = ((SystemClock.uptimeMillis() - tweenStart).toDouble() / tweenDuration).coerceIn(0.0, 1.0)
             shownAlong = tweenFrom + (tweenTo - tweenFrom) * t
             val line = route.geometry
-            pos = line.pointAt(shownAlong)
+            val lane = ribbon
+            pos = lane?.pointAt(shownAlong) ?: line.pointAt(shownAlong)
             // Look-ahead bearing (≈25 m) so the camera turns before the car does and never jitters on short segments.
-            val ahead = line.pointAt(shownAlong + 25)
+            val ahead = lane?.pointAt(shownAlong + 25) ?: line.pointAt(shownAlong + 25)
             targetBearing = if (ahead == pos) shownBearing.takeUnless { it.isNaN() } ?: 0.0 else Geo.bearing(pos, ahead)
         }
         shownBearing = if (shownBearing.isNaN()) targetBearing

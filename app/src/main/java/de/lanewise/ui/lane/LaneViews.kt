@@ -59,13 +59,16 @@ private fun usedBits(mask: Int, turn: Int): Int {
 @Composable
 fun LaneBar(
     advice: LaneAdvice, modifier: Modifier = Modifier, bikeColor: Color? = null, onLaneTap: (Int) -> Unit = {},
+    docked: Boolean = false,
 ) {
     val c = LocalLaneColors.current
     val site = advice.site
+    // Docked: full width under the manoeuvre banner, lanes share the width, same colour as the banner.
     Row(
         modifier
-            .clip(RoundedCornerShape(16.dp))
-            .background(Color(0xF0101216))
+            .then(if (docked) Modifier.fillMaxWidth() else Modifier)
+            .clip(if (docked) RoundedCornerShape(6.dp, 6.dp, 18.dp, 18.dp) else RoundedCornerShape(16.dp))
+            .background(if (docked) c.banner else Color(0xF0101216))
             .padding(horizontal = 8.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -82,8 +85,7 @@ fun LaneBar(
             }
             val highlight = if (allowed) usedBits(mask, site.turn) else 0
             Box(
-                Modifier
-                    .size(width = 44.dp, height = 52.dp)
+                (if (docked) Modifier.weight(1f).height(52.dp) else Modifier.size(width = 44.dp, height = 52.dp))
                     .clip(RoundedCornerShape(10.dp))
                     .background(if (recommended) Color(0x33B8F33A) else Color.Transparent)
                     .clickable { onLaneTap(i) },

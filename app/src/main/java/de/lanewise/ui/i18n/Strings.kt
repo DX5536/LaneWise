@@ -131,6 +131,8 @@ data class Strings(
     val save: String,
     val satellite: String,
     val satelliteSub: String,
+    val aerialLanes: String,
+    val aerialLanesSub: String,
 ) {
     fun feature(k: FeatureKind) = when (k) {
         FeatureKind.TRAFFIC_SIGNALS -> trafficLight
@@ -205,6 +207,7 @@ val DE = Strings(
     noFavorites = "Noch keine Orte gespeichert. Tippe in der Routenvorschau auf „★ Speichern“.",
     delete = "Löschen", savePlace = "Ort speichern", name = "Name", save = "Speichern",
     satellite = "Luftbild", satelliteSub = "Amtliches Luftbild Niedersachsen (LGLN DOP20, 20 cm) unter den Fahrspuren.",
+    aerialLanes = "Spuren aus Luftbildern", aerialLanesSub = "Spuranzahl aus amtlichen Luftbildern erkannt – nur wo OSM keine Angabe hat oder abweicht.",
 )
 
 val EN = Strings(
@@ -261,6 +264,7 @@ val EN = Strings(
     noFavorites = "No saved places yet. Tap “★ Save” in the route preview.",
     delete = "Delete", savePlace = "Save place", name = "Name", save = "Save",
     satellite = "Aerial imagery", satelliteSub = "Official Lower Saxony aerial photos (LGLN DOP20, 20 cm) under the lanes.",
+    aerialLanes = "Lanes from aerial photos", aerialLanesSub = "Lane counts detected in official aerial photos – only where OSM has none or disagrees.",
 )
 
 val VI = Strings(
@@ -317,4 +321,5 @@ val VI = Strings(
     noFavorites = "Chưa có địa điểm nào được lưu. Nhấn „★ Lưu“ trong phần xem trước lộ trình.",
     delete = "Xóa", savePlace = "Lưu địa điểm", name = "Tên", save = "Lưu",
     satellite = "Ảnh vệ tinh", satelliteSub = "Ảnh hàng không chính thức của Niedersachsen (LGLN DOP20, 20 cm) dưới các làn đường.",
+    aerialLanes = "Làn đường từ ảnh hàng không", aerialLanesSub = "Số làn nhận diện từ ảnh hàng không chính thức – chỉ khi OSM không có hoặc khác.",
 )

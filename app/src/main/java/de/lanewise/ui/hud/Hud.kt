@@ -212,13 +212,29 @@ fun BikeLaneChip(exclusive: Boolean, color: Color, modifier: Modifier = Modifier
     }
 }
 
-/** Top banner: manoeuvre arrow, distance, road; optional "then" chip for close-following steps. */
+/**
+ * Top banner: manoeuvre arrow, distance, road; optional "then" chip for close-following steps.
+ * The whole box doubles as a countdown: a violet fill shrinks with [countdown] (1 = start, 0 = manoeuvre).
+ * [lanesBelow] squares off the bottom corners so the lane bar can dock underneath as one card.
+ * [below] is drawn directly under the banner (lane bar), above the "then" chip.
+ */
 @Composable
-fun ManeuverBanner(step: RouteStep?, distanceText: String, instruction: String, then: RouteStep?, thenText: String?, modifier: Modifier = Modifier) {
+fun ManeuverBanner(
+    step: RouteStep?, distanceText: String, instruction: String, then: RouteStep?, thenText: String?,
+    modifier: Modifier = Modifier, countdown: Float? = null, lanesBelow: Boolean = false,
+    below: @Composable () -> Unit = {},
+) {
     val c = LocalLaneColors.current
+    val fill by androidx.compose.animation.core.animateFloatAsState(
+        countdown?.coerceIn(0f, 1f) ?: 0f, androidx.compose.animation.core.tween(900, easing = androidx.compose.animation.core.LinearEasing),
+        label = "countdown",
+    )
+    val shape = if (lanesBelow) RoundedCornerShape(22.dp, 22.dp, 6.dp, 6.dp) else RoundedCornerShape(22.dp)
     Column(modifier) {
         Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(c.banner).padding(14.dp),
+            Modifier.fillMaxWidth().clip(shape).background(c.banner)
+                .drawBehind { if (countdown != null) drawRect(c.bannerAccent.copy(alpha = 0.38f), size = Size(size.width * fill, size.height)) }
+                .padding(14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
@@ -231,6 +247,7 @@ fun ManeuverBanner(step: RouteStep?, distanceText: String, instruction: String, 
                 Text(instruction, color = c.onBanner.copy(alpha = 0.9f), fontSize = 17.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         }
+        below()
         if (then != null && thenText != null) {
             Row(
                 Modifier.padding(start = 12.dp, top = 4.dp).clip(RoundedCornerShape(12.dp)).background(c.banner.copy(alpha = 0.92f))

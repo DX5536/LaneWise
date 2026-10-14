@@ -1,0 +1,3 @@
+way_id,verdict,note
+42410724,wrong,"Hohenzollernstrasse: 4 lanes (2+2) clearly painted, OSM right; model missed faint dashes, tree shadows"
+42404086,wrong,"Hamburger Allee under the Raschplatz elevated road; detected the bridge's dashes"

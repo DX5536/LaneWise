@@ -36,6 +36,7 @@ import de.lanewise.settings.PlacesRepository
 import de.lanewise.settings.SavedPlace
 import de.lanewise.ui.i18n.Strings
 import de.lanewise.core.geo.Geo
+import de.lanewise.osm.AerialLanes
 import de.lanewise.osm.OsmTags
 import de.lanewise.settings.RoutingSource
 import de.lanewise.settings.SettingsRepository
@@ -161,6 +162,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (snap.offRoute && !fix.simulated) reroute(fix)
         if (snap.route.provider != "offline" && snap.distanceAlong > speedFetchedUntil - 8_000) fetchCorridor(snap.route, snap.distanceAlong)
     }
+
+    private var aerial: AerialLanes? = null
+
+    /** Lane counts from aerial photos (assets/aerial_lanes.json, built by tools/aerial_lanes); loaded once. */
+    suspend fun aerialLanes(): AerialLanes = aerial ?: withContext(Dispatchers.IO) {
+        runCatching {
+            ctx.assets.open("aerial_lanes.json").bufferedReader().use { AerialLanes.parse(it.readText()) }
+        }.getOrDefault(AerialLanes.EMPTY)
+    }.also { aerial = it }
 
     /** Lane-level street data around the car (refetched after moving 250 m), for the map when no route is active. */
     private fun updateNearbyStreets(p: LatLon) {

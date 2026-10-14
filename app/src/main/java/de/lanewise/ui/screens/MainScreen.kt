@@ -120,10 +120,11 @@ fun MainScreen(vm: MainViewModel, ui: UiState, settings: AppSettings, dark: Bool
         LaunchedEffect(ui.incidents) { controller.showIncidents(ui.incidents) }
         // Without an active route: lanes and markings of all nearby streets (like Petal / AMAP).
         // While navigating only the route's lanes are drawn (updateNavigation).
-        LaunchedEffect(ui.nearbyStreets, ui.mode, settings.laneRibbonsOnMap, settings.showBikeLanes) {
+        LaunchedEffect(ui.nearbyStreets, ui.mode, settings.laneRibbonsOnMap, settings.showBikeLanes, settings.aerialLanes) {
             if (ui.mode == Mode.NAVIGATING) return@LaunchedEffect
             if (!settings.laneRibbonsOnMap) { controller.clearLanes(); return@LaunchedEffect }
-            val shapes = de.lanewise.osm.StreetLanes.build(ui.nearbyStreets)
+            val streets = if (settings.aerialLanes) vm.aerialLanes().let { a -> ui.nearbyStreets.map(a::apply) } else ui.nearbyStreets
+            val shapes = de.lanewise.osm.StreetLanes.build(streets)
                 .filter { settings.showBikeLanes || it.kind != de.lanewise.lane.LaneRibbonBuilder.Kind.BIKE }
             controller.setLaneShapes(shapes)
         }

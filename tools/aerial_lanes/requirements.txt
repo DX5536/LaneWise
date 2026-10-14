@@ -1,0 +1,8 @@
+# Install PyTorch with CUDA first (RTX 3070 Ti):
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+numpy
+pillow
+requests
+pyproj
+opencv-python-headless
+segmentation-models-pytorch

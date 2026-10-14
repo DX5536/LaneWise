@@ -16,11 +16,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
-/** One OSM street segment with what is painted on it. */
-data class OsmStreet(val geometry: List<LatLon>, val tags: Map<String, String>)
+/** One OSM street segment with what is painted on it; [nodes] are the OSM node ids of [geometry] (for junctions). */
+data class OsmStreet(val geometry: List<LatLon>, val tags: Map<String, String>, val id: Long = 0, val nodes: List<Long> = emptyList())
 
 /**
  * Lanes and markings of all streets around the car while no route is active — like Petal / AMAP's lane-level
@@ -33,7 +34,7 @@ object StreetLanes {
         "tertiary|tertiary_link|unclassified|residential|living_street"
 
     suspend fun fetch(center: LatLon, radiusM: Int = 450): List<OsmStreet> {
-        val q = String.format(Locale.US, "[out:json][timeout:40];way(around:%d,%.5f,%.5f)[\"highway\"~\"^(%s)$\"];out tags geom;",
+        val q = String.format(Locale.US, "[out:json][timeout:40];way(around:%d,%.5f,%.5f)[\"highway\"~\"^(%s)$\"];out geom;",
             radiusM, center.lat, center.lon, CLASSES)
         val elements = Overpass.json(q)["elements"].arr.orEmpty()
         return elements.mapNotNull { el ->
@@ -42,7 +43,9 @@ object StreetLanes {
                 if (la != null && lo != null) LatLon(la, lo) else null
             }
             val tags = (el["tags"] as? JsonObject)?.mapValues { it.value.str.orEmpty() } ?: return@mapNotNull null
-            if (geom.size < 2) null else OsmStreet(geom, tags)
+            val nodes = el["nodes"].arr.orEmpty().mapNotNull { it.dbl?.toLong() }
+            if (geom.size < 2) null
+            else OsmStreet(geom, tags, el["id"].dbl?.toLong() ?: 0, if (nodes.size == geom.size) nodes else emptyList())
         }
     }
 
@@ -52,22 +55,52 @@ object StreetLanes {
         else -> 3.0
     }
 
-    suspend fun build(streets: List<OsmStreet>): List<Shape> = withContext(Dispatchers.Default) {
-        val out = ArrayList<Shape>()
-        for (st in streets) runCatching { buildStreet(st, out) }
-        out
-    }
+    /** A junction on a street: along-way distance and the half width of the crossing roads (lines stop there). */
+    private class Cut(val d: Double, val r: Double)
 
-    private fun buildStreet(st: OsmStreet, out: MutableList<Shape>) {
-        val t = st.tags
+    /** Lateral layout of one street (m, + = right of the way direction). */
+    private class Layout(t: Map<String, String>) {
         val hw = t["highway"].orEmpty()
         val oneway = t["oneway"] == "yes" || hw == "motorway" || hw == "motorway_link" || t["junction"] == "roundabout"
         val minor = hw == "residential" || hw == "living_street" || hw == "unclassified"
         val fwd = OsmTags.lanesInDirection(t, true, oneway) ?: 1
         val bwd = if (oneway) 0 else OsmTags.lanesInDirection(t, false, false) ?: 1
         val w = laneWidth(hw) * if (minor && t["lanes"] == null) 0.9 else 1.0
+        val left = if (oneway) -fwd * w / 2 else -bwd * w
+        val right = if (oneway) fwd * w / 2 else fwd * w
+        val extent get() = max(-left, right) + 0.3
+    }
 
-        val line = Polyline(st.geometry)
+    suspend fun build(streets: List<OsmStreet>): List<Shape> = withContext(Dispatchers.Default) {
+        val layouts = streets.map { Layout(it.tags) }
+        // Node degree: interior nodes count twice (in + out); degree >= 3 is a real junction, 2 a plain way split.
+        val degree = HashMap<Long, Int>()
+        val atNode = HashMap<Long, MutableList<Int>>()
+        streets.forEachIndexed { k, st ->
+            st.nodes.forEachIndexed { i, n ->
+                degree.merge(n, if (i == 0 || i == st.nodes.lastIndex) 1 else 2, Int::plus)
+                atNode.getOrPut(n) { ArrayList(4) } += k
+            }
+        }
+        val out = ArrayList<Shape>()
+        streets.forEachIndexed { k, st ->
+            val line = Polyline(st.geometry)
+            val cuts = st.nodes.mapIndexedNotNull { i, n ->
+                if ((degree[n] ?: 0) < 3) return@mapIndexedNotNull null
+                val r = atNode[n].orEmpty().filter { it != k }.maxOfOrNull { layouts[it].extent } ?: return@mapIndexedNotNull null
+                Cut(line.cumulative[i], r + 0.8)
+            }
+            runCatching { buildStreet(st, layouts[k], line, cuts, out) }
+        }
+        out
+    }
+
+    private fun buildStreet(st: OsmStreet, lay: Layout, line: Polyline, cuts: List<Cut>, out: MutableList<Shape>) {
+        val t = st.tags
+        val oneway = lay.oneway
+        val fwd = lay.fwd
+        val bwd = lay.bwd
+        val w = lay.w
         if (line.length < 8) return
         val pts = smooth(line)
         val bearings = pts.indices.map { i ->
@@ -76,42 +109,57 @@ object StreetLanes {
         }
         fun at(i: Int, off: Double) = Geo.destination(pts[i], bearings[i] + 90.0, off)
         val idx = pts.indices.toList()
-
-        // Lateral layout (m, + = right of way direction).
-        val left = if (oneway) -fwd * w / 2 else -bwd * w
-        val right = if (oneway) fwd * w / 2 else fwd * w
-        out += Shape(idx.map { at(it, left - 0.3) } + idx.reversed().map { at(it, right + 0.3) } + at(0, left - 0.3), Kind.SURFACE, true)
-        out += Shape(idx.map { at(it, left) }, Kind.EDGE, false, 0.18)
-        out += Shape(idx.map { at(it, right) }, Kind.EDGE, false, 0.18)
-        // Centre line between directions, lane dividers within each direction.
-        if (!oneway && fwd > 0 && bwd > 0) {
-            out += Shape(idx.map { at(it, 0.0) }, if (minor) Kind.DIVIDER else Kind.DIVIDER_SOLID, false, 0.15)
+        // Along-way distance of each smoothed point (scaled back to the raw way length).
+        val pd = DoubleArray(pts.size).also { c -> for (i in 1 until pts.size) c[i] = c[i - 1] + Geo.distance(pts[i - 1], pts[i]) }
+        val scale = if (pd.last() > 0) line.length / pd.last() else 1.0
+        fun inJunction(i: Int) = cuts.any { abs(pd[i] * scale - it.d) < it.r }
+        // Runs of points outside junctions: markings stop where another road crosses, as painted on the street.
+        val runs = ArrayList<List<Int>>()
+        var cur = ArrayList<Int>()
+        for (i in idx) {
+            if (!inJunction(i)) { cur += i; continue }
+            if (cur.size >= 2) runs += cur
+            cur = ArrayList()
         }
+        if (cur.size >= 2) runs += cur
+        fun lines(off: Double, kind: Kind, width: Double) = runs.forEach { r -> out += Shape(r.map { at(it, off) }, kind, false, width) }
+        fun strip(a: Double, b: Double, kind: Kind) = runs.forEach { r ->
+            out += Shape(r.map { at(it, a) } + r.reversed().map { at(it, b) } + at(r.first(), a), kind, true)
+        }
+
+        val left = lay.left
+        val right = lay.right
+        out += Shape(idx.map { at(it, left - 0.3) } + idx.reversed().map { at(it, right + 0.3) } + at(0, left - 0.3), Kind.SURFACE, true)
+        lines(left, Kind.EDGE, 0.18)
+        lines(right, Kind.EDGE, 0.18)
+        // Centre line between directions, lane dividers within each direction.
+        if (!oneway && fwd > 0 && bwd > 0) lines(0.0, if (lay.minor) Kind.DIVIDER else Kind.DIVIDER_SOLID, 0.15)
         val fwdStart = if (oneway) left else 0.0
-        for (k in 1 until fwd) out += Shape(idx.map { at(it, fwdStart + k * w) }, Kind.DIVIDER, false, 0.15)
-        for (k in 1 until bwd) out += Shape(idx.map { at(it, -k * w) }, Kind.DIVIDER, false, 0.15)
+        for (k in 1 until fwd) lines(fwdStart + k * w, Kind.DIVIDER, 0.15)
+        for (k in 1 until bwd) lines(-k * w, Kind.DIVIDER, 0.15)
 
         // Bike lanes on the right edge of each direction.
         OsmTags.bikeLaneRight(t, forward = true, oneway = oneway)?.let { exclusive ->
-            val bw = if (exclusive) 1.6 else 1.3
-            out += Shape(idx.map { at(it, right + 0.35) } + idx.reversed().map { at(it, right + 0.35 + bw) } + at(0, right + 0.35), Kind.BIKE, true)
+            strip(right + 0.35, right + 0.35 + if (exclusive) 1.6 else 1.3, Kind.BIKE)
         }
         if (!oneway) OsmTags.bikeLaneRight(t, forward = false, oneway = false)?.let { exclusive ->
-            val bw = if (exclusive) 1.6 else 1.3
-            out += Shape(idx.map { at(it, left - 0.35) } + idx.reversed().map { at(it, left - 0.35 - bw) } + at(0, left - 0.35), Kind.BIKE, true)
+            strip(left - 0.35, left - 0.35 - if (exclusive) 1.6 else 1.3, Kind.BIKE)
         }
 
         // Turn arrows + stop line at the end of each direction (turn:lanes apply where the way ends).
         val turnF = t["turn:lanes:forward"] ?: if (oneway) t["turn:lanes"] else null
         val turnB = t["turn:lanes:backward"]
         val len = line.length
-        if (turnF != null && len > 25) {
+        // Stop line in front of the crossing road, not inside the junction.
+        val endCut = cuts.filter { it.d > len - 1 }.maxOfOrNull { it.r } ?: 0.0
+        val startCut = cuts.filter { it.d < 1 }.maxOfOrNull { it.r } ?: 0.0
+        if (turnF != null && len > 25 + endCut) {
             val masks = LaneDir.parseTurnLanes(turnF)
-            paint(masks, forward = true, fromStart = len, line, w, if (oneway) left else 0.0, out)
+            paint(masks, forward = true, fromStart = len - endCut, line, w, if (oneway) left else 0.0, out)
         }
-        if (turnB != null && len > 25 && !oneway) {
+        if (turnB != null && len > 25 + startCut && !oneway) {
             val masks = LaneDir.parseTurnLanes(turnB)
-            paint(masks, forward = false, fromStart = 0.0, line, w, 0.0, out)
+            paint(masks, forward = false, fromStart = startCut, line, w, 0.0, out)
         }
     }
 

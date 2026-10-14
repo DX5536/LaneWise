@@ -51,18 +51,47 @@ object LaneRibbonBuilder {
         fun at(off: Double) = Geo.destination(p, bearing + 90.0, off)
     }
 
+    /**
+     * Lane geometry plus [lanePath]: the centre of the lane the car is in / should be in (along-route distance →
+     * position), so the car puck and camera drive in the lane instead of on the road's centre line.
+     */
+    data class Ribbon(val shapes: List<Shape>, val lanePath: List<Pair<Double, LatLon>>) {
+        /** Point on [lanePath] at along-route distance [d], or null outside it. */
+        fun pointAt(d: Double): LatLon? {
+            if (lanePath.size < 2 || d < lanePath.first().first || d > lanePath.last().first) return null
+            var lo = 0; var hi = lanePath.size - 1
+            while (hi - lo > 1) { val m = (lo + hi) / 2; if (lanePath[m].first <= d) lo = m else hi = m }
+            val (d0, p0) = lanePath[lo]; val (d1, p1) = lanePath[hi]
+            val t = if (d1 - d0 < 1e-6) 0.0 else (d - d0) / (d1 - d0)
+            return LatLon(p0.lat + (p1.lat - p0.lat) * t, p0.lon + (p1.lon - p0.lon) * t)
+        }
+    }
+
     fun build(
         route: Route, state: LaneState, carDistance: Double, ahead: Double = 1200.0, behind: Double = 60.0,
         showBikeLanes: Boolean = true,
-    ): List<Shape> {
+    ): Ribbon {
         val line = route.geometry
         val from = max(0.0, carDistance - behind)
         val to = min(line.length, carDistance + ahead)
-        if (to - from < 20) return emptyList()
+        if (to - from < 20) return Ribbon(emptyList(), emptyList())
 
         val samples = smoothedSamples(line, from, to)
-        if (samples.size < 3) return emptyList()
+        if (samples.size < 3) return Ribbon(emptyList(), emptyList())
         assignLanes(route, samples)
+
+        // Centre of the planned lane per sample. Counted from the right edge (lateral 0 = rightmost through lane),
+        // which stays put while left-turn pockets open, then smoothed over ±20 m so lane-count changes and
+        // pocket openings become gentle curves instead of steps.
+        val plan = state.plan
+        val keys = if (plan.isNotEmpty()) keyframes(state, carDistance, behind)
+        else listOf(carDistance to (state.assumedLateral ?: 0).toDouble())
+        val rawCentres = samples.map { s ->
+            val lat = interpolate(keys, s.d)
+            (s.right - (lat + s.rightPockets + 0.5) * s.w).coerceIn(s.left + 0.5 * s.w, max(s.left + 0.5 * s.w, s.right - 0.5 * s.w))
+        }
+        val centres = movingAverage(samples, rawCentres, 20.0)
+        val lanePath = samples.mapIndexed { i, s -> s.d to s.at(centres[i]) }
 
         val out = ArrayList<Shape>()
 
@@ -79,14 +108,7 @@ object LaneRibbonBuilder {
         }
 
         // Recommended lane ribbon (and the other optimal lanes just before the next site).
-        val plan = state.plan
         if (plan.isNotEmpty()) {
-            val keys = keyframes(state, carDistance, behind)
-            val centres = samples.map { s ->
-                val lat = interpolate(keys, s.d)
-                val idx = ((s.nominal - 1 - s.rightPockets) - lat).coerceIn(0.0, s.lanes - 1.0)
-                s.left + (idx + 0.5) * s.w
-            }
             val hw = samples.map { it.w * 0.36 }
             val endIdx = samples.indexOfLast { it.d <= plan.last().site.distanceAlong + 40 }.coerceAtLeast(1)
             out += polygon(
@@ -124,7 +146,26 @@ object LaneRibbonBuilder {
             out += Shape(listOf(s.at(s.left), s.at(s.left + site.laneCount * s.w)), Kind.STOP, false, 0.5)
             paintArrows(site, samples, out)
         }
-        return out
+        return Ribbon(out, lanePath)
+    }
+
+    /** Distance-weighted moving average of [v] over ±[radius] m along the samples. */
+    private fun movingAverage(samples: List<S>, v: List<Double>, radius: Double): List<Double> {
+        val prefix = DoubleArray(v.size + 1).also { p -> for (i in v.indices) p[i + 1] = p[i] + v[i] }
+        var lo = 0; var hi = 0
+        return samples.indices.map { i ->
+            while (samples[i].d - samples[lo].d > radius) lo++
+            while (hi + 1 < samples.size && samples[hi + 1].d - samples[i].d <= radius) hi++
+            (prefix[hi + 1] - prefix[lo]) / (hi - lo + 1)
+        }
+    }
+
+    /** How far before a junction turn pockets open (m): short in town, long on fast roads. */
+    private fun pocketLength(kind: RoadKind) = when (kind) {
+        RoadKind.MOTORWAY -> 250.0
+        RoadKind.TRUNK -> 150.0
+        RoadKind.RURAL -> 80.0
+        RoadKind.URBAN -> 35.0
     }
 
     // --- geometry helpers ---------------------------------------------------------------------------
@@ -166,7 +207,9 @@ object LaneRibbonBuilder {
             val next = sites.firstOrNull { it.distanceAlong >= s.d - 1 }
             val osm = route.laneCountAt(s.d)
             when {
-                next != null && next.distanceAlong - s.d < 90 -> { s.nominal = next.laneCount; s.rightPockets = next.rightPockets() }
+                next != null && next.distanceAlong - s.d < pocketLength(kind) -> {
+                    s.nominal = next.laneCount; s.rightPockets = next.rightPockets()
+                }
                 osm != null -> s.nominal = osm
                 next != null && next.distanceAlong - s.d < 500 ->
                     s.nominal = (next.laneCount - next.leftPockets() - next.rightPockets()).coerceAtLeast(1)

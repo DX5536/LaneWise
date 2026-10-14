@@ -1,0 +1,1 @@
+{"v":1,"source":"LGLN DOP20 (c) LGLN 2026, CC BY 4.0; road markings detected by LaneWise","area":"test","generated":"2026-10-14","model_val_iou":0.5447912116358459,"fields":["osm_way_id","lanes","confidence_pct"],"ways":[]}
