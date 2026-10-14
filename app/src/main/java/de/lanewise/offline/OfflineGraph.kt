@@ -33,7 +33,38 @@ class OfflineGraph(
     val featLat: IntArray = IntArray(0),
     val featLon: IntArray = IntArray(0),
     val featKind: ByteArray = ByteArray(0),
+    /** OSM turn restrictions (`type=restriction` with a via *node*); empty in graphs older than LWG4. */
+    val restrictions: TurnRestrictions = TurnRestrictions.NONE,
 ) {
+    /**
+     * `no_*`: going from way [from] via node [via] onto way [to] is forbidden. `only_*` ([only] = 1): from [from] via
+     * [via], [to] is the only way allowed. Way and node values are indices into this graph.
+     */
+    class TurnRestrictions(val from: IntArray, val via: IntArray, val to: IntArray, val only: ByteArray) {
+        val size get() = from.size
+
+        /** Restriction indices per via node. */
+        private val byVia: HashMap<Int, IntArray> by lazy {
+            val m = HashMap<Int, MutableList<Int>>()
+            for (i in 0 until size) m.getOrPut(via[i]) { ArrayList() }.add(i)
+            HashMap<Int, IntArray>(m.size).also { out -> m.forEach { (k, v) -> out[k] = v.toIntArray() } }
+        }
+
+        /** May a car coming along way [fromWay] turn into way [toWay] at node [node]? */
+        fun allows(fromWay: Int, node: Int, toWay: Int): Boolean {
+            if (size == 0) return true
+            val list = byVia[node] ?: return true
+            for (i in list) {
+                if (from[i] != fromWay) continue
+                if (only[i].toInt() == 1) { if (to[i] != toWay) return false }
+                else if (to[i] == toWay) return false
+            }
+            return true
+        }
+
+        companion object { val NONE = TurnRestrictions(IntArray(0), IntArray(0), IntArray(0), ByteArray(0)) }
+    }
+
     class Ways(
         val highway: ByteArray,
         /** km/h; [de.lanewise.osm.OsmTags.NO_LIMIT] = none, UNKNOWN = -1. */
@@ -111,7 +142,7 @@ class OfflineGraph(
     fun save(file: File) {
         val tmp = File(file.parentFile, file.name + ".tmp")
         DataOutputStream(BufferedOutputStream(GZIPOutputStream(tmp.outputStream()), 1 shl 16)).use { out ->
-            out.writeInt(MAGIC_V3)
+            out.writeInt(MAGIC_V4)
             out.writeLong(createdAt)
             bbox.forEach { out.writeDouble(it) }
             out.writeIntArr(nodeLat); out.writeIntArr(nodeLon)
@@ -127,6 +158,8 @@ class OfflineGraph(
             out.writeIntArr(featLat); out.writeIntArr(featLon)
             out.writeInt(featKind.size); out.write(featKind)
             out.writeIntArr(ways.changeLanesForward); out.writeIntArr(ways.changeLanesBackward)
+            out.writeIntArr(restrictions.from); out.writeIntArr(restrictions.via); out.writeIntArr(restrictions.to)
+            out.writeInt(restrictions.only.size); out.write(restrictions.only)
         }
         if (file.exists()) file.delete()
         tmp.renameTo(file)
@@ -136,11 +169,12 @@ class OfflineGraph(
         private const val MAGIC_V1 = 0x4C574731 // "LWG1"
         private const val MAGIC_V2 = 0x4C574732 // "LWG2": + bike lanes, traffic lights/signs
         private const val MAGIC_V3 = 0x4C574733 // "LWG3": + change:lanes (solid lines)
+        private const val MAGIC_V4 = 0x4C574734 // "LWG4": + turn restrictions
 
         fun load(file: File): OfflineGraph =
             DataInputStream(BufferedInputStream(GZIPInputStream(file.inputStream()), 1 shl 16)).use { inp ->
                 val magic = inp.readInt()
-                require(magic == MAGIC_V1 || magic == MAGIC_V2 || magic == MAGIC_V3) { "Not a LaneWise graph file" }
+                require(magic == MAGIC_V1 || magic == MAGIC_V2 || magic == MAGIC_V3 || magic == MAGIC_V4) { "Not a LaneWise graph file" }
                 val created = inp.readLong()
                 val bbox = DoubleArray(4) { inp.readDouble() }
                 val lat = inp.readIntArr(); val lon = inp.readIntArr()
@@ -158,10 +192,13 @@ class OfflineGraph(
                     val bike = ByteArray(inp.readInt()).also { inp.readFully(it) }
                     val fLat = inp.readIntArr(); val fLon = inp.readIntArr()
                     val fKind = ByteArray(inp.readInt()).also { inp.readFully(it) }
-                    val cf = if (magic == MAGIC_V3) inp.readIntArr() else IntArray(hw.size) { -1 }
-                    val cb = if (magic == MAGIC_V3) inp.readIntArr() else IntArray(hw.size) { -1 }
+                    val v3 = magic == MAGIC_V3 || magic == MAGIC_V4
+                    val cf = if (v3) inp.readIntArr() else IntArray(hw.size) { -1 }
+                    val cb = if (v3) inp.readIntArr() else IntArray(hw.size) { -1 }
+                    val tr = if (magic == MAGIC_V4) TurnRestrictions(inp.readIntArr(), inp.readIntArr(), inp.readIntArr(),
+                        ByteArray(inp.readInt()).also { inp.readFully(it) }) else TurnRestrictions.NONE
                     OfflineGraph(lat, lon, es, et, el, ew, ef, Ways(hw, mf, mb, nm, rf, tf, tb, fn, ln, strings, bike, cf, cb),
-                        bbox, created, fLat, fLon, fKind)
+                        bbox, created, fLat, fLon, fKind, tr)
                 }
             }
 

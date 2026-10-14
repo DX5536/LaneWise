@@ -1,6 +1,6 @@
 # Status & roadmap
 
-_Last updated: 2026-10-14 (v0.3: crash fix, AMAP-style view, pre-built route road, voice packs, aerial-lane pipeline)._
+_Last updated: 2026-10-14 (v0.4: turn restrictions offline, guidance with the screen off, lane reports; v0.3.1 video fixes)._
 
 ## Done (v0.1)
 - [x] Reverse-engineering notes for Petal Maps 4.7 and AMAP 17.00 lane guidance (`docs/REVERSE_ENGINEERING.md`)
@@ -96,11 +96,82 @@ _Last updated: 2026-10-14 (v0.3: crash fix, AMAP-style view, pre-built route roa
       OSM streets within 450 m, refetched every 250 m) replaces the route-only road; the route highlight stays on top.
 - [x] Lane-change hint is a countdown too: bright lime shrinks to the deadline (end of the dashed stretch / junction)
 
+## Done (v0.3.1, 2026-10-14) — owner's demo video (Brüderstraße 4 → Hauptstraße 3 Langenhagen)
+- [x] **Wrong lane highlight before left turns** (video 0:30–0:45, Celler Straße → Herschelstraße): the highlight stayed
+      in the middle straight-only lane and "move one lane to the left" came only ~50 m before the turn. Two causes:
+      (1) "lanes that open are free" was judged from the *car* to the junction, so once the car had passed the point where
+      the road widens (1 → 3 lanes) the free move suddenly became a late lane change; it is now judged from where the
+      assumed lane was established (last junction passed / lane tapped, `LaneGuidance.assumedSince`,
+      `LanePlanner.Options.assumedSince`). (2) The highlight's lane-change transition and the change instruction were
+      timed from `car + 5 m` inside the lead distance, so they slid ahead of the car and the strip at the car never left
+      the old lane; both are now fixed on the road. Same bug at the Arndtstraße right-turn pocket and Hauptstraße.
+      Tests: `laneThatOpenedBehindTheCarIsStillFree`, `changeStartDoesNotSlideWithTheCar`,
+      `highlightIsInTheOpenedTurnLaneAfterTheWidening`; the live trace (`LANEWISE_TRACE=1` with `RouteRenderLiveTest`)
+      prints what the lane bar / hint would show every 20 m.
+- [x] **Demo lag**: the live highlight (1.2 km) was rebuilt 4×/s and the route road (up to 4 km, also whenever OSM
+      corridor data arrived) built on the UI thread; both now run on a worker thread (one build at a time, newest wins),
+      only the hand-over to MapLibre stays on the UI thread.
+- [x] **Demo speed**: − / + on the DEMO badge, ×0.25 … ×8 (live; the shown speed stays the real one, so speed
+      warnings still work). DE/EN/VI accessibility labels.
+- [x] Traffic-light pop-up without the green pedestrian figure (owner's request); the push-button marker stays.
+- [x] Light mode: the recommended lane and usable-lane band are violet (`#6C4CF5`) instead of lime; the route line
+      underneath is lavender with a violet casing so the strip stands out. Dark mode unchanged (lime).
+- [x] Lane bar of a junction the route only passes through is shown only in the last 250 m (600 m motorway/trunk)
+      before it, not 900 m — under "turn right in 2.3 km" (Schulenburger Landstraße) it looked like the turn's lanes.
+
+## Done (v0.4, 2026-10-14)
+- [x] **Turn restrictions in the offline router** (was Next 3): OSM `type=restriction` relations with a via node
+      (`no_*` / `only_*`, `restriction:motorcar`, `except=motorcar` skipped) are downloaded with the region (second,
+      optional Overpass query) and stored in graph format **LWG4**; A* is now edge-based so "from way, via node, to way"
+      applies exactly. Older graph files still load (without restrictions) — re-download the region. `OfflineRouterTest`.
+- [x] **Guidance with the screen off** (was Next 5): `nav/NavigationService`, a location foreground service started by
+      "Let's go" / Demo and stopped at the end; ongoing notification with the next manoeuvre and remaining distance
+      (DE/EN/VI channel name). Asks for the notification permission on Android 13+ (optional).
+- [x] **Settings text fields debounced** (was Next 7): written 600 ms after the last keystroke / when leaving the field.
+- [x] **Lane reports** (first step of Next 0): long-press the lane bar while driving → "lanes wrong here" is saved with
+      position, road and the lanes shown (`turn:lanes` notation) to `Android/data/<package>/files/lane_reports.geojson`;
+      the file opens directly in JOSM / iD for fixing OSM. Pull it with
+      `adb pull /sdcard/Android/data/de.lanewise.app.debug/files/lane_reports.geojson`. `LaneReportsTest`.
+- [x] Lane bar of a junction before the banner's manoeuvre shows its own distance tag (video review item).
+- [x] Browse map (no route) shows traffic lights / signs too: they came only from a route before. Signal and sign
+      nodes are fetched with the nearby streets in the same Overpass query (`StreetLanes.fetchNearby`).
+- [x] Search box hint shortened to "Where to?" / "Wohin?" / "Đi đâu?" (one line).
+- Note (owner, Hildesheimer Straße × Grazer Straße): no arrows because OSM has only `lanes=2` there, no `turn:lanes`
+  (ways 29702218, 29702219, 45977791, 45977795, 1435846363) — fix in OSM, or later from the aerial arrows
+  (aerial lanes item 4).
+
+- [x] Sandbox for TomTom lanes: `ProviderCompareLiveTest` routes the test route with OSRM (OSM) and TomTom, pairs the
+      junctions, prints both lane layouts + the advice per turn, flags TomTom lane counts wider than the OSM road, and
+      writes an HTML map (`app/build/reports/lanewise/provider_compare.html`). Not run yet — waiting for a key.
+
+## Done (v0.4.1, 2026-10-14) — owner's drive screenshots
+- [x] **Wrong lane at Schiffgraben → left into Berliner Allee**: OSRM flagged the 2nd left lane, the straight lane and
+      the straight+right lane as "valid" for the left turn (`left|left|through|through;right`), and the lane bar
+      recommended the straight lane. At a real turn, provider flags that call a lane usable whose arrows cannot make
+      the turn are now ignored and the arrows decide (`LaneSite.allowed`, test `wrongProviderFlagsAtATurnAreIgnored`);
+      flags that only narrow the arrows down are still used. Live trace now recommends the leftmost lane.
+- [x] Traffic-light pop-up moved off the map into a **vertical HUD card on the left above the speed**: signal head,
+      inferred arrow signals (dashed), Grünpfeil, push button. No light count (only one signal applies to the driver's
+      lane) and no pedestrian figure; the top-left chip lost its count too.
+- [x] **Stop line at traffic lights without lane data**: one line across the drawn road at the first signal of a
+      junction (other heads within 40 m are skipped; never where a lane site already has one). `stopLineAtTrafficLightWithoutLanes`.
+- [x] **Start point**: "From: My position" in the route preview; tap to search any start (Demo then drives from there).
+      "Let's go" from elsewhere re-routes from the GPS position once you drive. DE/EN/VI.
+- [x] `RouteRenderLiveTest` takes `LANEWISE_FROM` / `LANEWISE_TO` (`lat,lon`) to check any route.
+
+## Video review — still open
+- [ ] `RouteRenderLiveTest` Schiffgraben → Berliner Allee: one road edge folds back at the `CONTINUE LEFT` bend
+      (route 1371 m) — check the offset-line pruning on tight bends.
+- [ ] Re-check the whole test route on the phone with the fixes (the video was before them).
+- [ ] Philipsbornstraße left turn (4 lanes, video 1:25–1:45) and Hauptstraße left turn (video 9:10): verify the strip
+      enters the left pocket where it opens; Overpass timed out in the PC check of the 8.4 km route option, so those
+      were only checked without OSM lane counts.
+
 ## Aerial lanes — next sessions
 1. Owner spot-checks `work/spot/index.html` → `spot_checks.csv`; hand-correct 20–50 label tiles → retrain.
 2. Run on the full `hannover` area (~2–3k tiles, ~1 h download) once agreement with OSM is good on `test`.
 3. Use aerial counts in navigation too (`SpeedLimitProvider` corridor lane spans by way id).
-4. Turn arrows from the mask → `turn:lanes` suggestions; solid lines → `change:lanes` (ties into "Next" 1).
+4. Turn arrows from the mask → `turn:lanes` suggestions; solid lines → `change:lanes` (ties into "Next" 1, solid lane lines).
 5. Optional: 2× bicubic input to the network for 1-px lines (no generative upscaler — it would invent paint).
 
 - [x] AMAP-style camera zooms out only moderately on open road (urban 17.1 / fast 16.4, was 16.3 / 15.6).
@@ -113,17 +184,18 @@ _Last updated: 2026-10-14 (v0.3: crash fix, AMAP-style view, pre-built route roa
       GitHub release not done.
 
 ## Next
-0. In-app lane corrections (owner's own observations, stored on the phone, applied over OSM), and/or
-   fixing OSM directly — wrong lane counts found so far are OSM tagging errors, not imagery (DOP20 flown 2025-03-06).
-1. Solid lines, rest: on-device check in Hannover (how well is `change:lanes` tagged?); fall back to the
-   aerial-imagery pipeline (solid vs dashed tracks are already measured there) where OSM has no `change:lanes`.
-2. Lane-count continuity between sites from OSM `lanes`/`lanes:forward` instead of the next-site approximation
+1. **Solid lane lines from aerial imagery** (owner's request 2026-10-14): draw solid dividers (and plan with them)
+   where OSM has no `change:lanes`, using the DOP20 photos as reference — the aerial pipeline already measures
+   solid vs dashed tracks per OSM way (`tools/aerial_lanes`); export them as `change:lanes`-like spans in
+   `aerial_lanes.json`, apply them in `AerialLanes` for the route corridor and the browse map, and check how well
+   `change:lanes` is tagged in Hannover on the phone first.
+2. In-app lane corrections applied over OSM (reports are saved already, see v0.4), and/or fixing OSM directly —
+   wrong lane counts found so far are OSM tagging errors, not imagery (DOP20 flown 2025-03-06).
+3. Lane reports: a share button in Settings (FileProvider) instead of `adb pull`.
+4. Lane-count continuity between sites from OSM `lanes`/`lanes:forward` instead of the next-site approximation
    (partly done: pocket length by road kind).
-3. Turn restrictions in the offline router (`type=restriction` relations).
-4. Owner's lane drawing ("coMap" sketch) was referenced but not attached in the first chat —
+5. Owner's lane drawing ("coMap" sketch) was referenced but not attached in the first chat —
    compare it with `docs/LANE_ALGORITHM.md` once shared and add it as a unit test scenario.
-5. Foreground service so guidance continues with the screen off.
 6. Android Auto / car display.
-7. Settings text fields: debounce DataStore writes.
-8. HERE Routing v8 as an additional provider; TomTom flow tiles as a traffic overlay.
-9. Optional: install `jadx-headless-mcp` for REA and decompile the Petal `hdmi` beans / AMAP lane messages.
+7. HERE Routing v8 as an additional provider; TomTom flow tiles as a traffic overlay.
+8. Optional: install `jadx-headless-mcp` for REA and decompile the Petal `hdmi` beans / AMAP lane messages.

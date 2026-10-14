@@ -26,12 +26,15 @@ on fresh open German data instead of their outdated lane data.
   when too fast (pulsing) or too slow; both offsets adjustable in Settings.
 - **Official traffic data** — Die Autobahn GmbH (roadworks/closures), TomTom, HERE, Mobilithek (VMZ Niedersachsen).
 - **Offline / satellite-only** — download Region Hannover once; afterwards map, routing, lanes and
-  speed limits work with GNSS only (GPS/Galileo/GLONASS/BeiDou), no internet.
+  speed limits work with GNSS only (GPS/Galileo/GLONASS/BeiDou), no internet; offline routes respect OSM turn restrictions.
 - **Voice** — English (default), German, Vietnamese; Android TTS or natural OmniVoice voice packs rendered on a
   PC (`tools/voice_pack/`).
 - **Lanes from aerial photos** (work in progress) — the official 20 cm LGLN photos and an ML model fill gaps in
   OSM lane data (`tools/aerial_lanes/`).
-- Light/dark mode, favourites, bike lanes, road signs, demo drive for testing at your desk.
+- **Report wrong lanes** — long-press the lane bar while driving; reports are saved as GeoJSON
+  (`lane_reports.geojson`) for fixing OpenStreetMap in JOSM / iD.
+- Guidance keeps running with the screen off (ongoing notification).
+- Light/dark mode, favourites, bike lanes, road signs, demo drive for testing at your desk (− / + on the DEMO badge: ×0.25 … ×8).
 
 ## Install
 Every push builds APKs in GitHub Actions → *Actions → Build → Artifacts → LaneWise-apks*.
@@ -63,6 +66,13 @@ Map styles are generated: `python tools/gen_map_styles.py`.
 Opt-in check of the owner's real test route (needs internet; prints rendering and lane-advice problems):
 ```bash
 LANEWISE_LIVE=1 ./gradlew testDebugUnitTest --tests '*RouteRenderLiveTest*'
+```
+`LANEWISE_ALT=0` / `1` picks the route option, `LANEWISE_TRACE=1` prints the lane bar / hint every 20 m along the route.
+
+OSM vs TomTom lane data on the same route (needs `TOMTOM_API_KEY` in `local.properties`; writes
+`app/build/reports/lanewise/provider_compare.html`):
+```bash
+LANEWISE_LIVE=1 ./gradlew testDebugUnitTest --tests '*ProviderCompareLiveTest*'
 ```
 After changing a spoken phrase, refresh the voice-pack script list: `./gradlew testDebugUnitTest -PupdateVoiceInventory`.
 

@@ -66,7 +66,7 @@ object RoadSignArt {
      * [density] scales it to the screen; bubble with a pointer at the bottom centre.
      */
     fun signalPopup(sig: de.lanewise.core.model.SignalCluster, density: Float): Bitmap {
-        val key = "sig-${sig.vehicleLights}-${sig.pedestrianLights}-${sig.greenArrow}-${sig.onDemand}-${sig.inferredArrowSignals}-$density"
+        val key = "sig-${sig.vehicleLights}-${sig.greenArrow}-${sig.onDemand}-${sig.inferredArrowSignals}-$density"
         return cache.getOrPut(key) {
             val u = 12f * density                                   // layout unit
             val items = ArrayList<(Canvas, Float) -> Unit>()       // each draws at x, returns via width list
@@ -103,16 +103,7 @@ object RoadSignArt {
                 c.drawRoundRect(plate, 0.2f * u, 0.2f * u, paint(BLACK))
                 arrow(c, x + 1.2f * u, 2.5f * u, 0.85f * u, false, GREEN)
             }
-            // Pedestrian lights.
-            if (sig.pedestrianLights > 0) item(3.2f * u) { c, x ->
-                val g = stroke(GREEN, 0.22f * u)
-                val cx = x + 0.8f * u
-                c.drawCircle(cx, 1.6f * u, 0.35f * u, paint(GREEN))
-                c.drawLine(cx, 2.0f * u, cx, 3.0f * u, g)
-                c.drawLine(cx, 2.3f * u, cx - 0.5f * u, 2.8f * u, g); c.drawLine(cx, 2.3f * u, cx + 0.5f * u, 2.8f * u, g)
-                c.drawLine(cx, 3.0f * u, cx - 0.45f * u, 3.9f * u, g); c.drawLine(cx, 3.0f * u, cx + 0.45f * u, 3.9f * u, g)
-                c.drawText("×${sig.pedestrianLights}", x + 1.5f * u, 3.0f * u, text(WHITE, 1.2f * u))
-            }
+            // Pedestrian lights are not drawn (owner: the green figure is clutter while driving).
             // Push button (Anforderungstaster).
             if (sig.onDemand) item(1.8f * u) { c, x ->
                 val box = RectF(x, 1.6f * u, x + 1.8f * u, 3.4f * u)

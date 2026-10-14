@@ -33,6 +33,8 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -241,8 +243,20 @@ private fun LabeledSlider(label: String, value: Float, range: ClosedFloatingPoin
 
 @Composable
 private fun Field(label: String, value: String, secret: Boolean = false, onChange: (String) -> Unit) {
+    // Typing edits a local copy; it is written to DataStore 600 ms after the last keystroke (and when the field leaves
+    // the screen), instead of one disk write per character.
+    var text by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(value) }
+    val latest by androidx.compose.runtime.rememberUpdatedState(onChange)
+    val stored by androidx.compose.runtime.rememberUpdatedState(value)
+    androidx.compose.runtime.LaunchedEffect(text) {
+        kotlinx.coroutines.delay(600)
+        if (text != stored) latest(text)
+    }
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose { if (text != stored) latest(text) }
+    }
     OutlinedTextField(
-        value = value, onValueChange = onChange, label = { Text(label) }, singleLine = true,
+        value = text, onValueChange = { text = it }, label = { Text(label) }, singleLine = true,
         visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
         keyboardOptions = KeyboardOptions(keyboardType = if (secret) KeyboardType.Password else KeyboardType.Uri),
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),

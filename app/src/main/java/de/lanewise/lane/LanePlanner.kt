@@ -61,6 +61,11 @@ class LanePlanner(private val config: Config = Config()) {
         val changeSpans: List<ChangeSpan> = emptyList(),
         /** Lanes in driving direction at a route distance (OSM), to tell lanes that open from lanes that existed. */
         val laneCountAt: ((Double) -> Int?)? = null,
+        /**
+         * Where [currentLateral] was last established (the junction passed last, or where the driver tapped their lane).
+         * Lanes that opened after this point are entered for free, even when the car has already passed the widening.
+         */
+        val assumedSince: Double? = null,
     )
 
     /** Moving from lane i of one site to lane j of the next: the lane entered after the junction and the changes after it. */
@@ -91,7 +96,7 @@ class LanePlanner(private val config: Config = Config()) {
             val target = site.lateral(path[k])
             val changes = when {
                 entry == null -> 0
-                k == 0 -> effectiveChanges(site, entry, target, minLanes(options, options.carDistance, site.distanceAlong))
+                k == 0 -> effectiveChanges(site, entry, target, minLanes(options, options.gapStart(), site.distanceAlong))
                 else -> transition(horizon[k - 1], path[k - 1], allowed[k - 1], site, path[k], options.freeTurnEntry,
                     minLanes(options, horizon[k - 1].distanceAlong, site.distanceAlong)).changes
             }
@@ -151,6 +156,9 @@ class LanePlanner(private val config: Config = Config()) {
         val e = target.coerceIn(lo, hi)
         return Transition(e, effectiveChanges(next, e, target, gapLanes), config.turnEntryCost * abs(e - corr))
     }
+
+    /** Start of the stretch before the first site in which lanes that open count as free (see [Options.assumedSince]). */
+    private fun Options.gapStart() = min(carDistance, assumedSince ?: carDistance)
 
     /** Fewest lanes in driving direction between [d0] and [d1] (OSM), or null if unknown. */
     fun minLanes(options: Options, d0: Double, d1: Double): Int? {
@@ -268,7 +276,7 @@ class LanePlanner(private val config: Config = Config()) {
 
         // Layer 0: from the car.
         val s0 = sites[0]
-        val gap0Lanes = minLanes(options, options.carDistance, s0.distanceAlong)
+        val gap0Lanes = minLanes(options, options.gapStart(), s0.distanceAlong)
         val gapLanes = (1 until n).map { minLanes(options, sites[it - 1].distanceAlong, sites[it].distanceAlong) }
         for (j in 0 until s0.laneCount) {
             val nc = nodeCost(0, j)

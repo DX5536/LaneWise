@@ -108,7 +108,12 @@ data class LaneSite(
 
     fun allowed(): BooleanArray {
         val pv = providerValid
-        val arr = if (pv != null && pv.size == lanes.size && pv.any { it }) {
+        // At a real turn the painted arrows decide: provider flags that call a lane usable although its arrows cannot make
+        // the turn are wrong (OSRM at Schiffgraben → Berliner Allee: left|left|through|through;right, valid = lanes 2–4).
+        val pvContradictsArrows = pv != null && pv.size == lanes.size && isManeuver && turn != LaneDir.STRAIGHT &&
+            lanes.any { LaneDir.permits(it, turn) } &&
+            pv.indices.any { pv[it] && lanes[it] != LaneDir.NONE && !LaneDir.permits(lanes[it], turn) }
+        val arr = if (pv != null && pv.size == lanes.size && pv.any { it } && !pvContradictsArrows) {
             pv.toBooleanArray()
         } else {
             BooleanArray(lanes.size) { LaneDir.permits(lanes[it], turn) }

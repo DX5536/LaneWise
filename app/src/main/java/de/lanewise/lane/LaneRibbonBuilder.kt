@@ -135,6 +135,17 @@ object LaneRibbonBuilder {
             out += Shape(listOf(s.at(s.left), s.at(s.left + site.laneCount * s.w)), Kind.STOP, false, 0.5)
             paintArrows(site, all, out)
         }
+        // Traffic lights without lane data still get a clear stop line across the road (owner's request): the first
+        // signal of a junction only (the far-side / other-direction signals follow within 40 m), never where a lane
+        // site already drew one.
+        val signals = route.features.filter { it.kind == de.lanewise.core.model.FeatureKind.TRAFFIC_SIGNALS }.sortedBy { it.distanceAlong }
+        for (sig in signals.filter { it.distanceAlong >= from && it.distanceAlong < to }) {
+            if (signals.any { it.distanceAlong < sig.distanceAlong && sig.distanceAlong - it.distanceAlong < 40 }) continue
+            if (allSites.any { it.distanceAlong - sig.distanceAlong in -15.0..40.0 }) continue
+            val s = all.minByOrNull { abs(it.d - (sig.distanceAlong - 2)) } ?: continue
+            if (abs(s.d - (sig.distanceAlong - 2)) > 6 || s.junction) continue
+            out += Shape(listOf(s.at(s.left), s.at(s.right)), Kind.STOP, false, 0.6)
+        }
         return out
     }
 
@@ -468,8 +479,11 @@ object LaneRibbonBuilder {
         val plan = state.plan
         val keys = ArrayList<Pair<Double, Double>>()
         val startLat = (state.assumedLateral ?: plan.first().site.lateral(plan.first().recommended)).toDouble()
-        keys += carDistance - behind to startLat
-        var prevD = carDistance
+        // Transitions are placed relative to where the assumed lane was established (fixed on the road), never relative
+        // to the car: anchored at the car they would slide ahead of it and the strip would stay in the old lane until
+        // the junction. A lane that opens on the way is entered as it opens (the strip is clamped to the drawn road).
+        var prevD = min(carDistance, state.assumedSince ?: carDistance)
+        keys += min(carDistance - behind, prevD) to startLat
         var cur = startLat
         val guidance = LaneGuidance()
         for (a in plan) {

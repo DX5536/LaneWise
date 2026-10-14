@@ -29,6 +29,17 @@ data class Strings(
     val recenter: String,
     val then: String,
     val demoBadge: String,
+    val demoSlower: String,
+    /** Notification channel of the ongoing navigation notification. */
+    val navChannel: String,
+    /** Route preview: start point ("From: My position"). */
+    val from: String,
+    val chooseStart: String,
+    val searchStart: String,
+    /** %d = number of reports stored. */
+    val laneReported: String,
+    val laneReportFailed: String,
+    val demoFaster: String,
     val kmh: String,
     val offline: String,
     val satellites: String,
@@ -166,12 +177,12 @@ data class Strings(
 val LocalStrings = staticCompositionLocalOf { DE }
 
 val DE = Strings(
-    searchHint = "Wohin? (z. B. Hannover Messe)", settings = "Einstellungen", myPosition = "Meine Position",
+    searchHint = "Wohin?", settings = "Einstellungen", myPosition = "Meine Position",
     markedPlace = "Markierter Ort", searchFailed = "Suche fehlgeschlagen", waitingForGps = "Warte auf GPS-Position …",
     noRoute = "Keine Route gefunden",
     computingRoute = "Berechne Route mit Spurdaten …", cancel = "Abbrechen", demo = "Demo", go = "Los geht's",
     laneNodes = "Spur-Knoten", roadworks = "Baustellen", closures = "Sperrungen",
-    recenter = "Zentrieren", then = "Dann", demoBadge = "DEMO", kmh = "km/h", offline = "offline", satellites = "Sat",
+    recenter = "Zentrieren", then = "Dann", demoBadge = "DEMO", demoSlower = "Demo langsamer", navChannel = "Navigation", from = "Von", chooseStart = "Startpunkt wählen", searchStart = "Start suchen …", laneReported = "Spuren gemeldet (%d gespeichert, lane_reports.geojson)", laneReportFailed = "Meldung konnte nicht gespeichert werden", demoFaster = "Demo schneller", kmh = "km/h", offline = "offline", satellites = "Sat",
     bikeLane = "Schutzstreifen", bikeLaneExclusive = "Radfahrstreifen", noLimit = "kein Limit",
     trafficLight = "Ampel", stopSign = "Stopp", giveWay = "Vorfahrt achten", crossing = "Zebrastreifen", railCrossing = "Bahnübergang",
     back = "‹ Zurück", appearance = "Darstellung", themeSystem = "System", themeLight = "Hell", themeDark = "Dunkel",
@@ -229,12 +240,12 @@ val DE = Strings(
 )
 
 val EN = Strings(
-    searchHint = "Where to? (e.g. Hannover Messe)", settings = "Settings", myPosition = "My position",
+    searchHint = "Where to?", settings = "Settings", myPosition = "My position",
     markedPlace = "Marked place", searchFailed = "Search failed", waitingForGps = "Waiting for GPS position …",
     noRoute = "No route found",
     computingRoute = "Calculating route with lane data …", cancel = "Cancel", demo = "Demo", go = "Let's go",
     laneNodes = "lane junctions", roadworks = "roadworks", closures = "closures",
-    recenter = "Recenter", then = "Then", demoBadge = "DEMO", kmh = "km/h", offline = "offline", satellites = "sat",
+    recenter = "Recenter", then = "Then", demoBadge = "DEMO", demoSlower = "Slower demo", navChannel = "Navigation", from = "From", chooseStart = "Choose start", searchStart = "Search start …", laneReported = "Lanes reported (%d saved, lane_reports.geojson)", laneReportFailed = "Could not save the report", demoFaster = "Faster demo", kmh = "km/h", offline = "offline", satellites = "sat",
     bikeLane = "Advisory bike lane", bikeLaneExclusive = "Bike lane", noLimit = "no limit",
     trafficLight = "Traffic light", stopSign = "Stop", giveWay = "Give way", crossing = "Zebra crossing", railCrossing = "Level crossing",
     back = "‹ Back", appearance = "Appearance", themeSystem = "System", themeLight = "Light", themeDark = "Dark",
@@ -292,12 +303,12 @@ val EN = Strings(
 )
 
 val VI = Strings(
-    searchHint = "Đi đâu? (vd. Hannover Messe)", settings = "Cài đặt", myPosition = "Vị trí của tôi",
+    searchHint = "Đi đâu?", settings = "Cài đặt", myPosition = "Vị trí của tôi",
     markedPlace = "Địa điểm đã đánh dấu", searchFailed = "Tìm kiếm thất bại", waitingForGps = "Đang chờ tín hiệu GPS …",
     noRoute = "Không tìm thấy lộ trình",
     computingRoute = "Đang tính lộ trình với dữ liệu làn đường …", cancel = "Hủy", demo = "Thử", go = "Bắt đầu",
     laneNodes = "nút làn đường", roadworks = "công trường", closures = "đoạn bị chặn",
-    recenter = "Về vị trí", then = "Sau đó", demoBadge = "THỬ", kmh = "km/h", offline = "ngoại tuyến", satellites = "vệ tinh",
+    recenter = "Về vị trí", then = "Sau đó", demoBadge = "THỬ", demoSlower = "Chạy thử chậm hơn", navChannel = "Dẫn đường", from = "Từ", chooseStart = "Chọn điểm xuất phát", searchStart = "Tìm điểm xuất phát …", laneReported = "Đã báo làn sai (%d đã lưu, lane_reports.geojson)", laneReportFailed = "Không lưu được báo cáo", demoFaster = "Chạy thử nhanh hơn", kmh = "km/h", offline = "ngoại tuyến", satellites = "vệ tinh",
     bikeLane = "Làn xe đạp (khuyến nghị)", bikeLaneExclusive = "Làn xe đạp", noLimit = "không giới hạn",
     trafficLight = "Đèn giao thông", stopSign = "Dừng lại", giveWay = "Nhường đường", crossing = "Vạch qua đường", railCrossing = "Giao cắt đường sắt",
     back = "‹ Quay lại", appearance = "Giao diện", themeSystem = "Hệ thống", themeLight = "Sáng", themeDark = "Tối",

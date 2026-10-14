@@ -23,7 +23,10 @@ class RouteRenderLiveTest {
     fun ownersRouteRendersCleanly() = runBlocking {
         assumeTrue(System.getenv("LANEWISE_LIVE") == "1")
         // Owner's test drive: Brüderstraße 4 → Hauptstraße 3, Langenhagen (Asia Haus), second route option.
-        val req = RouteRequest(LatLon(52.3784754, 9.7340973), LatLon(52.4380884, 9.7052888), alternatives = true)
+        // LANEWISE_FROM / LANEWISE_TO = "lat,lon" check any other route.
+        fun env(k: String, d: LatLon) = System.getenv(k)?.split(',')?.let { LatLon(it[0].trim().toDouble(), it[1].trim().toDouble()) } ?: d
+        val req = RouteRequest(env("LANEWISE_FROM", LatLon(52.3784754, 9.7340973)), env("LANEWISE_TO", LatLon(52.4380884, 9.7052888)),
+            alternatives = true)
         val routes = OsrmRoutingProvider().route(req)
         println("${routes.size} routes: " + routes.joinToString { "${it.distance.toInt()} m" })
         var route: Route = routes.getOrElse(System.getenv("LANEWISE_ALT")?.toIntOrNull() ?: 1) { routes.first() }
@@ -79,6 +82,20 @@ class RouteRenderLiveTest {
             val a = state.nextAdvice ?: continue
             println("  before step @${st.distanceAlong.toInt()} ${st.maneuver.modifier}: next site @${a.site.distanceAlong.toInt()} " +
                 "lanes=${a.site.lanes} turn=${a.site.turn} rec=${a.recommended}")
+        }
+        // 4) Trace of the guidance while driving (LANEWISE_TRACE=1): what the lane bar and hint would show.
+        if (System.getenv("LANEWISE_TRACE") == "1") {
+            val g3 = LaneGuidance()
+            var d = 0.0
+            while (d < route.distance) {
+                val s = g3.update(route.laneSites, d, true, true, route.laneChanges,
+                    route::laneCountAt.takeIf { route.laneCounts.isNotEmpty() })
+                val a = s.nextAdvice
+                if (a != null && a.site.distanceAlong - d < 400) println("  car ${d.toInt()} lanesHere=${route.laneCountAt(d)} assumed=${s.assumedLateral} " +
+                    "site@${a.site.distanceAlong.toInt()} ${a.site.lanes} turn=${a.site.turn} man=${a.site.isManeuver} rec=${a.recommended} " +
+                    "chg=${a.changeFromPrevious} pending=${s.pendingChange?.let { "${it.lanes}@${it.startAt.toInt()}" }}")
+                d += 20.0
+            }
         }
         println("problems: $problems")
     }

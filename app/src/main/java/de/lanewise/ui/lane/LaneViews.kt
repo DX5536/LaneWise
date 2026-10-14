@@ -9,6 +9,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -61,6 +62,10 @@ private fun usedBits(mask: Int, turn: Int): Int {
 fun LaneBar(
     advice: LaneAdvice, modifier: Modifier = Modifier, bikeColor: Color? = null, onLaneTap: (Int) -> Unit = {},
     docked: Boolean = false,
+    /** Long-press on any lane: "lanes wrong here" report. */
+    onLongPress: (() -> Unit)? = null,
+    /** Small distance tag on the left (lanes of a junction before the manoeuvre shown in the banner). */
+    distanceLabel: String? = null,
 ) {
     val c = LocalLaneColors.current
     val site = advice.site
@@ -74,6 +79,11 @@ fun LaneBar(
         horizontalArrangement = Arrangement.spacedBy(2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (distanceLabel != null) {
+            Text(distanceLabel, color = Color.White.copy(alpha = 0.85f), fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(end = 4.dp).clip(RoundedCornerShape(6.dp)).background(Color(0x33FFFFFF))
+                    .padding(horizontal = 5.dp, vertical = 2.dp))
+        }
         site.lanes.forEachIndexed { i, mask ->
             val recommended = i == advice.recommended
             val optimal = advice.optimal.getOrElse(i) { false }
@@ -89,7 +99,7 @@ fun LaneBar(
                 (if (docked) Modifier.weight(1f).height(52.dp) else Modifier.size(width = 44.dp, height = 52.dp))
                     .clip(RoundedCornerShape(10.dp))
                     .background(if (recommended) Color(0x33B8F33A) else Color.Transparent)
-                    .clickable { onLaneTap(i) },
+                    .combinedClickable(onClick = { onLaneTap(i) }, onLongClick = onLongPress),
                 contentAlignment = Alignment.Center,
             ) {
                 Canvas(Modifier.size(34.dp)) {

@@ -78,6 +78,8 @@ data class UiState(
     val gnss: GnssInfo = GnssInfo(),
     val online: Boolean = true,
     val simulating: Boolean = false,
+    /** Demo playback speed (×1 = real driving time). */
+    val demoSpeed: Double = 1.0,
     val message: String? = null,
     val incidents: List<TrafficIncident> = emptyList(),
     val offlineGraphReady: Boolean = false,
@@ -93,6 +95,11 @@ data class UiState(
     val places: List<SavedPlace> = emptyList(),
     /** Streets around the car with lane data, shown while not navigating. */
     val nearbyStreets: List<de.lanewise.osm.OsmStreet> = emptyList(),
+    /** Start of the route when not the current position (route preview "From"); null = GPS position. */
+    val origin: Place? = null,
+    val originResults: List<Place> = emptyList(),
+    /** Traffic lights / signs around the car for the browse map (a route brings its own). */
+    val nearbyFeatures: List<de.lanewise.core.model.RoadFeature> = emptyList(),
 ) {
     val selectedRoute get() = routes.getOrNull(selected)
 }
@@ -168,6 +175,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             ((it.deadline - snap.distanceAlong) / (it.deadline - from).coerceAtLeast(1.0)).toFloat().coerceIn(0f, 1f)
         }
         _ui.update { it.copy(nav = snap, laneHint = hint, laneHintCountdown = countdown) }
+        updateNavNotification(snap, phrases)
         if (s.voice) ann.sortedByDescending { it.priority }.forEach { voice.speak(it) }
         if (s.overSpeedSound && snap.speedStatus == SpeedStatus.OVER && (fix.timeMs / 1000) % 5 == 0L) voice.beep()
         if (snap.arrived) { stopNavigation(); _ui.update { it.copy(message = phrases.instruction(snap.route.steps.last())) }; return }
@@ -191,9 +199,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (streetsJob?.isActive == true || !isOnline()) return
         streetsCenter = p
         streetsJob = viewModelScope.launch {
-            val streets = runCatching { de.lanewise.osm.StreetLanes.fetch(p) }.getOrNull()
+            val nearby = runCatching { de.lanewise.osm.StreetLanes.fetchNearby(p) }.getOrNull()
+            val streets = nearby?.streets
             if (streets == null) { streetsCenter = c; return@launch }   // retry on next fix
-            _ui.update { it.copy(nearbyStreets = streets) }
+            _ui.update { it.copy(nearbyStreets = streets, nearbyFeatures = nearby?.features.orEmpty()) }
         }
     }
 
@@ -243,6 +252,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private var originJob: Job? = null
+
+    /** Search for a start point (route preview "From"). */
+    fun onOriginQuery(q: String) {
+        originJob?.cancel()
+        if (q.length < 3) { _ui.update { it.copy(originResults = emptyList()) }; return }
+        originJob = viewModelScope.launch {
+            delay(350)
+            val res = runCatching { geocoder.search(q, _ui.value.fix?.position) }
+            _ui.update { it.copy(originResults = res.getOrDefault(emptyList()),
+                message = res.exceptionOrNull()?.let { e -> "${strings.searchFailed}: ${e.message}" }) }
+        }
+    }
+
+    /** Route from [place] instead of the current position; null = back to the GPS position. Recomputes the routes. */
+    fun chooseOrigin(place: Place?) {
+        _ui.update { it.copy(origin = place, originResults = emptyList()) }
+        if (_ui.value.destination != null) computeRoutes()
+    }
+
     fun chooseDestination(place: Place) {
         _ui.update { it.copy(destination = place, results = emptyList(), query = place.title, mode = Mode.PREVIEW) }
         computeRoutes()
@@ -264,7 +293,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun selectRoute(i: Int) = _ui.update { it.copy(selected = i) }
 
-    fun cancelPreview() = _ui.update { it.copy(mode = Mode.BROWSE, routes = emptyList(), destination = null, query = "") }
+    fun cancelPreview() = _ui.update { it.copy(mode = Mode.BROWSE, routes = emptyList(), destination = null, query = "", origin = null, originResults = emptyList()) }
 
     fun clearMessage() = _ui.update { it.copy(message = null) }
 
@@ -295,14 +324,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun computeRoutes(origin: LatLon? = null, heading: Double? = null) {
         val dest = _ui.value.destination ?: return
-        val from = origin ?: _ui.value.fix?.position ?: run {
+        val custom = _ui.value.origin?.position
+        val from = origin ?: custom ?: _ui.value.fix?.position ?: run {
             _ui.update { it.copy(message = strings.waitingForGps) }; return
         }
         val s = settings.value
         viewModelScope.launch {
             _ui.update { it.copy(routing = true) }
             val online = isOnline()
-            val req = RouteRequest(from, dest.position, heading, alternatives = true, avoidTolls = s.avoidTolls, avoidMotorways = s.avoidMotorways)
+            val req = RouteRequest(from, dest.position, heading.takeIf { origin != null || custom == null }, alternatives = true,
+                avoidTolls = s.avoidTolls, avoidMotorways = s.avoidMotorways)
             var routes: List<Route> = emptyList()
             var lastError: String? = null
             for (p in providers(s, online)) {
@@ -374,11 +405,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         engine = NavigationEngine(route, laneGuidance)
         speedFetchedUntil = 0.0
         _ui.update { it.copy(mode = Mode.NAVIGATING, simulating = simulate, routes = listOf(route), selected = 0) }
+        notifText = ""
+        de.lanewise.nav.NavigationService.start(ctx, "LaneWise", route.steps.firstOrNull()?.name.orEmpty(),
+            Strings.of(settings.value.language).navChannel)
         if (route.provider != "offline" && isOnline()) fetchCorridor(route, 0.0)
         navJob?.cancel()
         if (simulate) {
             navJob = viewModelScope.launch {
-                SimulatedLocationSource(route.geometry, { d -> (currentRoute?.speedLimitAt(d)?.kmh ?: 50).toDouble() }).fixes()
+                SimulatedLocationSource(route.geometry, { d -> (currentRoute?.speedLimitAt(d)?.kmh ?: 50).toDouble() }, { _ui.value.demoSpeed }).fixes()
                     .collect { onFix(it) }
             }
         } else {
@@ -397,11 +431,51 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private var notifText = ""
+
+    /** Ongoing notification (screen off / app in background): next manoeuvre, distance rounded like the banner. */
+    private fun updateNavNotification(snap: NavSnapshot, phrases: Phrases) {
+        val step = snap.nextStep ?: return
+        val title = phrases.distance(snap.distanceToNextStep) + " · " + phrases.instruction(step)
+        val text = phrases.distance(snap.remainingDistance)
+        if (title + text == notifText) return
+        notifText = title + text
+        de.lanewise.nav.NavigationService.update(ctx, title, text, Strings.of(settings.value.language).navChannel)
+    }
+
+    /** Demo only: one step slower / faster through [DEMO_SPEEDS]. */
+    fun changeDemoSpeed(faster: Boolean) {
+        _ui.update { st ->
+            val i = DEMO_SPEEDS.indexOfFirst { it >= st.demoSpeed }.let { if (it < 0) DEMO_SPEEDS.lastIndex else it }
+            st.copy(demoSpeed = DEMO_SPEEDS[(i + if (faster) 1 else -1).coerceIn(0, DEMO_SPEEDS.lastIndex)])
+        }
+    }
+
     fun stopNavigation() {
         navJob?.cancel(); trafficJob?.cancel()
+        de.lanewise.nav.NavigationService.stop(ctx)
         engine = null; currentRoute = null
-        _ui.update { it.copy(mode = Mode.BROWSE, nav = null, simulating = false, routes = emptyList(), destination = null, laneHint = null, laneHintCountdown = null) }
+        _ui.update { it.copy(mode = Mode.BROWSE, nav = null, simulating = false, routes = emptyList(), destination = null, laneHint = null, laneHintCountdown = null,
+            origin = null, originResults = emptyList()) }
     }
+
+    /** Long-press on the lane bar: remember this spot as "lanes wrong here" (GeoJSON for fixing OSM later). */
+    fun reportLanes() {
+        val nav = _ui.value.nav ?: return
+        val advice = nav.lanes.nextAdvice ?: return
+        val strings = Strings.of(settings.value.language)
+        val road = nav.route.steps.lastOrNull { it.distanceAlong <= nav.distanceAlong }?.name.orEmpty()
+        val report = de.lanewise.osm.LaneReports.Report(nav.fix.position, System.currentTimeMillis(), road,
+            de.lanewise.osm.LaneReports.turnLanes(advice.site.lanes), advice.site.distanceAlong.toInt())
+        viewModelScope.launch {
+            val n = withContext(Dispatchers.IO) {
+                runCatching { de.lanewise.osm.LaneReports.append(laneReportFile(), report) }.getOrNull()
+            }
+            _ui.update { it.copy(message = if (n != null) String.format(strings.laneReported, n) else strings.laneReportFailed) }
+        }
+    }
+
+    fun laneReportFile() = File(ctx.getExternalFilesDir(null) ?: ctx.filesDir, "lane_reports.geojson")
 
     fun overrideLane(index: Int) {
         val advice = _ui.value.nav?.lanes?.nextAdvice ?: return
@@ -521,7 +595,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
+        de.lanewise.nav.NavigationService.stop(ctx)
         voice.shutdown()
         super.onCleared()
+    }
+
+    companion object {
+        /** Demo playback speeds (× real driving time). */
+        val DEMO_SPEEDS = listOf(0.25, 0.5, 1.0, 2.0, 4.0, 8.0)
     }
 }

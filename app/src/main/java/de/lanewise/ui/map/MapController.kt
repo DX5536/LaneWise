@@ -42,6 +42,12 @@ import org.maplibre.geojson.FeatureCollection
 import org.maplibre.geojson.LineString
 import org.maplibre.geojson.Point
 import org.maplibre.geojson.Polygon
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.abs
 
 /**
@@ -82,6 +88,12 @@ class MapController(private val context: Context) {
     private var offRoutePos: LatLon? = null
     private var offRouteBearing = 0.0
     private var frameRunning = false
+    /** Lane geometry is built off the UI thread (it was the demo's stutter); one build at a time, latest request wins. */
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var geomJob: Job? = null
+    private var geomPending: (() -> Unit)? = null
+    /** Bumped when lanes are cleared, so a build that finishes afterwards is dropped. */
+    private var geomGeneration = 0
     private val choreographer by lazy { Choreographer.getInstance() }
     private val frame = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) {
@@ -156,13 +168,14 @@ class MapController(private val context: Context) {
             PropertyFactory.lineCap(Property.LINE_CAP_ROUND), PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
         ))
         add(LineLayer("route-casing", SRC_ROUTE).withProperties(
-            PropertyFactory.lineColor("#4A33B8"),
+            PropertyFactory.lineColor(if (isDark) "#4A33B8" else "#6C4CF5"),
             PropertyFactory.lineWidth(Expression.interpolate(Expression.exponential(1.5f), Expression.zoom(),
                 Expression.stop(10, 6f), Expression.stop(18, 22f))),
             PropertyFactory.lineCap(Property.LINE_CAP_ROUND), PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
         ))
         add(LineLayer("route-line", SRC_ROUTE).withProperties(
-            PropertyFactory.lineColor(if (isDark) "#9A82FF" else "#6C4CF5"),
+            // Light mode: lavender line so the violet lane highlight on top of it stands out.
+            PropertyFactory.lineColor(if (isDark) "#9A82FF" else "#C9BEFF"),
             PropertyFactory.lineWidth(Expression.interpolate(Expression.exponential(1.5f), Expression.zoom(),
                 Expression.stop(10, 4f), Expression.stop(18, 16f))),
             PropertyFactory.lineCap(Property.LINE_CAP_ROUND), PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
@@ -174,8 +187,10 @@ class MapController(private val context: Context) {
         ))
         fill("lane-surface", "SURFACE", if (isDark) 0xFF1C1F27.toInt() else 0xFF2B2F38.toInt(), 0.97f)
         fill("lane-bike", "BIKE", bikeColor, 0.9f)
-        fill("lane-allowed", "ALLOWED", 0xFFB8F33A.toInt(), 0.28f, SRC_LANES_DYN)
-        fill("lane-recommended", "RECOMMENDED", 0xFFB8F33A.toInt(), 0.85f, SRC_LANES_DYN)
+        // Highlight: lime on the dark map, violet on the light map (lime has too little contrast on light grey).
+        val highlight = if (isDark) 0xFFB8F33A.toInt() else 0xFF6C4CF5.toInt()
+        fill("lane-allowed", "ALLOWED", highlight, if (isDark) 0.28f else 0.3f, SRC_LANES_DYN)
+        fill("lane-recommended", "RECOMMENDED", highlight, if (isDark) 0.85f else 0.95f, SRC_LANES_DYN)
         fill("lane-arrow", "ARROW", 0xFFFFFFFF.toInt(), 0.92f)
         add(LineLayer("lane-stop", SRC_LANES).withFilter(kind("STOP")).withProperties(
             PropertyFactory.lineColor("#FFFFFF"), PropertyFactory.lineWidth(metresToPixels()),
@@ -320,17 +335,22 @@ class MapController(private val context: Context) {
     /** Lane-level shapes (route lanes while navigating, all nearby streets otherwise). */
     fun setLaneShapes(shapes: List<LaneRibbonBuilder.Shape>) = setShapes(SRC_LANES, shapes)
 
-    private fun setShapes(src: String, shapes: List<LaneRibbonBuilder.Shape>) {
+    private fun setShapes(src: String, shapes: List<LaneRibbonBuilder.Shape>) = setFeatures(src, features(shapes))
+
+    private fun setFeatures(src: String, fc: FeatureCollection) {
         val s = style ?: return
-        (s.getSource(src) as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(shapes.map { sh ->
-            val geom = if (sh.polygon) Polygon.fromLngLats(listOf(sh.points.map { Point.fromLngLat(it.lon, it.lat) }))
-            else line(sh.points)
-            Feature.fromGeometry(geom).apply {
-                addStringProperty("k", sh.kind.name)
-                addNumberProperty("w", sh.widthM)
-            }
-        }))
+        (s.getSource(src) as? GeoJsonSource)?.setGeoJson(fc)
     }
+
+    /** Plain object building, safe off the UI thread. */
+    private fun features(shapes: List<LaneRibbonBuilder.Shape>): FeatureCollection = FeatureCollection.fromFeatures(shapes.map { sh ->
+        val geom = if (sh.polygon) Polygon.fromLngLats(listOf(sh.points.map { Point.fromLngLat(it.lon, it.lat) }))
+        else line(sh.points)
+        Feature.fromGeometry(geom).apply {
+            addStringProperty("k", sh.kind.name)
+            addNumberProperty("w", sh.widthM)
+        }
+    })
 
     /** Pop-up with the traffic-light set-up of [sig] at its junction, or none. */
     fun showSignalPopup(sig: de.lanewise.core.model.SignalCluster?) {
@@ -346,31 +366,70 @@ class MapController(private val context: Context) {
     }
 
     fun clearLanes() {
+        geomGeneration++
+        clearLaneSources()
+    }
+
+    private fun clearLaneSources() {
         (style?.getSource(SRC_LANES) as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(emptyList()))
         (style?.getSource(SRC_LANES_DYN) as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(emptyList()))
         roadRoute = null; shownChunks = emptySet()
     }
 
     // The route's road, pre-built per [ROAD_CHUNK] and kept: rebuilt only when the route (or its OSM data) changes.
-    private var roadRoute: Route? = null
+    @Volatile private var roadRoute: Route? = null
     private var roadBikes = true
     private val roadChunks = HashMap<Int, List<LaneRibbonBuilder.Shape>>()
     private var shownChunks: Set<Int> = emptySet()
 
-    private fun updateRoad(route: Route, along: Double, showBikeLanes: Boolean) {
+    /**
+     * Road chunks for [along] (runs on a worker thread; [roadChunks] is only touched by the single geometry job).
+     * Returns the chunk set and its features if it differs from what is shown, else null.
+     */
+    private fun buildRoad(route: Route, along: Double, showBikeLanes: Boolean, shown: Set<Int>): Pair<Set<Int>, FeatureCollection>? {
         if (route !== roadRoute || showBikeLanes != roadBikes) {
-            roadRoute = route; roadBikes = showBikeLanes; roadChunks.clear(); shownChunks = emptySet()
+            roadRoute = route; roadBikes = showBikeLanes; roadChunks.clear()
+            return buildRoad(route, along, showBikeLanes, emptySet())
         }
         val last = (route.distance / ROAD_CHUNK).toInt()
         val first = ((along - 300) / ROAD_CHUNK).toInt().coerceIn(0, last)
         val want = (first..((along + 2500) / ROAD_CHUNK).toInt().coerceAtMost(last)).toSet()
-        if (want == shownChunks) return
+        if (want == shown) return null
         for (c in want) roadChunks.getOrPut(c) {
             LaneRibbonBuilder.buildRoad(route, c * ROAD_CHUNK, minOf(route.distance, (c + 1) * ROAD_CHUNK), showBikeLanes)
         }
         roadChunks.keys.retainAll { it in (first - 1)..(want.max() + 1) }
-        setShapes(SRC_LANES, want.sorted().flatMap { roadChunks[it].orEmpty() })
-        shownChunks = want
+        return want to features(want.sorted().flatMap { roadChunks[it].orEmpty() })
+    }
+
+    /** Builds highlight (+ road) on a worker, then hands the result to the map on the UI thread. */
+    private fun requestGeometry(snap: NavSnapshot, along: Double, showRibbons: Boolean, showBikeLanes: Boolean, streetsMode: Boolean) {
+        val work = {
+            val gen = geomGeneration
+            val shown = if (streetsMode) emptySet() else shownChunks
+            geomJob = scope.launch {
+                val result = runCatching {
+                    withContext(Dispatchers.Default) {
+                        val r = LaneRibbonBuilder.build(snap.route, snap.lanes, along)
+                        val road = if (showRibbons && !streetsMode) buildRoad(snap.route, along, showBikeLanes, shown) else null
+                        Triple(r, if (showRibbons) features(r.shapes) else null, road)
+                    }
+                }.getOrNull()
+                if (result != null && tweenRoute != null) {
+                    val (r, live, road) = result
+                    ribbon = r
+                    if (live != null && gen == geomGeneration) {
+                        if (streetsMode) shownChunks = emptySet()
+                        road?.let { (set, fc) -> setFeatures(SRC_LANES, fc); shownChunks = set }
+                        setFeatures(SRC_LANES_DYN, live)
+                    }
+                }
+                val next = geomPending
+                geomPending = null
+                next?.invoke()
+            }
+        }
+        if (geomJob?.isActive == true) geomPending = work else work()
     }
 
     fun updateCar(position: LatLon, bearing: Double) {
@@ -437,18 +496,20 @@ class MapController(private val context: Context) {
             (s.getLayer("lane-stop") as? LineLayer)?.setProperties(PropertyFactory.lineWidth(metresToPixels()))
         }
 
-        val r = if (snap.offRoute) null else LaneRibbonBuilder.build(route, snap.lanes, along)
-        ribbon = r
-        if (showRibbons && r != null) {
+        if (snap.offRoute) {
+            ribbon = null
+            clearLanes()
+        } else {
+            if (!showRibbons) clearLaneSources()
             // Streets mode: the street layer (all streets around the car) stays, only the highlight is the route's.
-            if (streetsMode) shownChunks = emptySet() else updateRoad(route, along, showBikeLanes)
-            setShapes(SRC_LANES_DYN, r.shapes)
-        } else clearLanes()
+            requestGeometry(snap, along, showRibbons, showBikeLanes, streetsMode)
+        }
 
         if (!frameRunning) { frameRunning = true; choreographer.postFrameCallback(frame) }
     }
 
     fun stopTween() {
+        geomGeneration++; geomPending = null
         tweenRoute = null; offRoutePos = null; ribbon = null
         (style?.getSource(SRC_LANES_DYN) as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(emptyList()))
         roadRoute = null; shownChunks = emptySet()

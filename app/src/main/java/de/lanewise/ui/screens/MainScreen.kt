@@ -2,8 +2,12 @@ package de.lanewise.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -113,10 +117,11 @@ fun MainScreen(vm: MainViewModel, ui: UiState, settings: AppSettings, dark: Bool
         LaunchedEffect(dark) { controller.setDark(dark) }
         LaunchedEffect(settings.bikeLaneColor) { controller.setBikeColor(settings.bikeLaneColor) }
         LaunchedEffect(settings.satellite, dark) { controller.setSatellite(settings.satellite) }
-        LaunchedEffect(ui.routes, ui.selected, ui.mode, ui.destination, settings.showSigns) {
+        LaunchedEffect(ui.routes, ui.selected, ui.mode, ui.destination, settings.showSigns, ui.nearbyFeatures) {
             val main = ui.selectedRoute
             controller.showRoutes(main, ui.routes.filterIndexed { i, _ -> i != ui.selected }, ui.destination?.position)
-            controller.showFeatures(main?.features.orEmpty(), settings.showSigns)
+            // Without a route: the lights / signs around the car (fetched with the nearby streets).
+            controller.showFeatures(if (main != null) main.features else ui.nearbyFeatures, settings.showSigns)
             if (ui.mode == Mode.PREVIEW && main != null) controller.overview(main, 420, 900)
         }
         LaunchedEffect(ui.incidents) { controller.showIncidents(ui.incidents) }
@@ -133,7 +138,8 @@ fun MainScreen(vm: MainViewModel, ui: UiState, settings: AppSettings, dark: Bool
         }
         // AMAP-style traffic-light pop-up at the next signalised junction (within 250 m, while navigating).
         val sig = ui.nav?.signals?.takeIf { settings.showSigns && it.distance < 250 && ui.mode == Mode.NAVIGATING }
-        LaunchedEffect(sig?.position, sig?.vehicleLights, sig?.inferredArrowSignals, sig?.greenArrow) { controller.showSignalPopup(sig) }
+        // The signal pop-up is a HUD card now (left, above the speed); keep the old map pop-up empty.
+        LaunchedEffect(Unit) { controller.showSignalPopup(null) }
         LaunchedEffect(ui.nav) {
             ui.nav?.let {
                 controller.updateNavigation(
@@ -225,7 +231,7 @@ private fun BrowseOverlay(vm: MainViewModel, ui: UiState, settings: AppSettings,
                 Icon(painterResource(R.drawable.ic_search), null, tint = c.onChip.copy(alpha = 0.7f))
                 TextField(
                     value = ui.query, onValueChange = vm::onQuery, modifier = Modifier.weight(1f),
-                    placeholder = { Text(str.searchHint) }, singleLine = true,
+                    placeholder = { Text(str.searchHint, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }, singleLine = true,
                     colors = TextFieldDefaults.colors(
                         focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent,
                         focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
@@ -364,6 +370,7 @@ private fun PreviewOverlay(vm: MainViewModel, ui: UiState, phrases: Phrases) {
     val c = LocalLaneColors.current
     val str = LocalStrings.current
     var saving by remember { mutableStateOf(false) }
+    var pickingStart by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
         Column(
             Modifier.align(Alignment.BottomCenter).fillMaxWidth().clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
@@ -376,6 +383,17 @@ private fun PreviewOverlay(vm: MainViewModel, ui: UiState, phrases: Phrases) {
                     ui.destination?.subtitle?.takeIf { it.isNotBlank() }?.let { Text(it, color = c.onChip.copy(alpha = 0.65f), fontSize = 13.sp) }
                 }
                 TextButton({ saving = true }) { Text("★ " + str.save) }
+            }
+            // Start point: GPS position by default, any searched place on tap (plan / demo a drive from elsewhere).
+            Row(
+                Modifier.fillMaxWidth().padding(top = 8.dp).clip(RoundedCornerShape(12.dp))
+                    .background(c.onChip.copy(alpha = 0.06f)).clickable { pickingStart = true }.padding(horizontal = 12.dp, vertical = 9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(str.from + ": ", color = c.onChip.copy(alpha = 0.65f), fontSize = 14.sp)
+                Text(ui.origin?.title ?: str.myPosition, color = c.onChip, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Text("✎", color = MaterialTheme.colorScheme.primary, fontSize = 16.sp)
             }
             Spacer(Modifier.height(12.dp))
             if (ui.routing) {
@@ -397,10 +415,40 @@ private fun PreviewOverlay(vm: MainViewModel, ui: UiState, phrases: Phrases) {
             }
         }
     }
+    if (pickingStart) StartPickerDialog(vm, ui) { pickingStart = false }
     val dest = ui.destination
     if (saving && dest != null) {
         SavePlaceDialog(dest, onSave = { kind, name -> vm.savePlace(kind, name, dest); saving = false }) { saving = false }
     }
+}
+
+/** Search a start point, or go back to the GPS position. */
+@Composable
+private fun StartPickerDialog(vm: MainViewModel, ui: UiState, onDismiss: () -> Unit) {
+    val str = LocalStrings.current
+    var q by remember { mutableStateOf("") }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = { vm.onOriginQuery(""); onDismiss() },
+        title = { Text(str.chooseStart) },
+        text = {
+            Column {
+                androidx.compose.material3.OutlinedTextField(
+                    value = q, onValueChange = { q = it; vm.onOriginQuery(it) }, singleLine = true,
+                    placeholder = { Text(str.searchStart) }, modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                Text("◎  " + str.myPosition, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.fillMaxWidth().clickable { vm.chooseOrigin(null); onDismiss() }.padding(vertical = 10.dp))
+                ui.originResults.take(6).forEach { p ->
+                    Column(Modifier.fillMaxWidth().clickable { vm.chooseOrigin(p); onDismiss() }.padding(vertical = 8.dp)) {
+                        Text(p.title, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (p.subtitle.isNotBlank()) Text(p.subtitle, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton({ vm.onOriginQuery(""); onDismiss() }) { Text(str.cancel) } },
+    )
 }
 
 @Composable
@@ -480,7 +528,13 @@ private fun NavigationOverlay(
                 val distToSite = advice?.let { it.site.distanceAlong - nav.distanceAlong } ?: Double.MAX_VALUE
                 // Only lanes that belong to the coming manoeuvre (or junctions before it): never the lanes of a junction
                 // after the next turn (e.g. "turn left" here, lanes of a right turn 600 m later).
-                val showLanes = advice != null && distToSite < 900 &&
+                // A junction the route only passes through, far before the manoeuvre in the banner, is shown just shortly
+                // before it (owner's video: lanes of side junctions under "turn right in 2.3 km" looked like the turn's).
+                val passThrough = advice != null && !advice.site.isManeuver &&
+                    (next == null || next.distanceAlong - advice.site.distanceAlong > 80) &&
+                    nav.lanes.pendingChange?.site != advice.site
+                val fastRoad = advice?.site?.roadKind.let { it == de.lanewise.lane.RoadKind.MOTORWAY || it == de.lanewise.lane.RoadKind.TRUNK }
+                val showLanes = advice != null && distToSite < (if (passThrough) (if (fastRoad) 600.0 else 250.0) else 900.0) &&
                     (next == null || advice.site.distanceAlong <= next.distanceAlong + 10)
                 ManeuverBanner(
                     step = next,
@@ -495,7 +549,9 @@ private fun NavigationOverlay(
                     if (showLanes && advice != null) {
                         Spacer(Modifier.height(3.dp))
                         LaneBar(advice, bikeColor = nav.bikeLane.takeIf { settings.showBikeLanes }?.let { bikeColor },
-                            onLaneTap = vm::overrideLane, docked = true)
+                            onLaneTap = vm::overrideLane, onLongPress = vm::reportLanes, docked = true,
+                            // Lanes of a junction before the banner's manoeuvre get their own distance.
+                            distanceLabel = if (passThrough) phrases.distance(distToSite) else null)
                     }
                 }
             }
@@ -519,6 +575,12 @@ private fun NavigationOverlay(
         }
 
         SpeedPanel(nav.fix.speedKmh, nav.speedStatus, Modifier.align(Alignment.CenterStart).padding(start = 12.dp, top = 160.dp))
+        // Next traffic light (< 250 m): vertical card just above the speed panel (its top is ~40 dp below the centre).
+        nav.signals?.takeIf { settings.showSigns && it.distance < 250 }?.let { sig ->
+            Box(Modifier.align(Alignment.CenterStart).padding(start = 12.dp).requiredHeight(400.dp).offset(y = (-158).dp)) {
+                de.lanewise.ui.hud.SignalCard(sig, Modifier.align(Alignment.BottomStart))
+            }
+        }
         if (!following) {
             OutlinedButton(
                 onClick = onRecenter,
@@ -528,8 +590,26 @@ private fun NavigationOverlay(
             ) { Text(str.recenter, fontWeight = FontWeight.Bold) }
         }
         if (ui.simulating) {
-            Text(str.demoBadge, Modifier.align(Alignment.CenterEnd).padding(end = 12.dp).clip(RoundedCornerShape(8.dp))
-                .background(Color(0xFF6C4CF5)).padding(horizontal = 8.dp, vertical = 3.dp), color = Color.White, fontSize = 12.sp)
+            // Demo badge with playback speed: − / × / + (live, the simulated car speeds up or slows down at once).
+            Column(
+                Modifier.align(Alignment.CenterEnd).padding(end = 12.dp).clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFF6C4CF5)).padding(horizontal = 4.dp, vertical = 3.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(str.demoBadge, color = Color.White, fontSize = 12.sp)
+                val speed = ui.demoSpeed
+                Text(if (speed < 1) "×${speed.toString().trimEnd('0')}" else "×${speed.toInt()}",
+                    color = Color(0xFFB8F33A), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Row {
+                    for ((faster, label, desc) in listOf(Triple(false, "−", str.demoSlower), Triple(true, "+", str.demoFaster))) {
+                        Box(
+                            Modifier.size(32.dp).clip(RoundedCornerShape(8.dp)).clickable { vm.changeDemoSpeed(faster) }
+                                .semantics { contentDescription = desc },
+                            contentAlignment = Alignment.Center,
+                        ) { Text(label, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
+                    }
+                }
+            }
         }
         EtaBar(
             remainingText = formatDuration(nav.remainingSeconds),

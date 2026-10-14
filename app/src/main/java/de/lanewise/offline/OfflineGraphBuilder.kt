@@ -56,6 +56,22 @@ class OfflineGraphBuilder {
             }
         }
         coroutineContext.ensureActive()
+        // Turn restrictions (no left turn, only straight on, …). Optional: without them routing still works.
+        runCatching {
+            Overpass.stream("[out:json][timeout:300];rel[\"type\"=\"restriction\"]($bbox);out body qt;") { resp ->
+                val body = resp.body ?: throw IOException("Overpass: empty body")
+                JsonReader(InputStreamReader(body.byteStream(), Charsets.UTF_8)).use { r ->
+                    r.beginObject()
+                    while (r.hasNext()) {
+                        if (r.nextName() == "elements") {
+                            r.beginArray(); while (r.hasNext()) readRestriction(r, acc); r.endArray()
+                        } else r.skipValue()
+                    }
+                    r.endObject()
+                }
+            }
+        }
+        coroutineContext.ensureActive()
         progress(strings.dlBuild)
         val graph = acc.toGraph(doubleArrayOf(region.south, region.west, region.north, region.east))
         progress(strings.dlSave)
@@ -64,8 +80,53 @@ class OfflineGraphBuilder {
         graph
     }
 
+    /** One `type=restriction` relation with from way, via node and to way. */
+    private fun readRestriction(r: JsonReader, acc: Accumulator) {
+        var from = -1L; var via = -1L; var to = -1L
+        var viaIsWay = false
+        val tags = HashMap<String, String>()
+        r.beginObject()
+        while (r.hasNext()) {
+            when (r.nextName()) {
+                "members" -> {
+                    r.beginArray()
+                    while (r.hasNext()) {
+                        var type = ""; var ref = -1L; var role = ""
+                        r.beginObject()
+                        while (r.hasNext()) when (r.nextName()) {
+                            "type" -> type = r.nextString()
+                            "ref" -> ref = r.nextLong()
+                            "role" -> role = r.nextString()
+                            else -> r.skipValue()
+                        }
+                        r.endObject()
+                        when (role) {
+                            "from" -> if (type == "way") from = ref
+                            "to" -> if (type == "way") to = ref
+                            "via" -> if (type == "node") via = ref else viaIsWay = true
+                        }
+                    }
+                    r.endArray()
+                }
+                "tags" -> { r.beginObject(); while (r.hasNext()) tags[r.nextName()] = r.nextString(); r.endObject() }
+                else -> r.skipValue()
+            }
+        }
+        r.endObject()
+        if (viaIsWay || from < 0 || via < 0 || to < 0) return
+        val kind = tags["restriction:motorcar"] ?: tags["restriction"] ?: return
+        if (tags["except"]?.split(';')?.any { it.trim() == "motorcar" } == true) return
+        val only = when {
+            kind.startsWith("no_") -> false
+            kind.startsWith("only_") -> true
+            else -> return
+        }
+        acc.addRestriction(from, via, to, only)
+    }
+
     private fun readElement(r: JsonReader, acc: Accumulator) {
         var type = ""
+        var id = -1L
         var lat = Double.NaN
         var lon = Double.NaN
         val nodeIds = ArrayList<Long>()
@@ -75,6 +136,7 @@ class OfflineGraphBuilder {
         while (r.hasNext()) {
             when (r.nextName()) {
                 "type" -> type = r.nextString()
+                "id" -> id = r.nextLong()
                 "lat" -> lat = r.nextDouble()
                 "lon" -> lon = r.nextDouble()
                 "nodes" -> { r.beginArray(); while (r.hasNext()) nodeIds += r.nextLong(); r.endArray() }
@@ -99,7 +161,7 @@ class OfflineGraphBuilder {
             }
         }
         r.endObject()
-        if (type == "way" && nodeIds.size >= 2 && nodeIds.size == geom.size) acc.addWay(nodeIds, geom, tags)
+        if (type == "way" && nodeIds.size >= 2 && nodeIds.size == geom.size) acc.addWay(id, nodeIds, geom, tags)
         if (type == "node" && !lat.isNaN() && !lon.isNaN()) OsmTags.feature(tags, LatLon(lat, lon), 0.0)?.let { acc.addFeature(lat, lon, it.encode()) }
     }
 
@@ -129,7 +191,18 @@ class OfflineGraphBuilder {
             lat.add((p.lat * 1e7).toInt()); lon.add((p.lon * 1e7).toInt()); lat.size - 1
         }
 
-        fun addWay(ids: List<Long>, geom: List<LatLon>, tags: Map<String, String>) {
+        val wayIndex = HashMap<Long, Int>(1 shl 16)
+        val rFrom = IntList(); val rVia = IntList(); val rTo = IntList(); val rOnly = ByteList()
+
+        /** Keeps restrictions whose ways and via node are part of the drivable graph. */
+        fun addRestriction(fromWay: Long, viaNode: Long, toWay: Long, only: Boolean) {
+            val f = wayIndex[fromWay] ?: return
+            val t = wayIndex[toWay] ?: return
+            val v = nodeIndex[viaNode] ?: return
+            rFrom.add(f); rVia.add(v); rTo.add(t); rOnly.add(if (only) 1 else 0)
+        }
+
+        fun addWay(osmId: Long, ids: List<Long>, geom: List<LatLon>, tags: Map<String, String>) {
             if (geom.any { it.lat.isNaN() }) return
             val hw = tags["highway"] ?: return
             val code = OsmTags.classCode(hw).takeIf { it >= 0 } ?: return
@@ -148,6 +221,7 @@ class OfflineGraphBuilder {
             val changeB = tags["change:lanes:backward"] ?: if (oneway == -1) tags["change:lanes"] else null
 
             val w = wHw.size
+            if (osmId >= 0) wayIndex[osmId] = w
             wHw.add(code.toByte()); wMaxF.add(maxF); wMaxB.add(maxB)
             wName.add(intern(tags["name"])); wRef.add(intern(tags["ref"]))
             wTurnF.add(intern(turnF)); wTurnB.add(intern(turnB))
@@ -188,6 +262,7 @@ class OfflineGraphBuilder {
                     wChangeF.toArray(), wChangeB.toArray(),
                 ),
                 bbox, System.currentTimeMillis(), fLat.toArray(), fLon.toArray(), fKind.toArray(),
+                OfflineGraph.TurnRestrictions(rFrom.toArray(), rVia.toArray(), rTo.toArray(), rOnly.toArray()),
             )
         }
     }

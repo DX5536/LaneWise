@@ -34,11 +34,21 @@ object StreetLanes {
     private const val CLASSES = "motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|" +
         "tertiary|tertiary_link|unclassified|residential|living_street"
 
-    suspend fun fetch(center: LatLon, radiusM: Int = 450): List<OsmStreet> {
-        val q = String.format(Locale.US, "[out:json][timeout:40];way(around:%d,%.5f,%.5f)[\"highway\"~\"^(%s)$\"];out geom;",
-            radiusM, center.lat, center.lon, CLASSES)
+    suspend fun fetch(center: LatLon, radiusM: Int = 450): List<OsmStreet> = fetchNearby(center, radiusM).streets
+
+    /** Streets around [center] plus their traffic lights / signs (for the browse map, where no route provides them). */
+    class Nearby(val streets: List<OsmStreet>, val features: List<de.lanewise.core.model.RoadFeature>)
+
+    suspend fun fetchNearby(center: LatLon, radiusM: Int = 450): Nearby {
+        val around = String.format(Locale.US, "(around:%d,%.5f,%.5f)", radiusM, center.lat, center.lon)
+        val q = "[out:json][timeout:40];(way$around[\"highway\"~\"^($CLASSES)$\"];${OsmTags.featureNodeQuery(around)});out geom;"
         val elements = Overpass.json(q)["elements"].arr.orEmpty()
-        return elements.mapNotNull { el ->
+        val features = elements.filter { it["type"].str == "node" }.mapNotNull { el ->
+            val la = el["lat"].dbl; val lo = el["lon"].dbl
+            val tags = (el["tags"] as? JsonObject)?.mapValues { it.value.str.orEmpty() }
+            if (la == null || lo == null || tags == null) null else OsmTags.feature(tags, LatLon(la, lo), 0.0)
+        }
+        val streets = elements.filter { it["type"].str != "node" }.mapNotNull { el ->
             val geom = el["geometry"].arr.orEmpty().mapNotNull { p ->
                 val la = p["lat"].dbl; val lo = p["lon"].dbl
                 if (la != null && lo != null) LatLon(la, lo) else null
@@ -48,6 +58,7 @@ object StreetLanes {
             if (geom.size < 2) null
             else OsmStreet(geom, tags, el["id"].dbl?.toLong() ?: 0, if (nodes.size == geom.size) nodes else emptyList())
         }
+        return Nearby(streets, features)
     }
 
     private fun laneWidth(hw: String) = when {

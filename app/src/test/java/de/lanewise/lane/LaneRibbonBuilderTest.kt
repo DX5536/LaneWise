@@ -67,6 +67,51 @@ class LaneRibbonBuilderTest {
         assertTrue("road still ${widths.max() * 2} m wide after the junction", widths.max() < 2.2)
     }
 
+    /**
+     * Owner's video (Celler Straße → left into Herschelstraße): one lane widening to left | straight | straight+right
+     * 84 m before the turn. With the car already on the wide stretch, the highlight must be in the left-turn lane —
+     * not in the middle straight-only lane — and must stay put as the car moves on.
+     */
+    @Test
+    fun highlightIsInTheOpenedTurnLaneAfterTheWidening() {
+        val a = LaneSite(200.0, listOf(S), null, S, false, RoadKind.URBAN)
+        val b = LaneSite(400.0, listOf(L, S, S or R), null, L, true, RoadKind.URBAN)
+        val line = route(emptyList(), null).geometry
+        val r = Route("test", line, line.length, 100.0, emptyList(), listOf(a, b),
+            laneCounts = listOf(LaneCountSpan(0.0, 316.0, 1), LaneCountSpan(316.0, 1200.0, 3)))
+        val g = LaneGuidance()
+        fun offsetAt(car: Double, d: Double): Double {
+            val st = g.update(r.laneSites, car, avoidLaneChanges = true, keepRight = false, laneCountAt = r::laneCountAt)
+            val p = LaneRibbonBuilder.build(r, st, car).pointAt(d)!!
+            return r.geometry.project(p)!!.signedOffset
+        }
+        offsetAt(150.0, 370.0)
+        val seen = listOf(250.0, 330.0, 350.0, 365.0).map { offsetAt(it, 375.0) }
+        assertTrue("highlight moved as the car drove on: $seen", seen.max() - seen.min() < 0.3)
+        // The driver taps the middle lane: that is where the straight-only lane is — one lane width away.
+        g.overrideCurrentLane(b, 1)
+        val middle = run {
+            val st = g.update(r.laneSites, 366.0, avoidLaneChanges = true, keepRight = false, laneCountAt = r::laneCountAt)
+            r.geometry.project(LaneRibbonBuilder.build(r, st, 366.0).pointAt(366.0)!!)!!.signedOffset
+        }
+        assertTrue("highlight ${seen.last()} not in the left lane (middle lane at $middle)", abs(seen.last() - middle) > 2.0)
+    }
+
+    /** A traffic light without lane data gets one stop line across the road (not one per signal head of the junction). */
+    @Test
+    fun stopLineAtTrafficLightWithoutLanes() {
+        val a = LatLon(52.38, 9.74)
+        val line = Polyline(listOf(a, Geo.destination(a, 0.0, 1200.0)))
+        fun sig(d: Double) = de.lanewise.core.model.RoadFeature(de.lanewise.core.model.FeatureKind.TRAFFIC_SIGNALS,
+            line.pointAt(d), d)
+        val r = Route("test", line, line.length, 100.0, emptyList(), emptyList(),
+            features = listOf(sig(500.0), sig(520.0)), laneCounts = listOf(LaneCountSpan(0.0, 1200.0, 2)))
+        val stops = LaneRibbonBuilder.buildRoad(r, 0.0, 1000.0).filter { it.kind == LaneRibbonBuilder.Kind.STOP }
+        assertTrue("expected 1 stop line, got ${stops.size}", stops.size == 1)
+        val width = Geo.distance(stops[0].points.first(), stops[0].points.last())
+        assertTrue("stop line $width m does not span 2 lanes", width > 5.5)
+    }
+
     /** Fixed sampling grid: the same spot of the route gives the same geometry whatever the car position (no jitter). */
     @Test
     fun geometryDoesNotShiftAsTheCarMoves() {

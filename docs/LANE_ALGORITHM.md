@@ -57,7 +57,9 @@ With the setting **off**, the horizon is just the next site (classic behaviour).
 
 `LaneGuidance.leadDistance`: 600 m (+250 m per extra lane) on motorways, 400 m trunk, 250 m rural,
 150 m urban (+80 m). Inspired by AMAP's 300 m `arrowInSurfaceDisplayDist`, lengthened for German
-Autobahn exit signage (1000 m / 500 m). The instruction never starts before the previous site.
+Autobahn exit signage (1000 m / 500 m). The instruction never starts before the previous site, and it is timed from
+where the assumed lane was established (the last junction passed, or where the driver tapped a lane), never from the
+car — a start measured from the car would slide along with it.
 When no change is needed and the next junction restricts lanes, LaneWise says
 "Bleiben Sie auf Ihrer Spur" — AMAP's "keep current lane" rule.
 
@@ -72,7 +74,8 @@ through turns). Tap a lane in the lane bar to correct it; the plan updates immed
 `LanePlanner.effectiveChanges`: only crossings between lanes that existed all the way since the previous
 junction count. When OSM lane counts (`Route.laneCountAt`) show the road was narrower in between (a turn
 pocket opening, or one lane widening to three before a junction), moving into the new lanes is free and not
-announced. Without lane-count data every crossing counts. OSRM lanes on the intersection ≤ 80 m before a turn
+announced. "In between" starts where the assumed lane was established (`assumedSince`), not at the car: a lane that
+opened behind the car is still entered for free. Without lane-count data every crossing counts. OSRM lanes on the intersection ≤ 80 m before a turn
 without its own lane data are re-targeted to that turn (`attachTurnsToLaneSites`); the lane bar never shows the
 lanes of a junction after the next turn.
 

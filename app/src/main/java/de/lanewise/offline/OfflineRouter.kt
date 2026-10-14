@@ -30,7 +30,7 @@ import kotlin.math.min
  * On-device A* router over an [OfflineGraph]. Needs no network: position comes from GNSS
  * (GPS/Galileo/GLONASS/BeiDou), the road network from the downloaded OSM extract.
  *
- * Limitations (documented in docs/ARCHITECTURE.md): no turn restrictions, no live traffic.
+ * Turn restrictions (OSM `type=restriction` via a node) are respected. Limitation: no live traffic.
  */
 class OfflineRouter(
     private val graphProvider: () -> OfflineGraph?,
@@ -47,7 +47,7 @@ class OfflineRouter(
         val s = g.nearestNode(request.origin)
         val t = g.nearestNode(request.destination, requireOutgoing = false)
         if (s < 0 || t < 0) throw RoutingException(strings().offNoRoad)
-        val edges = astar(g, s, t, request) ?: throw RoutingException(strings().offNoRoute)
+        val edges = astar(g, s, t, request)?.takeIf { it.isNotEmpty() } ?: throw RoutingException(strings().offNoRoute)
         listOf(buildRoute(g, edges, request))
     }
 
@@ -71,46 +71,52 @@ class OfflineRouter(
         return g.edgeLenDm[e] / 10.0 / (speedKmh(g, e) / 3.6)
     }
 
+    /**
+     * Edge-based A*: the search state is the edge the car arrived on, so turn restrictions (from way, via node, to way)
+     * and the no-U-turn rule apply exactly. Returns the edges of the fastest path from [s] to [t].
+     */
     private fun astar(g: OfflineGraph, s: Int, t: Int, request: RouteRequest): IntArray? {
-        val n = g.nodeCount
-        val gScore = DoubleArray(n) { Double.POSITIVE_INFINITY }
-        val prevEdge = IntArray(n) { -1 }
-        val closed = BooleanArray(n)
+        if (s == t) return IntArray(0)
+        val m = g.edgeCount
+        val gScore = DoubleArray(m) { Double.POSITIVE_INFINITY }
+        val prevEdge = IntArray(m) { -1 }
+        val closed = BooleanArray(m)
         val heap = MinHeap(1024)
         val target = g.latLon(t)
         val maxSpeed = 130 / 3.6
         fun h(v: Int) = Geo.distance(g.latLon(v), target) / maxSpeed
+        val restrictions = g.restrictions
 
-        gScore[s] = 0.0
-        heap.push(s, h(s))
+        for (e in g.edgeStart[s] until g.edgeStart[s + 1]) {
+            val c = edgeSeconds(g, e, request)
+            if (c < gScore[e]) { gScore[e] = c; heap.push(e, c + h(g.edgeTo[e])) }
+        }
+        var found = -1
         while (heap.size > 0) {
-            val u = heap.pop()
-            if (u == t) break
-            if (closed[u]) continue
-            closed[u] = true
-            val cameFrom = if (prevEdge[u] >= 0) g.edgeWay[prevEdge[u]] else -1
+            val ein = heap.pop()
+            if (closed[ein]) continue
+            closed[ein] = true
+            val u = g.edgeTo[ein]
+            if (u == t) { found = ein; break }
+            val wayIn = g.edgeWay[ein]
             for (e in g.edgeStart[u] until g.edgeStart[u + 1]) {
-                val v = g.edgeTo[e]
-                if (closed[v]) continue
+                if (closed[e]) continue
+                val wayOut = g.edgeWay[e]
                 // Forbid immediate U-turns on the same way.
-                if (prevEdge[u] >= 0 && g.edgeWay[e] == cameFrom && g.edgeForward[e] != g.edgeForward[prevEdge[u]]) continue
-                val cand = gScore[u] + edgeSeconds(g, e, request)
-                if (cand < gScore[v]) {
-                    gScore[v] = cand
-                    prevEdge[v] = e
-                    heap.push(v, cand + h(v))
+                if (wayOut == wayIn && g.edgeForward[e] != g.edgeForward[ein]) continue
+                if (!restrictions.allows(wayIn, u, wayOut)) continue
+                val cand = gScore[ein] + edgeSeconds(g, e, request)
+                if (cand < gScore[e]) {
+                    gScore[e] = cand
+                    prevEdge[e] = ein
+                    heap.push(e, cand + h(g.edgeTo[e]))
                 }
             }
         }
-        if (prevEdge[t] < 0 && s != t) return null
+        if (found < 0) return null
         val path = ArrayList<Int>()
-        var cur = t
-        while (cur != s) {
-            val e = prevEdge[cur]
-            if (e < 0) return null
-            path += e
-            cur = fromNode(g, e)
-        }
+        var cur = found
+        while (cur >= 0) { path += cur; cur = prevEdge[cur] }
         path.reverse()
         return path.toIntArray()
     }

@@ -204,6 +204,57 @@ class LanePlannerTest {
         assertEquals(0, vahr[0].changeFromPrevious)
     }
 
+    /**
+     * Owner's video (2026-10-14, Celler Straße → Herschelstraße): once the car had passed the point where the road
+     * widens, the opening lanes suddenly counted as a change — a late "move one lane left" 50 m before the turn, and
+     * the highlight stayed in the middle straight-only lane until then. The free move is judged from where the lane
+     * was last known (the previous junction), not from the car.
+     */
+    @Test
+    fun laneThatOpenedBehindTheCarIsStillFree() {
+        val a = site(200.0, listOf(S), S)
+        val b = site(400.0, listOf(L, S, S or R), L, maneuver = true)
+        val celler: (Double) -> Int? = { d -> if (d < 316.0) 1 else 3 }
+        val g = LaneGuidance()
+        for (car in listOf(150.0, 250.0, 300.0, 330.0, 360.0, 390.0)) {
+            val st = g.update(listOf(a, b), car, avoidLaneChanges = true, keepRight = true, laneCountAt = celler)
+            val adv = st.plan.last()
+            assertEquals("car $car", 0, adv.recommended)
+            assertEquals("car $car", 0, adv.changeFromPrevious)
+            assertEquals("car $car", null, st.pendingChange)
+        }
+    }
+
+    /**
+     * Owner's screenshot (Schiffgraben → left into Berliner Allee): OSRM flagged the 2nd left lane, the straight lane
+     * and the straight+right lane as valid for the left turn, and the lane bar recommended the straight lane. The
+     * arrows win at a turn: both left lanes are usable, nothing else.
+     */
+    @Test
+    fun wrongProviderFlagsAtATurnAreIgnored() {
+        val site = LaneSite(772.0, listOf(L, L, S, S or R), listOf(false, true, true, true), L, true, RoadKind.URBAN)
+        assertArrayEquals(booleanArrayOf(true, true, false, false), site.allowed())
+        val plan = LanePlanner().plan(listOf(site), LanePlanner.Options())
+        assertTrue(plan[0].recommended in 0..1)
+        // Flags that only narrow down the arrows (e.g. "use the 2nd left lane") are still trusted.
+        val narrow = LaneSite(772.0, listOf(L, L, S, S or R), listOf(false, true, false, false), L, true, RoadKind.URBAN)
+        assertArrayEquals(booleanArrayOf(false, true, false, false), narrow.allowed())
+    }
+
+    /** A real change is timed on the road (fixed start), not from the moving car. */
+    @Test
+    fun changeStartDoesNotSlideWithTheCar() {
+        val a = site(100.0, listOf(S, S), S)
+        val b = site(400.0, listOf(L, S), L, maneuver = true)
+        val g = LaneGuidance()
+        g.update(listOf(a, b), 120.0, true, true)
+        g.overrideCurrentLane(b, 1) // driver says: I'm in the right (straight) lane
+        val starts = listOf(130.0, 300.0, 330.0, 370.0).map { car ->
+            g.update(listOf(a, b), car, true, true).pendingChange!!.startAt
+        }
+        assertEquals(1, starts.distinct().size)
+    }
+
     /** Lanes OSRM put on the intersection 50 m before a left turn whose junction has none: they are the turn lanes. */
     @Test
     fun laneDataBeforeAnUnmappedTurnIsUsedForTheTurn() {

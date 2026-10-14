@@ -103,7 +103,8 @@ class GnssLocationSource(context: Context) {
 class SimulatedLocationSource(
     private val line: Polyline,
     private val speedAt: (Double) -> Double, // km/h for a given distance
-    private val speedFactor: Double = 1.0,
+    /** Demo speed-up (1 = real time); read on every step so it can be changed while driving. */
+    private val speedFactor: () -> Double = { 1.0 },
 ) {
     fun fixes(startAt: Double = 0.0): Flow<Fix> = flow {
         var d = startAt
@@ -114,7 +115,7 @@ class SimulatedLocationSource(
             val limit = speedAt(d).coerceIn(20.0, 140.0)
             // Oscillate ±12% around the limit to exercise the over/under-speed border.
             val kmh = limit * (1.0 + 0.12 * kotlin.math.sin(phase))
-            val mps = kmh / 3.6 * speedFactor
+            val mps = kmh / 3.6 * speedFactor()
             emit(Fix(line.pointAt(d), (kmh / 3.6).toFloat(), line.bearingAt(d).toFloat(), 3f, System.currentTimeMillis(), simulated = true))
             delay(dtMs)
             d += mps * dtMs / 1000.0

@@ -20,9 +20,11 @@ de.lanewise
 ├── location/Location.kt              raw GNSS (LocationManager GPS_PROVIDER + GnssStatus), simulator
 ├── nav/                              NavigationEngine (snap, reroute, speed status, announcements),
 │                                     Phrases (DE/EN/VI, voice segments), VoiceGuide (OmniVoice packs → Android TTS),
-│                                     VoicePack, VoiceInventory (tools/voice_pack)
+│                                     VoicePack, VoiceInventory (tools/voice_pack),
+│                                     NavigationService (foreground service: guidance with the screen off)
 ├── osm/                              OsmTags, StreetLanes (all streets around the car, clipped at junctions),
-│                                     AerialLanes (lane counts from aerial photos, applied over OSM)
+│                                     AerialLanes (lane counts from aerial photos, applied over OSM),
+│                                     LaneReports ("lanes wrong here" → lane_reports.geojson)
 ├── search/Geocoder.kt                Photon (OSM) search, Germany only
 ├── settings/Settings.kt              DataStore-backed AppSettings
 └── ui/
@@ -59,12 +61,12 @@ graph, which is downloaded once per region:
 1. `OfflineGraphBuilder` downloads drivable OSM ways for the region bbox via Overpass, streams the
    JSON (`android.util.JsonReader`), and builds a CSR graph with per-way `maxspeed`
    (`DE:urban` = 50 etc.), `turn:lanes(:forward/:backward)`, `change:lanes` (solid lines; format LWG3), names and refs → `filesDir/graph_<region>.lwg`
-   (gzip).
+   (gzip). Format LWG4 adds turn restrictions (`type=restriction` via a node, second Overpass query).
 2. `OfflineTiles` downloads MapLibre tile packs (z8–14, both styles) from OpenFreeMap.
-3. `OfflineRouter` runs A* (time-weighted) and reconstructs steps, lane sites (turn lanes apply at the
+3. `OfflineRouter` runs edge-based A* (time-weighted, respects turn restrictions) and reconstructs steps, lane sites (turn lanes apply at the
    end of a way), speed limits and road kinds — so lane assist and speed warnings work offline too.
 
-Limitations: no turn restrictions, no live traffic, region-bounded.
+Limitations: no live traffic, region-bounded, restrictions via a way (rare) are ignored.
 
 ## Tools (PC side)
 

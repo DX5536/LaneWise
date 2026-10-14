@@ -124,6 +124,65 @@ fun SpeedPanel(speedKmh: Float, status: SpeedStatus, modifier: Modifier = Modifi
     }
 }
 
+/**
+ * Next traffic light as a vertical card on the left above the speed (owner's layout): the signal head, then the
+ * separate arrow signals that are likely there (inferred from turn-only lanes: dashed outline), Grünpfeil (Zeichen 720)
+ * and push button. No light count — only one signal applies to the driver's lane — and no pedestrian figure.
+ */
+@Composable
+fun SignalCard(sig: de.lanewise.core.model.SignalCluster, modifier: Modifier = Modifier) {
+    val green = Color(0xFF2ECC71)
+    Column(
+        modifier.clip(RoundedCornerShape(14.dp)).background(Color(0xF01A1D24))
+            .border(1.5.dp, Color(0xFF6C4CF5), RoundedCornerShape(14.dp)).padding(horizontal = 8.dp, vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        // Main signal head.
+        Canvas(Modifier.size(width = 26.dp, height = 62.dp)) {
+            val w = size.width; val h = size.height
+            drawRoundRect(Color.Black, cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.25f))
+            drawRoundRect(Color(0xFF5A5F6E), cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.25f),
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = w * 0.06f))
+            val r = w * 0.3f
+            listOf(Color(0xFFE5484D), Color(0xFFF5A524), green).forEachIndexed { i, col ->
+                drawCircle(col, r, Offset(w / 2, h * (0.19f + 0.31f * i)))
+            }
+        }
+        val arrows = listOf(de.lanewise.lane.LaneDir.ANY_LEFT to de.lanewise.lane.LaneDir.LEFT,
+            de.lanewise.lane.LaneDir.ANY_RIGHT to de.lanewise.lane.LaneDir.RIGHT)
+            .filter { (any, _) -> sig.inferredArrowSignals and any != 0 }
+        for ((_, bit) in arrows) {
+            Box(
+                Modifier.size(30.dp).clip(RoundedCornerShape(6.dp)).background(Color.Black)
+                    .drawBehind {
+                        drawRoundRect(Color(0xFF9AA0AE), cornerRadius = androidx.compose.ui.geometry.CornerRadius(6.dp.toPx()),
+                            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.dp.toPx(),
+                                pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 3.dp.toPx()))))
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Canvas(Modifier.size(20.dp)) {
+                    LaneArrows.draw(this, bit, bit, green, green, size.width * LaneArrows.SHAFT) { p -> Offset(p.x * size.width, p.y * size.height) }
+                }
+            }
+        }
+        if (sig.greenArrow) {
+            Box(Modifier.size(width = 30.dp, height = 22.dp).clip(RoundedCornerShape(3.dp)).background(Color.Black), contentAlignment = Alignment.Center) {
+                Canvas(Modifier.size(18.dp)) {
+                    LaneArrows.draw(this, de.lanewise.lane.LaneDir.RIGHT, de.lanewise.lane.LaneDir.RIGHT, green, green,
+                        size.width * LaneArrows.SHAFT) { p -> Offset(p.x * size.width, p.y * size.height) }
+                }
+            }
+        }
+        if (sig.onDemand) {
+            Box(Modifier.size(24.dp).clip(RoundedCornerShape(5.dp)).background(Color(0xFFF5A524)), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(11.dp).clip(androidx.compose.foundation.shape.CircleShape).background(Color.Black))
+            }
+        }
+    }
+}
+
 /** Upcoming traffic light / road sign with distance. */
 @Composable
 fun FeatureChip(feature: RoadFeature, distanceText: String, modifier: Modifier = Modifier) {
@@ -155,7 +214,6 @@ fun SignalChip(sig: de.lanewise.core.model.SignalCluster, distanceText: String, 
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Image(light, null, Modifier.size(24.dp))
-            if (sig.vehicleLights > 1) Text("×${sig.vehicleLights}", color = c.onChip, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.width(6.dp))
             Text(distanceText, color = c.onChip, fontSize = 14.sp, fontWeight = FontWeight.Bold)
         }

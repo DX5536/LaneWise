@@ -26,6 +26,8 @@ data class LaneState(
     /** True if no lane change is needed up to the end of the planning horizon. */
     val stayInLane: Boolean,
     val assumedLateral: Int?,
+    /** Route distance where [assumedLateral] was established (last junction passed / lane tapped); null = route start. */
+    val assumedSince: Double? = null,
 ) {
     companion object { val EMPTY = LaneState(null, emptyList(), null, true, null) }
 }
@@ -41,11 +43,15 @@ data class LaneState(
 class LaneGuidance(private val planner: LanePlanner = LanePlanner()) {
 
     private var assumedLateral: Int? = null
+    private var assumedSince: Double? = null
+    private var overridePending = false
     private var lastPassedSite: LaneSite? = null
     private var lastPlan: List<LaneAdvice> = emptyList()
 
     fun reset() {
         assumedLateral = null
+        assumedSince = null
+        overridePending = false
         lastPassedSite = null
         lastPlan = emptyList()
     }
@@ -53,6 +59,7 @@ class LaneGuidance(private val planner: LanePlanner = LanePlanner()) {
     /** Driver tells us which lane (index at [site]) they are in. */
     fun overrideCurrentLane(site: LaneSite, laneIndex: Int) {
         assumedLateral = site.lateral(laneIndex.coerceIn(0, site.laneCount - 1))
+        overridePending = true
     }
 
     fun update(
@@ -80,27 +87,33 @@ class LaneGuidance(private val planner: LanePlanner = LanePlanner()) {
                 else -> passed.lateral(advice.recommended)
             }
             lastPassedSite = passed
+            assumedSince = passed.distanceAlong
         }
+        if (overridePending) { assumedSince = carDistance; overridePending = false }
 
         val plan = planner.plan(
             sites,
-            LanePlanner.Options(avoidLaneChanges, keepRight, assumedLateral, carDistance, changeSpans = changeSpans, laneCountAt = laneCountAt),
+            LanePlanner.Options(avoidLaneChanges, keepRight, assumedLateral, carDistance, changeSpans = changeSpans, laneCountAt = laneCountAt,
+                assumedSince = assumedSince),
         )
         lastPlan = plan
-        if (plan.isEmpty()) return LaneState(null, emptyList(), null, true, assumedLateral)
+        if (plan.isEmpty()) return LaneState(null, emptyList(), null, true, assumedLateral, assumedSince)
 
-        val change = firstChange(plan, carDistance, changeSpans)
+        // The first change is timed from where the assumed lane was established, not from the car: otherwise its start
+        // slides along with the car inside the lead distance.
+        val change = firstChange(plan, min(carDistance, assumedSince ?: carDistance), changeSpans)
         return LaneState(
             nextAdvice = plan.first(),
             plan = plan,
             pendingChange = change,
             stayInLane = change == null,
             assumedLateral = assumedLateral,
+            assumedSince = assumedSince,
         )
     }
 
-    private fun firstChange(plan: List<LaneAdvice>, carDistance: Double, spans: List<ChangeSpan>): LaneChangeInstruction? {
-        var prevDist = carDistance
+    private fun firstChange(plan: List<LaneAdvice>, since: Double, spans: List<ChangeSpan>): LaneChangeInstruction? {
+        var prevDist = since
         for (a in plan) {
             if (a.changeFromPrevious != 0) {
                 val gap = a.site.distanceAlong - prevDist
