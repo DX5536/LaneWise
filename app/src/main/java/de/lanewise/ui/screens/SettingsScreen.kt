@@ -199,6 +199,9 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, ui: UiState, onBack: () ->
         }
         Spacer(Modifier.height(24.dp))
         Text(str.attribution, fontSize = 11.sp)
+        // Which build this is (CI run number + commit), so screenshots and bug reports can be matched to the code.
+        Text("LaneWise ${de.lanewise.BuildConfig.VERSION_NAME} · ${de.lanewise.BuildConfig.GIT_SHA}" +
+            if (de.lanewise.BuildConfig.DEBUG) " · debug" else "", fontSize = 11.sp, fontWeight = FontWeight.Bold)
     }
 }
 

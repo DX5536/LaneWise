@@ -206,6 +206,31 @@ data class ChangeSpan(val from: Double, val to: Double, val perms: List<Int>) {
             return (a != null && a and RIGHT == 0) || (b != null && b and LEFT == 0)
         }
 
+        /**
+         * OSM spans first; a TomTom span is added only where no OSM span overlaps it (OSM is the source the owner fixes).
+         */
+        fun merge(osm: List<ChangeSpan>, tomtom: List<ChangeSpan>): List<ChangeSpan> =
+            (osm + tomtom.filter { t -> osm.none { o -> o.from < t.to && t.from < o.to } }).sortedBy { it.from }
+
+        /**
+         * TomTom `laneSeparators` (n + 1 values for n lanes, left → right, outer edges included) → lane permissions.
+         * Dashed lines may be crossed; solid / double solid may not. Mixed lines follow § 41 StVO (Zeichen 295 + 340):
+         * the lane on the dashed side may cross. Null if nothing is restricted. Unknown values count as dashed.
+         */
+        fun fromTomTomSeparators(seps: List<String>, lanes: Int): List<Int>? {
+            if (lanes < 2 || seps.size != lanes + 1) return null
+            fun solid(s: String) = s == "SINGLE_SOLID" || s == "DOUBLE_SOLID"
+            val perms = (0 until lanes).map { i ->
+                var p = 0
+                // Line on the left of lane i is seps[i]; on its right seps[i + 1].
+                val leftLine = seps[i]; val rightLine = seps[i + 1]
+                if (i == 0 || !(solid(leftLine) || leftLine == "DASHED_SOLID")) p = p or LEFT    // DASHED_SOLID: solid on our side
+                if (i == lanes - 1 || !(solid(rightLine) || rightLine == "SOLID_DASHED")) p = p or RIGHT
+                p
+            }
+            return perms.takeIf { ps -> ps.any { it != (LEFT or RIGHT) } }
+        }
+
         /** Parses `yes|not_left|no` etc.; null if the value has no restriction at all or cannot be read. */
         fun parse(value: String): List<Int>? {
             val perms = value.split('|').map { v ->

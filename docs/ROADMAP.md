@@ -142,7 +142,21 @@ _Last updated: 2026-10-14 (v0.4: turn restrictions offline, guidance with the sc
 
 - [x] Sandbox for TomTom lanes: `ProviderCompareLiveTest` routes the test route with OSRM (OSM) and TomTom, pairs the
       junctions, prints both lane layouts + the advice per turn, flags TomTom lane counts wider than the OSM road, and
-      writes an HTML map (`app/build/reports/lanewise/provider_compare.html`). Not run yet — waiting for a key.
+      writes an HTML map (`app/build/reports/lanewise/provider_compare.html`).
+      **Result (2026-10-14, test route):** OSM 17 lane junctions vs TomTom 6; where both have data, 2 same, 2 different —
+      TomTom simplifies (`left|right` where OSM has `left|through;right`; raw API checked, not a parser bug). TomTom does
+      return `laneSeparators` (solid / dashed) at its lane sections — a possible extra source for solid lines.
+      Conclusion: keep OSM for lanes; TomTom for traffic only.
+- [x] **Auto = OSM lanes + TomTom traffic**: Auto routes with OSRM (OSM lanes); with a TomTom key, TomTom rebuilds that
+      same route (`supportingPoints`, `reconstructionMode=track`, `TomTomRoutingProvider.withTraffic`) for the live-traffic
+      ETA (no double-counted jams: `Route.trafficEta`) and its `laneSeparators`. Solid/dashed lines: OSM `change:lanes`
+      first, TomTom separators only where OSM has none (`ChangeSpan.merge` / `fromTomTomSeparators`, mixed lines per
+      § 41 StVO: the dashed side may cross). If TomTom's rebuild differs by > 3 % in length it is ignored. TomTom routes
+      only if OSRM fails. Settings text updated (DE/EN/VI).
+- [x] Signal card: one head per lane group in road order (owner's photo): a head with **arrow lamps** for left-turn
+      lanes, the round head for straight on, an arrow head for right-turn lanes (arrow heads inferred, dashed outline).
+- [x] APK names carry app and version: `LaneWise-v0.4.1.<CI run>-release.apk` (local: `-local`); version + commit shown
+      at the bottom of Settings (`BuildConfig.VERSION_NAME`, `GIT_SHA`). Bump `appVersion` in `app/build.gradle.kts`.
 
 ## Done (v0.4.1, 2026-10-14) — owner's drive screenshots
 - [x] **Wrong lane at Schiffgraben → left into Berliner Allee**: OSRM flagged the 2nd left lane, the straight lane and
@@ -150,9 +164,13 @@ _Last updated: 2026-10-14 (v0.4: turn restrictions offline, guidance with the sc
       recommended the straight lane. At a real turn, provider flags that call a lane usable whose arrows cannot make
       the turn are now ignored and the arrows decide (`LaneSite.allowed`, test `wrongProviderFlagsAtATurnAreIgnored`);
       flags that only narrow the arrows down are still used. Live trace now recommends the leftmost lane.
-- [x] Traffic-light pop-up moved off the map into a **vertical HUD card on the left above the speed**: signal head,
-      inferred arrow signals (dashed), Grünpfeil, push button. No light count (only one signal applies to the driver's
-      lane) and no pedestrian figure; the top-left chip lost its count too.
+- [x] Traffic-light pop-up moved off the map into a **HUD card under the banner** (left-aligned with it, "Then" chip on
+      the right of the same row), bold white border: signal head, inferred arrow signals (dashed), Grünpfeil, push
+      button. No light count (only one signal applies to the driver's lane) and no pedestrian figure; the top-left chip
+      lost its count too.
+- [x] **Journey progress bar** along the top of the bottom panel: violet = driven, grey = remaining, lime marker at the car.
+      Counts the whole journey across re-routes (driven on earlier routes is kept: `UiState.journeyDriven`).
+- [x] End-navigation button: red ✕ with thicker strokes and a red ring.
 - [x] **Stop line at traffic lights without lane data**: one line across the drawn road at the first signal of a
       junction (other heads within 40 m are skipped; never where a lane site already has one). `stopLineAtTrafficLightWithoutLanes`.
 - [x] **Start point**: "From: My position" in the route preview; tap to search any start (Demo then drives from there).

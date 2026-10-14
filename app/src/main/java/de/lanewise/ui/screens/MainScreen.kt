@@ -6,8 +6,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -545,6 +543,7 @@ private fun NavigationOverlay(
                     modifier = Modifier.weight(1f),
                     countdown = next?.let { countdownFraction(nav) },
                     lanesBelow = showLanes,
+                    belowLeft = nav.signals?.takeIf { settings.showSigns && it.distance < 250 }?.let { sig -> { de.lanewise.ui.hud.SignalCard(sig) } },
                 ) {
                     if (showLanes && advice != null) {
                         Spacer(Modifier.height(3.dp))
@@ -575,12 +574,6 @@ private fun NavigationOverlay(
         }
 
         SpeedPanel(nav.fix.speedKmh, nav.speedStatus, Modifier.align(Alignment.CenterStart).padding(start = 12.dp, top = 160.dp))
-        // Next traffic light (< 250 m): vertical card just above the speed panel (its top is ~40 dp below the centre).
-        nav.signals?.takeIf { settings.showSigns && it.distance < 250 }?.let { sig ->
-            Box(Modifier.align(Alignment.CenterStart).padding(start = 12.dp).requiredHeight(400.dp).offset(y = (-158).dp)) {
-                de.lanewise.ui.hud.SignalCard(sig, Modifier.align(Alignment.BottomStart))
-            }
-        }
         if (!following) {
             OutlinedButton(
                 onClick = onRecenter,
@@ -616,6 +609,8 @@ private fun NavigationOverlay(
             distanceText = phrases.distance(nav.remainingDistance),
             etaText = SimpleDateFormat("HH:mm", Locale.GERMANY).format(Date(System.currentTimeMillis() + (nav.remainingSeconds * 1000).toLong())),
             onClose = vm::stopNavigation, onOverview = onOverview,
+            // Whole journey, across re-routes: driven on earlier routes + driven on this one, out of that + remaining.
+            progress = (ui.journeyDriven + nav.distanceAlong).let { done -> (done / (done + nav.remainingDistance).coerceAtLeast(1.0)).toFloat() },
             modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding(),
         )
     }

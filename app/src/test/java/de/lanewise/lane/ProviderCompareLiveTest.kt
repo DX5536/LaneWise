@@ -95,6 +95,15 @@ class ProviderCompareLiveTest {
                     (a?.let { "lanes ${fmt(it.site)} → lane ${it.recommended + 1}" + (s.pendingChange?.let { c -> ", change ${c.lanes}" } ?: "") } ?: "no lane data"))
             }
         }
+        // Auto mode: the OSM route rebuilt by TomTom with live traffic and its lane separators.
+        val auto = TomTomRoutingProvider(key).withTraffic(osrm)
+        if (auto == null) println("\nAuto (OSM + TomTom traffic): TomTom could not rebuild the route")
+        else {
+            println("\nAuto (OSM + TomTom traffic): ${(osrm.duration / 60).toInt()} min OSRM → ${(auto.duration / 60).toInt()} min with traffic; " +
+                "${auto.tomtomLaneLines.size} TomTom solid-line spans, ${osrm.laneChanges.size} OSM change:lanes spans, " +
+                "${auto.laneChanges.size} merged")
+            auto.tomtomLaneLines.forEach { println(String.format(Locale.US, "  TomTom lines %.0f–%.0f m: %s", it.from, it.to, it.perms)) }
+        }
         writeHtml(osrm, tomtom, rows)
     }
 

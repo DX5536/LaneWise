@@ -94,8 +94,12 @@ data class Route(
     val bikeLanes: List<BikeLaneSpan> = emptyList(),
     /** Number of car lanes in driving direction, from OSM `lanes(:forward|:backward)` / `turn:lanes`. */
     val laneCounts: List<LaneCountSpan> = emptyList(),
-    /** Where solid lines forbid lane changes (OSM `change:lanes`). */
+    /** Where solid lines forbid lane changes: OSM `change:lanes`, plus TomTom lane separators where OSM has none. */
     val laneChanges: List<de.lanewise.lane.ChangeSpan> = emptyList(),
+    /** TomTom lane separators (solid / dashed) projected onto this route; merged into [laneChanges] behind OSM. */
+    val tomtomLaneLines: List<de.lanewise.lane.ChangeSpan> = emptyList(),
+    /** [duration] includes live traffic (TomTom), so jams must not be added again by the scorer. */
+    val trafficEta: Boolean = false,
 ) {
     fun laneChangeAt(d: Double): de.lanewise.lane.ChangeSpan? = laneChanges.firstOrNull { d >= it.from && d < it.to }
     fun laneCountAt(d: Double): Int? = laneCounts.firstOrNull { d >= it.from && d < it.to }?.count

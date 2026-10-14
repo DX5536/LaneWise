@@ -24,7 +24,7 @@ object RouteScorer {
                 penalty += when {
                     i.blocked || i.kind == IncidentKind.CLOSURE -> 1800.0
                     i.kind == IncidentKind.ACCIDENT -> (i.delaySeconds ?: 420).toDouble()
-                    i.kind == IncidentKind.JAM -> if (r.provider == "tomtom") 0.0 else (i.delaySeconds ?: 300).toDouble()
+                    i.kind == IncidentKind.JAM -> if (r.provider == "tomtom" || r.trafficEta) 0.0 else (i.delaySeconds ?: 300).toDouble()
                     i.kind == IncidentKind.ROADWORKS -> 60.0
                     else -> 30.0
                 }

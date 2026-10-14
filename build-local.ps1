@@ -21,5 +21,6 @@ Get-ChildItem "$PSScriptRoot\app\build\outputs\apk" -Recurse -Filter *.apk | Sel
 
 if ($Install) {
     $adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
-    & $adb install -r "$PSScriptRoot\app\build\outputs\apk\debug\app-debug.apk"
+    $apk = Get-ChildItem "$PSScriptRoot\app\build\outputs\apk\debug" -Filter *.apk | Sort-Object LastWriteTime | Select-Object -Last 1
+    & $adb install -r $apk.FullName
 }

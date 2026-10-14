@@ -241,6 +241,22 @@ class LanePlannerTest {
         assertArrayEquals(booleanArrayOf(false, true, false, false), narrow.allowed())
     }
 
+    /** TomTom lane separators → lane permissions; OSM `change:lanes` wins where both exist. */
+    @Test
+    fun tomTomSeparatorsBecomeSolidLines() {
+        val L1 = ChangeSpan.LEFT; val R1 = ChangeSpan.RIGHT
+        // left | through | right with a dashed line between 1-2 and a solid one between 2-3.
+        val perms = ChangeSpan.fromTomTomSeparators(listOf("SINGLE_SOLID", "LONG_DASHED", "SINGLE_SOLID", "SINGLE_SOLID"), 3)!!
+        assertEquals(listOf(L1 or R1, L1, R1), perms)
+        // All dashed: no restriction at all.
+        assertNull(ChangeSpan.fromTomTomSeparators(listOf("SINGLE_SOLID", "SHORT_DASHED", "SINGLE_SOLID"), 2))
+        // Mixed line (dashed on the left side, solid on the right side): only the left lane may cross it.
+        assertEquals(listOf(L1 or R1, R1), ChangeSpan.fromTomTomSeparators(listOf("SINGLE_SOLID", "DASHED_SOLID", "SINGLE_SOLID"), 2))
+        val osm = listOf(ChangeSpan(100.0, 200.0, listOf(R1, L1)))
+        val tt = listOf(ChangeSpan(150.0, 180.0, perms), ChangeSpan(400.0, 430.0, perms))
+        assertEquals(listOf(100.0, 400.0), ChangeSpan.merge(osm, tt).map { it.from })
+    }
+
     /** A real change is timed on the road (fixed start), not from the moving car. */
     @Test
     fun changeStartDoesNotSlideWithTheCar() {

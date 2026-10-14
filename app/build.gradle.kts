@@ -14,6 +14,17 @@ val localProps = Properties().apply {
     if (f.exists()) f.inputStream().use { load(it) }
 }
 
+// App version: bump APP_VERSION with docs/ROADMAP.md. CI adds the run number (0.4.1.57), local builds say "-local".
+val appVersion = "0.4.1"
+val runNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
+val fullVersion = appVersion + (runNumber?.let { ".$it" } ?: "-local")
+val gitSha: String = System.getenv("GITHUB_SHA")?.take(7) ?: runCatching {
+    providers.exec { commandLine("git", "rev-parse", "--short", "HEAD") }.standardOutput.asText.get().trim()
+}.getOrDefault("dev")
+
+// APK file names: LaneWise-v0.4.1.57-release.apk instead of app-release.apk.
+base { archivesName.set("LaneWise-v$fullVersion") }
+
 fun secret(name: String): String =
     (localProps.getProperty(name) ?: System.getenv(name) ?: "").replace("\"", "")
 
@@ -25,8 +36,9 @@ android {
         applicationId = "de.lanewise.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1)
-        versionName = "0.1.${System.getenv("GITHUB_RUN_NUMBER") ?: "0"}"
+        versionCode = runNumber ?: 1
+        versionName = fullVersion
+        buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
 
         buildConfigField("String", "TOMTOM_API_KEY", "\"${secret("TOMTOM_API_KEY")}\"")
         buildConfigField("String", "HERE_API_KEY", "\"${secret("HERE_API_KEY")}\"")

@@ -52,6 +52,49 @@ class TomTomRoutingProvider(private val apiKey: String) : RoutingProvider {
         return root["routes"].arr.orEmpty().mapNotNull { parse(it) }
     }
 
+    /**
+     * Auto mode: TomTom rebuilds [route] (OSRM / OSM, whose lanes LaneWise trusts) along the same roads
+     * (`supportingPoints`, `reconstructionMode=track`) and returns the live-traffic travel time and its lane
+     * separators (solid / dashed) near junctions. Lanes, steps and geometry stay OSM's. Null on any failure.
+     */
+    suspend fun withTraffic(route: Route): Route? {
+        if (apiKey.isBlank() || route.geometry.points.size < 2) return null
+        val pts = route.geometry.points
+        val step = (pts.size + 1999) / 2000                 // keep the body small; TomTom snaps to roads anyway
+        val sample = pts.filterIndexed { i, _ -> i % step == 0 || i == pts.lastIndex }
+        val body = sample.joinToString(",", "{\"supportingPoints\":[", "]}") {
+            String.format(Locale.US, "{\"latitude\":%.6f,\"longitude\":%.6f}", it.lat, it.lon)
+        }
+        val o = pts.first(); val d = pts.last()
+        val url = String.format(Locale.US, "https://api.tomtom.com/routing/1/calculateRoute/%.6f,%.6f:%.6f,%.6f/json", o.lat, o.lon, d.lat, d.lon) +
+            "?key=$apiKey&traffic=true&travelMode=car&reconstructionMode=track&instructionsType=coded&sectionType=lanes" +
+            "&computeTravelTimeFor=all"
+        val r = runCatching { Http.postJson(url, body) }.getOrNull()?.get("routes")?.get(0) ?: return null
+        val summary = r["summary"]
+        val length = summary["lengthInMeters"].dbl ?: return null
+        // A different road (> 3 % longer/shorter) is not "the same route with traffic": keep OSM's own estimate.
+        if (kotlin.math.abs(length - route.distance) > 0.03 * route.distance) return null
+        val ttPts = r["legs"].arr.orEmpty().flatMap { leg ->
+            leg["points"].arr.orEmpty().mapNotNull { p ->
+                val la = p["latitude"].dbl; val lo = p["longitude"].dbl
+                if (la != null && lo != null) LatLon(la, lo) else null
+            }
+        }
+        fun along(i: Int?): Double? = ttPts.getOrNull(i ?: -1)?.let { route.geometry.project(it) }
+            ?.takeIf { kotlin.math.abs(it.signedOffset) < 25 }?.distanceAlong
+        val lines = r["sections"].arr.orEmpty().filter { it["sectionType"].str == "LANES" }.mapNotNull { s ->
+            val n = s["lanes"].arr?.size ?: return@mapNotNull null
+            val seps = s["laneSeparators"].arr.orEmpty().mapNotNull { it.str }
+            val perms = de.lanewise.lane.ChangeSpan.fromTomTomSeparators(seps, n) ?: return@mapNotNull null
+            val to = along(s["endPointIndex"].int) ?: return@mapNotNull null
+            val from = minOf(along(s["startPointIndex"].int) ?: to, to - 25.0)
+            de.lanewise.lane.ChangeSpan(from.coerceAtLeast(0.0), to, perms)
+        }
+        val tt = summary["travelTimeInSeconds"].dbl ?: return null
+        return route.copy(duration = tt, trafficEta = true, tomtomLaneLines = lines,
+            laneChanges = de.lanewise.lane.ChangeSpan.merge(route.laneChanges, lines))
+    }
+
     private fun parse(r: JsonElement): Route? {
         val pts = r["legs"].arr.orEmpty().flatMap { leg ->
             leg["points"].arr.orEmpty().mapNotNull { p ->

@@ -44,6 +44,15 @@ object Http {
     suspend fun getJson(url: String, headers: Map<String, String> = emptyMap()): JsonElement =
         json.parseToJsonElement(getText(url, headers))
 
+    suspend fun postJson(url: String, body: String): JsonElement = withContext(Dispatchers.IO) {
+        val req = Request.Builder().url(url).post(body.toRequestBody("application/json".toMediaType())).build()
+        client.newCall(req).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw IOException("HTTP ${resp.code} for ${url.substringBefore('?')}: ${text.take(200)}")
+            json.parseToJsonElement(text)
+        }
+    }
+
     suspend fun postForm(url: String, form: String): String = withContext(Dispatchers.IO) {
         val req = Request.Builder().url(url)
             .post(form.toRequestBody("application/x-www-form-urlencoded".toMediaType()))

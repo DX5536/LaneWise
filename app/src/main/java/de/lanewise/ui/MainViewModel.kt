@@ -50,6 +50,7 @@ import de.lanewise.traffic.TrafficService
 import de.lanewise.traffic.TrafficSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -97,6 +98,8 @@ data class UiState(
     val nearbyStreets: List<de.lanewise.osm.OsmStreet> = emptyList(),
     /** Start of the route when not the current position (route preview "From"); null = GPS position. */
     val origin: Place? = null,
+    /** Metres driven on earlier routes of this journey (re-routes), so the journey progress bar keeps counting. */
+    val journeyDriven: Double = 0.0,
     val originResults: List<Place> = emptyList(),
     /** Traffic lights / signs around the car for the browse map (a route brings its own). */
     val nearbyFeatures: List<de.lanewise.core.model.RoadFeature> = emptyList(),
@@ -305,9 +308,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             RoutingSource.OFFLINE -> listOf(offlineRouter)
             RoutingSource.OSRM -> listOf(osrm, offlineRouter)
             RoutingSource.TOMTOM -> listOf(tomtom, osrm, offlineRouter)
+            // Auto: lanes from OSM (OSRM) — they beat TomTom's on the owner's test route (17 vs 6 lane junctions) and can be
+            // fixed in OSM — then TomTom adds live traffic to that same route (withTrafficFromTomTom). TomTom routes only
+            // if OSRM fails.
             RoutingSource.AUTO -> when {
                 !online -> listOf(offlineRouter)
-                s.tomtomKey.isNotBlank() -> listOf(tomtom, osrm, offlineRouter)
+                s.tomtomKey.isNotBlank() -> listOf(osrm, tomtom, offlineRouter)
                 else -> listOf(osrm, offlineRouter)
             }
         }
@@ -321,6 +327,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun mobilithekCert(): File = File(ctx.filesDir, "mobilithek.p12")
+
+    /** Auto mode with a TomTom key: OSM routes get TomTom's live-traffic ETA and solid/dashed lines (one call each). */
+    private suspend fun withTrafficFromTomTom(routes: List<Route>, s: AppSettings, online: Boolean): List<Route> {
+        if (s.routing != RoutingSource.AUTO || s.tomtomKey.isBlank() || !online) return routes
+        val tt = TomTomRoutingProvider(s.tomtomKey)
+        return kotlinx.coroutines.coroutineScope {
+            routes.map { r -> async { if (r.provider == "osrm") tt.withTraffic(r) ?: r else r } }.map { it.await() }
+        }
+    }
 
     fun computeRoutes(origin: LatLon? = null, heading: Double? = null) {
         val dest = _ui.value.destination ?: return
@@ -346,6 +361,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 _ui.update { it.copy(routing = false, message = lastError ?: strings.noRoute) }
                 return@launch
             }
+            routes = withTrafficFromTomTom(routes, s, online)
             // Traffic-aware ranking with official German data.
             val incidents = if (online) runCatching {
                 TrafficService { trafficSources(s) }.incidents(
@@ -374,7 +390,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 features = (base.features.filter { it.distanceAlong < from } + data.features).sortedBy { it.distanceAlong },
                 bikeLanes = (base.bikeLanes.filter { it.to <= from } + data.bikeLanes).sortedBy { it.from },
                 laneCounts = (base.laneCounts.filter { it.to <= from } + data.laneCounts).sortedBy { it.from },
-                laneChanges = (base.laneChanges.filter { it.to <= from } + data.laneChanges).sortedBy { it.from },
+                laneChanges = de.lanewise.lane.ChangeSpan.merge(
+                    (base.laneChanges.filter { it.to <= from && it !in base.tomtomLaneLines } + data.laneChanges).sortedBy { it.from }, base.tomtomLaneLines),
             )
             if (_ui.value.mode == Mode.NAVIGATING) {
                 engine = NavigationEngine(updated, laneGuidance).also { it.rehydrate(engine) }
@@ -390,7 +407,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 ?: return@launch
             val updated = route.copy(
                 speedLimits = if (route.provider == "osrm") data.limits else route.speedLimits,
-                features = data.features, bikeLanes = data.bikeLanes, laneCounts = data.laneCounts, laneChanges = data.laneChanges,
+                features = data.features, bikeLanes = data.bikeLanes, laneCounts = data.laneCounts,
+                laneChanges = de.lanewise.lane.ChangeSpan.merge(data.laneChanges, route.tomtomLaneLines),
             )
             _ui.update { st -> st.copy(routes = st.routes.map { if (it === route) updated else it }) }
         }
@@ -404,7 +422,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         currentRoute = route
         engine = NavigationEngine(route, laneGuidance)
         speedFetchedUntil = 0.0
-        _ui.update { it.copy(mode = Mode.NAVIGATING, simulating = simulate, routes = listOf(route), selected = 0) }
+        _ui.update { it.copy(mode = Mode.NAVIGATING, simulating = simulate, routes = listOf(route), selected = 0, journeyDriven = 0.0) }
         notifText = ""
         de.lanewise.nav.NavigationService.start(ctx, "LaneWise", route.steps.firstOrNull()?.name.orEmpty(),
             Strings.of(settings.value.language).navChannel)
@@ -495,8 +513,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 avoidTolls = s.avoidTolls, avoidMotorways = s.avoidMotorways)
             for (p in providers(s, online)) {
                 if (p.requiresNetwork && !online) continue
-                val r = runCatching { p.route(req) }.getOrNull()?.firstOrNull() ?: continue
+                val r = runCatching { p.route(req) }.getOrNull()?.firstOrNull()
+                    ?.let { withTrafficFromTomTom(listOf(it), s, online).first() } ?: continue
                 laneGuidance.reset()
+                // Keep the journey progress: what was driven on the old route stays driven.
+                val drivenOnOld = _ui.value.nav?.distanceAlong ?: 0.0
+                _ui.update { it.copy(journeyDriven = it.journeyDriven + drivenOnOld) }
                 currentRoute = r
                 engine = NavigationEngine(r, laneGuidance)
                 speedFetchedUntil = 0.0

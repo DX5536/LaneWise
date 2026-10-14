@@ -124,6 +124,37 @@ fun SpeedPanel(speedKmh: Float, status: SpeedStatus, modifier: Modifier = Modifi
     }
 }
 
+/** A 3-lamp signal head; [arrow] = LaneDir bit for arrow-shaped lamps (Pfeilsignal), null = round lamps. */
+@Composable
+private fun SignalHead(arrow: Int?, inferred: Boolean) {
+    val lamps = listOf(Color(0xFFE5484D), Color(0xFFF5A524), Color(0xFF2ECC71))
+    Canvas(Modifier.size(width = 20.dp, height = 46.dp)) {
+        val w = size.width; val h = size.height
+        val corner = androidx.compose.ui.geometry.CornerRadius(w * 0.25f)
+        drawRoundRect(Color.Black, cornerRadius = corner)
+        drawRoundRect(if (inferred) Color(0xFF9AA0AE) else Color(0xFF5A5F6E), cornerRadius = corner,
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = w * 0.07f,
+                pathEffect = if (inferred) androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(w * 0.18f, w * 0.12f)) else null))
+        val r = w * 0.32f
+        lamps.forEachIndexed { i, col ->
+            val c = Offset(w / 2, h * (0.18f + 0.32f * i))
+            if (arrow == null) drawCircle(col, r, c)
+            else {
+                // Dark lamp with a coloured arrow, as German arrow signals look.
+                drawCircle(Color(0xFF222429), r, c)
+                val d = if (arrow and de.lanewise.lane.LaneDir.ANY_LEFT != 0) -1f else 1f
+                val a = r * 0.75f
+                val path = androidx.compose.ui.graphics.Path().apply {
+                    moveTo(c.x + d * a, c.y); lineTo(c.x + d * 0.05f * a, c.y - 0.62f * a); lineTo(c.x + d * 0.05f * a, c.y - 0.22f * a)
+                    lineTo(c.x - d * a, c.y - 0.22f * a); lineTo(c.x - d * a, c.y + 0.22f * a); lineTo(c.x + d * 0.05f * a, c.y + 0.22f * a)
+                    lineTo(c.x + d * 0.05f * a, c.y + 0.62f * a); close()
+                }
+                drawPath(path, col)
+            }
+        }
+    }
+}
+
 /**
  * Next traffic light as a vertical card on the left above the speed (owner's layout): the signal head, then the
  * separate arrow signals that are likely there (inferred from turn-only lanes: dashed outline), Grünpfeil (Zeichen 720)
@@ -132,41 +163,21 @@ fun SpeedPanel(speedKmh: Float, status: SpeedStatus, modifier: Modifier = Modifi
 @Composable
 fun SignalCard(sig: de.lanewise.core.model.SignalCluster, modifier: Modifier = Modifier) {
     val green = Color(0xFF2ECC71)
-    Column(
+    // Horizontal card under the banner, bold white border so it stands out on the map (owner's layout).
+    Row(
         modifier.clip(RoundedCornerShape(14.dp)).background(Color(0xF01A1D24))
-            .border(1.5.dp, Color(0xFF6C4CF5), RoundedCornerShape(14.dp)).padding(horizontal = 8.dp, vertical = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+            .border(3.dp, Color.White, RoundedCornerShape(14.dp)).padding(horizontal = 12.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        // Main signal head.
-        Canvas(Modifier.size(width = 26.dp, height = 62.dp)) {
-            val w = size.width; val h = size.height
-            drawRoundRect(Color.Black, cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.25f))
-            drawRoundRect(Color(0xFF5A5F6E), cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.25f),
-                style = androidx.compose.ui.graphics.drawscope.Stroke(width = w * 0.06f))
-            val r = w * 0.3f
-            listOf(Color(0xFFE5484D), Color(0xFFF5A524), green).forEachIndexed { i, col ->
-                drawCircle(col, r, Offset(w / 2, h * (0.19f + 0.31f * i)))
-            }
-        }
-        val arrows = listOf(de.lanewise.lane.LaneDir.ANY_LEFT to de.lanewise.lane.LaneDir.LEFT,
-            de.lanewise.lane.LaneDir.ANY_RIGHT to de.lanewise.lane.LaneDir.RIGHT)
-            .filter { (any, _) -> sig.inferredArrowSignals and any != 0 }
-        for ((_, bit) in arrows) {
-            Box(
-                Modifier.size(30.dp).clip(RoundedCornerShape(6.dp)).background(Color.Black)
-                    .drawBehind {
-                        drawRoundRect(Color(0xFF9AA0AE), cornerRadius = androidx.compose.ui.geometry.CornerRadius(6.dp.toPx()),
-                            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.dp.toPx(),
-                                pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 3.dp.toPx()))))
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                Canvas(Modifier.size(20.dp)) {
-                    LaneArrows.draw(this, bit, bit, green, green, size.width * LaneArrows.SHAFT) { p -> Offset(p.x * size.width, p.y * size.height) }
-                }
-            }
-        }
+        // One signal head per lane group, in road order like the owner's photo (Hannover): a head with arrow lamps for
+        // the left-turn lanes, the round head for straight on, an arrow head for right-turn lanes. Arrow heads are
+        // inferred from turn-only lanes (OSM has no tag for signal heads) and get a dashed outline.
+        val left = sig.inferredArrowSignals and de.lanewise.lane.LaneDir.ANY_LEFT != 0
+        val right = sig.inferredArrowSignals and de.lanewise.lane.LaneDir.ANY_RIGHT != 0
+        if (left) SignalHead(de.lanewise.lane.LaneDir.LEFT, inferred = true)
+        SignalHead(null, inferred = false)
+        if (right) SignalHead(de.lanewise.lane.LaneDir.RIGHT, inferred = true)
         if (sig.greenArrow) {
             Box(Modifier.size(width = 30.dp, height = 22.dp).clip(RoundedCornerShape(3.dp)).background(Color.Black), contentAlignment = Alignment.Center) {
                 Canvas(Modifier.size(18.dp)) {
@@ -280,6 +291,8 @@ fun BikeLaneChip(exclusive: Boolean, color: Color, modifier: Modifier = Modifier
 fun ManeuverBanner(
     step: RouteStep?, distanceText: String, instruction: String, then: RouteStep?, thenText: String?,
     modifier: Modifier = Modifier, countdown: Float? = null, lanesBelow: Boolean = false,
+    /** Left of the "Then" row, under the banner / lane bar (the next traffic light). */
+    belowLeft: (@Composable () -> Unit)? = null,
     below: @Composable () -> Unit = {},
 ) {
     val c = LocalLaneColors.current
@@ -306,10 +319,9 @@ fun ManeuverBanner(
             }
         }
         below()
-        if (then != null && thenText != null) {
-            Row(
-                Modifier.padding(start = 12.dp, top = 4.dp).clip(RoundedCornerShape(12.dp)).background(c.banner.copy(alpha = 0.92f))
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
+        val thenChip: @Composable (Modifier) -> Unit = { m ->
+            if (then != null && thenText != null) Row(
+                m.clip(RoundedCornerShape(12.dp)).background(c.banner.copy(alpha = 0.92f)).padding(horizontal = 10.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(thenText, color = c.onBanner, fontSize = 13.sp)
@@ -317,6 +329,14 @@ fun ManeuverBanner(
                 ManeuverIcon(then, c.onBanner, Modifier.size(20.dp))
             }
         }
+        if (belowLeft != null) {
+            // Owner's layout: traffic light left-aligned with the banner, "Then" on the right of the same row.
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                belowLeft()
+                Spacer(Modifier.weight(1f))
+                thenChip(Modifier)
+            }
+        } else thenChip(Modifier.padding(start = 12.dp, top = 4.dp))
     }
 }
 
@@ -339,11 +359,24 @@ fun ManeuverIcon(step: RouteStep, color: Color, modifier: Modifier = Modifier) {
 fun EtaBar(
     remainingText: String, distanceText: String, etaText: String,
     onClose: () -> Unit, onOverview: () -> Unit, modifier: Modifier = Modifier,
+    /** Share of the journey driven (0..1): violet bar along the top of the panel with a lime marker at the car. */
+    progress: Float? = null,
 ) {
     val c = LocalLaneColors.current
+    Column(modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp)).background(c.chip)) {
+    if (progress != null) {
+        val p by androidx.compose.animation.core.animateFloatAsState(progress.coerceIn(0f, 1f), label = "journey")
+        Canvas(Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 8.dp).height(10.dp)) {
+            val h = 6.dp.toPx(); val y = (size.height - h) / 2
+            val r = androidx.compose.ui.geometry.CornerRadius(h / 2)
+            drawRoundRect(Color(0xFF3A3F4B), Offset(0f, y), Size(size.width, h), r)
+            drawRoundRect(Color(0xFF6C4CF5), Offset(0f, y), Size(size.width * p, h), r)
+            val x = (size.width * p).coerceIn(2.dp.toPx(), size.width - 2.dp.toPx())
+            drawLine(Color(0xFFB8F33A), Offset(x, 0f), Offset(x, size.height), 4.dp.toPx(), StrokeCap.Round)
+        }
+    }
     Row(
-        modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp)).background(c.chip)
-            .padding(horizontal = 20.dp, vertical = 14.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         RoundAction(RoundIcon.CLOSE, onClose)
@@ -352,6 +385,7 @@ fun EtaBar(
             Text("$distanceText · $etaText", color = c.onChip.copy(alpha = 0.7f), fontSize = 15.sp)
         }
         RoundAction(RoundIcon.OVERVIEW, onOverview)
+    }
     }
 }
 
@@ -362,7 +396,10 @@ enum class RoundIcon { CLOSE, OVERVIEW }
 fun RoundAction(icon: RoundIcon, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val c = LocalLaneColors.current
     Box(
-        modifier.size(48.dp).clip(CircleShape).border(1.5.dp, c.onChip.copy(alpha = 0.6f), CircleShape).clickable(onClick = onClick),
+        modifier.size(48.dp).clip(CircleShape)
+            .border(if (icon == RoundIcon.CLOSE) 2.5.dp else 1.5.dp,
+                if (icon == RoundIcon.CLOSE) Color(0xFFE5484D) else c.onChip.copy(alpha = 0.6f), CircleShape)
+            .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Canvas(Modifier.size(20.dp)) {
@@ -371,8 +408,10 @@ fun RoundAction(icon: RoundIcon, onClick: () -> Unit, modifier: Modifier = Modif
             val col = c.onChip
             when (icon) {
                 RoundIcon.CLOSE -> {
-                    drawLine(col, Offset(w * 0.15f, w * 0.15f), Offset(w * 0.85f, w * 0.85f), stroke, StrokeCap.Round)
-                    drawLine(col, Offset(w * 0.85f, w * 0.15f), Offset(w * 0.15f, w * 0.85f), stroke, StrokeCap.Round)
+                    // End navigation: red and bold so it is found at a glance.
+                    val red = Color(0xFFE5484D); val bold = w * 0.17f
+                    drawLine(red, Offset(w * 0.15f, w * 0.15f), Offset(w * 0.85f, w * 0.85f), bold, StrokeCap.Round)
+                    drawLine(red, Offset(w * 0.85f, w * 0.15f), Offset(w * 0.15f, w * 0.85f), bold, StrokeCap.Round)
                 }
                 RoundIcon.OVERVIEW -> {
                     // Four corner brackets: "show whole route".
