@@ -61,6 +61,7 @@ class LaneGuidance(private val planner: LanePlanner = LanePlanner()) {
         avoidLaneChanges: Boolean,
         keepRight: Boolean,
         changeSpans: List<ChangeSpan> = emptyList(),
+        laneCountAt: ((Double) -> Int?)? = null,
     ): LaneState {
         // Advance the "assumed lane" over sites we have passed.
         val passed = sites.lastOrNull { it.distanceAlong < carDistance }
@@ -83,7 +84,7 @@ class LaneGuidance(private val planner: LanePlanner = LanePlanner()) {
 
         val plan = planner.plan(
             sites,
-            LanePlanner.Options(avoidLaneChanges, keepRight, assumedLateral, carDistance, changeSpans = changeSpans),
+            LanePlanner.Options(avoidLaneChanges, keepRight, assumedLateral, carDistance, changeSpans = changeSpans, laneCountAt = laneCountAt),
         )
         lastPlan = plan
         if (plan.isEmpty()) return LaneState(null, emptyList(), null, true, assumedLateral)

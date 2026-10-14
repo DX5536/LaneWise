@@ -98,10 +98,13 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, ui: UiState, onBack: () ->
         Section(str.laneAssist) {
             Toggle(str.avoidChanges, str.avoidChangesSub, s.avoidLaneChanges) { v -> set { it.copy(avoidLaneChanges = v) } }
             Toggle(str.keepRight, str.keepRightSub, s.keepRight) { v -> set { it.copy(keepRight = v) } }
-            Toggle(str.laneScene, str.laneSceneSub, s.showLaneScene) { v -> set { it.copy(showLaneScene = v) } }
-            Toggle(str.junctionZoom, null, s.junctionZoom) { v -> set { it.copy(junctionZoom = v) } }
-            LabeledSlider(str.closeUpFrom, s.laneSceneDistance.toFloat(), 20f..300f, "${s.laneSceneDistance} ${str.beforeJunction}") { v ->
-                set { it.copy(laneSceneDistance = (v / 10).toInt() * 10) }
+            Toggle(str.immersiveView, str.immersiveViewSub, s.immersiveView) { v -> set { it.copy(immersiveView = v) } }
+            if (!s.immersiveView) {
+                Toggle(str.laneScene, str.laneSceneSub, s.showLaneScene) { v -> set { it.copy(showLaneScene = v) } }
+                Toggle(str.junctionZoom, null, s.junctionZoom) { v -> set { it.copy(junctionZoom = v) } }
+                LabeledSlider(str.closeUpFrom, s.laneSceneDistance.toFloat(), 20f..300f, "${s.laneSceneDistance} ${str.beforeJunction}") { v ->
+                    set { it.copy(laneSceneDistance = (v / 10).toInt() * 10) }
+                }
             }
             Toggle(str.laneRibbons, str.laneRibbonsSub, s.laneRibbonsOnMap) { v -> set { it.copy(laneRibbonsOnMap = v) } }
         }

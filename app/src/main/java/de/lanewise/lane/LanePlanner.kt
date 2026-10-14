@@ -59,6 +59,8 @@ class LanePlanner(private val config: Config = Config()) {
         val freeTurnEntry: Boolean = true,
         /** Solid-line stretches (OSM `change:lanes`): changes must happen where the line is dashed. */
         val changeSpans: List<ChangeSpan> = emptyList(),
+        /** Lanes in driving direction at a route distance (OSM), to tell lanes that open from lanes that existed. */
+        val laneCountAt: ((Double) -> Int?)? = null,
     )
 
     /** Moving from lane i of one site to lane j of the next: the lane entered after the junction and the changes after it. */
@@ -86,7 +88,14 @@ class LanePlanner(private val config: Config = Config()) {
         return horizon.mapIndexed { k, site ->
             val entry = if (k == 0) options.currentLateral
             else transition(horizon[k - 1], path[k - 1], allowed[k - 1], site, path[k], options.freeTurnEntry).entry
-            val change = if (entry == null) 0 else site.lateral(path[k]) - entry
+            val target = site.lateral(path[k])
+            val changes = when {
+                entry == null -> 0
+                k == 0 -> effectiveChanges(site, entry, target, minLanes(options, options.carDistance, site.distanceAlong))
+                else -> transition(horizon[k - 1], path[k - 1], allowed[k - 1], site, path[k], options.freeTurnEntry,
+                    minLanes(options, horizon[k - 1].distanceAlong, site.distanceAlong)).changes
+            }
+            val change = if (entry == null) 0 else changes * Integer.signum(target - entry)
             LaneAdvice(
                 site = site,
                 recommended = path[k],
@@ -127,16 +136,48 @@ class LanePlanner(private val config: Config = Config()) {
      * enter any through lane of the new road — the one that is already right for [j] if possible — at a small
      * [Config.turnEntryCost] per lane away from the corresponding lane; remaining offsets are lane changes.
      */
-    fun transition(prev: LaneSite, i: Int, prevAllowed: BooleanArray, next: LaneSite, j: Int, freeEntry: Boolean = true): Transition {
+    fun transition(
+        prev: LaneSite, i: Int, prevAllowed: BooleanArray, next: LaneSite, j: Int, freeEntry: Boolean = true,
+        gapLanes: Int? = null,
+    ): Transition {
         val corr = entryLateral(prev, i, prevAllowed, next)
         val target = next.lateral(j)
-        if (!freeEntry || !prev.isManeuver || prev.turn == LaneDir.STRAIGHT) return Transition(corr, abs(target - corr), 0.0)
+        val turned = prev.isManeuver && prev.turn != LaneDir.STRAIGHT
+        if (!freeEntry || !turned) return Transition(corr, effectiveChanges(next, corr, target, gapLanes), 0.0)
         // Any lane of the new road may be entered, including one that becomes a turn lane further on:
         // keeping to that side after the turn is not a lane change.
         val lo = next.lateral(next.laneCount - 1)
         val hi = next.lateral(0)
         val e = target.coerceIn(lo, hi)
-        return Transition(e, abs(target - e), config.turnEntryCost * abs(e - corr))
+        return Transition(e, effectiveChanges(next, e, target, gapLanes), config.turnEntryCost * abs(e - corr))
+    }
+
+    /** Fewest lanes in driving direction between [d0] and [d1] (OSM), or null if unknown. */
+    fun minLanes(options: Options, d0: Double, d1: Double): Int? {
+        val f = options.laneCountAt ?: return null
+        var best: Int? = null
+        var d = d0 + 5
+        while (d < d1 - 5) {
+            f(d)?.let { n -> if (best == null || n < best!!) best = n }
+            d += 10
+        }
+        return best
+    }
+
+    /**
+     * Lane changes needed to get from lateral [from] to [to] before [site]. Only crossings between lanes that
+     * existed along the whole way there count: when the road had just [gapLanes] lanes somewhere in between (e.g.
+     * one lane widening to three before a junction, or a turn pocket opening), moving into the lanes that open is
+     * not a lane change — you just follow the road into your lane. Unknown [gapLanes] counts every crossing.
+     */
+    fun effectiveChanges(site: LaneSite, from: Int, to: Int, gapLanes: Int?): Int {
+        if (from == to) return 0
+        if (gapLanes == null || gapLanes >= site.laneCount) return abs(to - from)
+        // Lanes that existed throughout: the rightmost [gapLanes] through lanes (right pockets open later).
+        val hi = gapLanes - 1
+        fun existed(x: Int) = x in 0..hi
+        return if (to > from) (from until to).count { existed(it) && existed(it + 1) }
+        else (to + 1..from).count { existed(it) && existed(it - 1) }
     }
 
     /**
@@ -214,8 +255,7 @@ class LanePlanner(private val config: Config = Config()) {
             }
         }
 
-        fun edgeCost(fromLat: Int, toLat: Int, d0: Double, d1: Double, kind: RoadKind): Double {
-            val changes = abs(toLat - fromLat)
+        fun edgeCost(changes: Int, fromLat: Int, toLat: Int, d0: Double, d1: Double, kind: RoadKind): Double {
             if (changes == 0) return 0.0
             val gap = d1 - d0
             val usable = gap - blockedLength(options.changeSpans, fromLat, toLat, d0, d1)
@@ -228,10 +268,14 @@ class LanePlanner(private val config: Config = Config()) {
 
         // Layer 0: from the car.
         val s0 = sites[0]
+        val gap0Lanes = minLanes(options, options.carDistance, s0.distanceAlong)
+        val gapLanes = (1 until n).map { minLanes(options, sites[it - 1].distanceAlong, sites[it].distanceAlong) }
         for (j in 0 until s0.laneCount) {
             val nc = nodeCost(0, j)
             if (nc >= INF) continue
-            val start = options.currentLateral?.let { edgeCost(it, s0.lateral(j), options.carDistance, s0.distanceAlong, s0.roadKind) } ?: 0.0
+            val start = options.currentLateral?.let {
+                edgeCost(effectiveChanges(s0, it, s0.lateral(j), gap0Lanes), it, s0.lateral(j), options.carDistance, s0.distanceAlong, s0.roadKind)
+            } ?: 0.0
             forward[0][j] = nc + start
         }
         // Layers 1..n-1.
@@ -246,9 +290,9 @@ class LanePlanner(private val config: Config = Config()) {
                 for (i in 0 until prev.laneCount) {
                     val f = forward[k - 1][i]
                     if (f >= INF) continue
-                    val tr = transition(prev, i, allowed[k - 1], cur, j, options.freeTurnEntry)
+                    val tr = transition(prev, i, allowed[k - 1], cur, j, options.freeTurnEntry, gapLanes[k - 1])
                     val c = tr.changes
-                    val e = edgeCost(tr.entry, cur.lateral(j), prev.distanceAlong, cur.distanceAlong, cur.roadKind)
+                    val e = edgeCost(c, tr.entry, cur.lateral(j), prev.distanceAlong, cur.distanceAlong, cur.roadKind)
                     val v = f + tr.entryCost + e + if (c == 0) 0.0 else TIE_EPS * i
                     if (v < best - 1e-9) { best = v; arg = i }
                 }
@@ -272,8 +316,8 @@ class LanePlanner(private val config: Config = Config()) {
                     if (b >= INF) continue
                     val nc = nodeCost(k + 1, j)
                     if (nc >= INF) continue
-                    val tr = transition(cur, i, allowed[k], next, j, options.freeTurnEntry)
-                    val e = edgeCost(tr.entry, next.lateral(j), cur.distanceAlong, next.distanceAlong, next.roadKind)
+                    val tr = transition(cur, i, allowed[k], next, j, options.freeTurnEntry, gapLanes[k])
+                    val e = edgeCost(tr.changes, tr.entry, next.lateral(j), cur.distanceAlong, next.distanceAlong, next.roadKind)
                     best = min(best, b + nc + tr.entryCost + e)
                 }
                 backward[k][i] = best

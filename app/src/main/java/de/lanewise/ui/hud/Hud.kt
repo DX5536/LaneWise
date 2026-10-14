@@ -344,3 +344,28 @@ fun GnssBadge(info: GnssInfo, online: Boolean, modifier: Modifier = Modifier) {
         if (!online) Text(LocalStrings.current.offline, color = c.onChip.copy(alpha = 0.7f), fontSize = 12.sp)
     }
 }
+
+/** "Solid line ahead" (AMAP 前方实线): lane changes stop being allowed in [distanceText]. */
+@Composable
+fun SolidLineChip(label: String, distanceText: String, modifier: Modifier = Modifier) {
+    val c = LocalLaneColors.current
+    Row(
+        modifier.clip(RoundedCornerShape(14.dp)).background(c.chip).padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Two lanes, dashed divider turning solid.
+        Canvas(Modifier.size(width = 18.dp, height = 26.dp)) {
+            val w = size.width; val h = size.height; val sw = w * 0.12f
+            drawLine(c.onChip, Offset(sw, 0f), Offset(sw, h), sw)
+            drawLine(c.onChip, Offset(w - sw, 0f), Offset(w - sw, h), sw)
+            drawLine(c.onChip, Offset(w / 2, h * 0.55f), Offset(w / 2, h * 0.75f), sw)
+            drawLine(c.onChip, Offset(w / 2, h * 0.85f), Offset(w / 2, h), sw)
+            drawLine(Color(0xFFB8F33A), Offset(w / 2, 0f), Offset(w / 2, h * 0.45f), sw * 1.4f)
+        }
+        Spacer(Modifier.width(8.dp))
+        Column {
+            Text(label, color = c.onChip, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text(distanceText, color = c.onChip, fontSize = 13.sp)
+        }
+    }
+}

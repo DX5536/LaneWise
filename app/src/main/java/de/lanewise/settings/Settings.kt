@@ -23,6 +23,8 @@ data class AppSettings(
     val avoidLaneChanges: Boolean = true,
     val keepRight: Boolean = true,
     val showLaneScene: Boolean = true,
+    /** AMAP-style navigation view: no junction box, the camera zooms in at decisions and out on plain stretches. */
+    val immersiveView: Boolean = true,
     /** Show the 3D junction close-up (and zoom the map in) only this close to the junction (m). */
     val laneSceneDistance: Int = 50,
     /** Zoom the map camera in when approaching a junction. */
@@ -83,6 +85,7 @@ class SettingsRepository(private val context: Context) {
         val bikeColor = intPreferencesKey("bike_lane_color")
         val signs = booleanPreferencesKey("signs")
         val satellite = booleanPreferencesKey("satellite")
+        val immersive = booleanPreferencesKey("immersive_view")
         val aerialLanes = booleanPreferencesKey("aerial_lanes")
         val voicePacks = stringPreferencesKey("voice_packs")
         val over = booleanPreferencesKey("over_speed")
@@ -113,6 +116,7 @@ class SettingsRepository(private val context: Context) {
             avoidLaneChanges = p[K.avoid] ?: d.avoidLaneChanges,
             keepRight = p[K.keepRight] ?: d.keepRight,
             showLaneScene = p[K.laneScene] ?: d.showLaneScene,
+            immersiveView = p[K.immersive] ?: d.immersiveView,
             laneSceneDistance = p[K.laneSceneDist] ?: d.laneSceneDistance,
             junctionZoom = p[K.junctionZoom] ?: d.junctionZoom,
             laneRibbonsOnMap = p[K.ribbons] ?: d.laneRibbonsOnMap,
@@ -151,6 +155,7 @@ class SettingsRepository(private val context: Context) {
             p[K.avoid] = s.avoidLaneChanges
             p[K.keepRight] = s.keepRight
             p[K.laneScene] = s.showLaneScene
+            p[K.immersive] = s.immersiveView
             p[K.laneSceneDist] = s.laneSceneDistance
             p[K.junctionZoom] = s.junctionZoom
             p[K.ribbons] = s.laneRibbonsOnMap

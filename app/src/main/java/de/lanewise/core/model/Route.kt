@@ -161,6 +161,8 @@ data class SignalCluster(
     val onDemand: Boolean,
     /** LaneDir bits of exclusive-turn lanes at this junction that probably have their own arrow signal (inferred). */
     val inferredArrowSignals: Int,
+    /** Where the first signal of the junction stands (for the map pop-up). */
+    val position: LatLon? = null,
 )
 
 /**

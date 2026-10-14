@@ -20,7 +20,7 @@ import kotlin.math.roundToInt
  */
 object LaneRibbonBuilder {
 
-    enum class Kind { SURFACE, BIKE, RECOMMENDED, ALLOWED, ARROW, EDGE, DIVIDER, DIVIDER_SOLID, STOP }
+    enum class Kind { SURFACE, BIKE, RECOMMENDED, ALLOWED, ARROW, EDGE, DIVIDER, DIVIDER_SOLID, STOP, TURN_ARROW }
 
     /** Either a closed polygon (fill) or an open line; [widthM] is used for lines only. */
     data class Shape(val points: List<LatLon>, val kind: Kind, val polygon: Boolean, val widthM: Double = 0.15)
@@ -46,6 +46,9 @@ object LaneRibbonBuilder {
         var w = 3.0
         var twoWay = false
         var rightPockets = 0
+        var rightPocketsT = 0.0  // tapered like [lanes], so the planned lane does not move while a pocket opens
+        var leftPockets = 0
+        var leftPocketsT = 0.0
         var left = 0.0           // offset of left carriageway edge (m, + = right of centre line)
         val right get() = left + lanes * w
         fun at(off: Double) = Geo.destination(p, bearing + 90.0, off)
@@ -67,32 +70,29 @@ object LaneRibbonBuilder {
         }
     }
 
-    fun build(
-        route: Route, state: LaneState, carDistance: Double, ahead: Double = 1200.0, behind: Double = 60.0,
-        showBikeLanes: Boolean = true,
-    ): Ribbon {
-        val line = route.geometry
-        val from = max(0.0, carDistance - behind)
-        val to = min(line.length, carDistance + ahead)
-        if (to - from < 20) return Ribbon(emptyList(), emptyList())
+    /** Sample grid spacing (m). Samples sit at fixed route distances, so geometry never shifts between frames. */
+    private const val GRID = 6.0
 
-        val samples = smoothedSamples(line, from, to)
-        if (samples.size < 3) return Ribbon(emptyList(), emptyList())
-        assignLanes(route, samples)
+    /** Samples on the fixed route grid covering [from]..[to] (plus smoothing context), with lane data. */
+    private fun gridSamples(route: Route, from: Double, to: Double): List<S> {
+        val a = max(0.0, kotlin.math.floor(from / GRID) * GRID)
+        val b = min(route.geometry.length, kotlin.math.ceil(to / GRID) * GRID)
+        if (b - a < 20) return emptyList()
+        val samples = smoothedSamples(route.geometry, a, b)
+        if (samples.size >= 3) assignLanes(route, samples)
+        return samples
+    }
 
-        // Centre of the planned lane per sample. Counted from the right edge (lateral 0 = rightmost through lane),
-        // which stays put while left-turn pockets open, then smoothed over ±20 m so lane-count changes and
-        // pocket openings become gentle curves instead of steps.
-        val plan = state.plan
-        val keys = if (plan.isNotEmpty()) keyframes(state, carDistance, behind)
-        else listOf(carDistance to (state.assumedLateral ?: 0).toDouble())
-        val rawCentres = samples.map { s ->
-            val lat = interpolate(keys, s.d)
-            (s.right - (lat + s.rightPockets + 0.5) * s.w).coerceIn(s.left + 0.5 * s.w, max(s.left + 0.5 * s.w, s.right - 0.5 * s.w))
-        }
-        val centres = movingAverage(samples, rawCentres, 20.0)
-        val lanePath = samples.mapIndexed { i, s -> s.d to s.at(centres[i]) }
-
+    /**
+     * The route's road for [from]..[to]: surface, bike lanes, dividers, edges, stop lines and painted arrows. It does
+     * not depend on the car, so the map builds it once per piece of route (see MapController) — no regeneration and
+     * no jitter while driving; only [build]'s highlight moves.
+     */
+    fun buildRoad(route: Route, from: Double, to: Double, showBikeLanes: Boolean = true): List<Shape> {
+        val all = gridSamples(route, from - 120, to + 120)          // context for smoothing and tapers
+        if (all.size < 3) return emptyList()
+        val samples = all.filter { it.d >= from - GRID && it.d <= to + GRID }   // one sample overlap with neighbours
+        if (samples.size < 2) return emptyList()
         val out = ArrayList<Shape>()
 
         // Road surface.
@@ -107,30 +107,10 @@ object LaneRibbonBuilder {
             }
         }
 
-        // Recommended lane ribbon (and the other optimal lanes just before the next site).
-        if (plan.isNotEmpty()) {
-            val hw = samples.map { it.w * 0.36 }
-            val endIdx = samples.indexOfLast { it.d <= plan.last().site.distanceAlong + 40 }.coerceAtLeast(1)
-            out += polygon(
-                (0..endIdx).map { samples[it].at(centres[it] - hw[it]) },
-                (0..endIdx).map { samples[it].at(centres[it] + hw[it]) },
-                Kind.RECOMMENDED,
-            )
-            val next = plan.first()
-            val near = samples.filter { it.d in (next.site.distanceAlong - 150)..(next.site.distanceAlong - 3) }
-            if (near.size >= 2) {
-                for (i in 0 until next.site.laneCount) {
-                    if (i == next.recommended || !next.optimal.getOrElse(i) { false }) continue
-                    out += polygon(near.map { it.at(it.left + (i + 0.5) * it.w - it.w * 0.3) },
-                        near.map { it.at(it.left + (i + 0.5) * it.w + it.w * 0.3) }, Kind.ALLOWED)
-                }
-            }
-        }
-
         // Dividers: one per lane boundary, only where both neighbouring lanes (almost) fully exist.
         val maxLanes = samples.maxOf { it.nominal }
-        val sites = route.laneSites.filter { it.distanceAlong in from..(to + 40) }
-        fun nearSite(d: Double) = sites.any { d in (it.distanceAlong - 30)..it.distanceAlong }
+        val near = route.laneSites.filter { it.distanceAlong in (from - 40)..(to + 40) }
+        fun nearSite(d: Double) = near.any { d in (it.distanceAlong - 30)..it.distanceAlong }
         for (k in 1 until maxLanes) {
             // Solid: last 30 m before a junction, or where OSM `change:lanes` forbids crossing this line.
             fun solidAt(s: S) = nearSite(s.d) || route.laneChangeAt(s.d)?.solidBoundary(k, s.nominal) == true
@@ -141,14 +121,120 @@ object LaneRibbonBuilder {
         out += Shape(samples.map { it.at(it.left) }, Kind.EDGE, false, 0.18)
         out += Shape(samples.map { it.at(it.right) }, Kind.EDGE, false, 0.18)
 
-        // Stop lines and painted arrows at each lane site in view.
-        for (site in sites) {
-            val s = samples.minByOrNull { abs(it.d - (site.distanceAlong - 2)) } ?: continue
+        // Stop lines and painted arrows of the sites in this piece.
+        val allSites = route.laneSites.sortedBy { it.distanceAlong }
+        for (site in route.laneSites.filter { it.distanceAlong >= from && it.distanceAlong < to }) {
+            // Second node of the same junction (dual carriageway): one stop line and one row of arrows is enough.
+            if (allSites.any { it.distanceAlong < site.distanceAlong && site.distanceAlong - it.distanceAlong < 35 }) continue
+            val s = all.minByOrNull { abs(it.d - (site.distanceAlong - 2)) } ?: continue
             if (abs(s.d - (site.distanceAlong - 2)) > 6) continue
             out += Shape(listOf(s.at(s.left), s.at(s.left + site.laneCount * s.w)), Kind.STOP, false, 0.5)
-            paintArrows(site, samples, out)
+            paintArrows(site, all, out)
         }
+        return out
+    }
+
+    /**
+     * The live part: recommended-lane strip, band of usable lanes and the turn arrow, plus [Ribbon.lanePath] for the
+     * car. Built on the same fixed grid as [buildRoad], so it lines up with the road exactly.
+     */
+    fun build(
+        route: Route, state: LaneState, carDistance: Double, ahead: Double = 1200.0, behind: Double = 60.0,
+    ): Ribbon {
+        val from = max(0.0, carDistance - behind)
+        val to = min(route.geometry.length, carDistance + ahead)
+        val samples = gridSamples(route, from, to)
+        if (samples.size < 3) return Ribbon(emptyList(), emptyList())
+
+        // Centre of the planned lane per sample. Counted from the right edge of the through lanes (lateral 0 =
+        // rightmost through lane), which stays put while turn pockets open on either side, then smoothed over ±20 m
+        // so lane-count changes and pocket openings become gentle curves instead of steps.
+        val plan = state.plan
+        val keys = if (plan.isNotEmpty()) keyframes(state, carDistance, behind)
+        else listOf(carDistance to (state.assumedLateral ?: 0).toDouble())
+        val rawCentres = samples.map { s ->
+            val lat = interpolate(keys, s.d)
+            (s.right - (lat + s.rightPocketsT + 0.5) * s.w).coerceIn(s.left + 0.5 * s.w, max(s.left + 0.5 * s.w, s.right - 0.5 * s.w))
+        }
+        val centres = movingAverage(samples, rawCentres, 20.0)
+        val lanePath = samples.mapIndexed { i, s -> s.d to s.at(centres[i]) }
+
+        val out = ArrayList<Shape>()
+        if (plan.isNotEmpty()) {
+            val hw = samples.map { it.w * 0.36 }
+            val endIdx = samples.indexOfLast { it.d <= plan.last().site.distanceAlong + 40 }.coerceAtLeast(1)
+            out += polygon(
+                (0..endIdx).map { samples[it].at(centres[it] - hw[it]) },
+                (0..endIdx).map { samples[it].at(centres[it] + hw[it]) },
+                Kind.RECOMMENDED,
+            )
+            // Soft band under the lime strip: every lane the route can use up to each site (AMAP's two-level carpet).
+            band(plan, samples, carDistance - behind)?.let { out += it }
+        }
+
+        // Raised arrow through the next turn, from just before the stop line into the new road (AMAP style).
+        val ribbonPath = Ribbon(emptyList(), lanePath)
+        route.steps.firstOrNull { st ->
+            st.distanceAlong > carDistance + 2 && st.distanceAlong - carDistance < 300 &&
+                st.maneuver.type != de.lanewise.core.model.ManeuverType.DEPART &&
+                st.maneuver.type != de.lanewise.core.model.ManeuverType.ARRIVE &&
+                st.maneuver.modifier != de.lanewise.core.model.Modifier.STRAIGHT
+        }?.let { st -> turnArrow(ribbonPath, st.distanceAlong - 14, minOf(st.distanceAlong + 24, to - 1))?.let { out += it } }
         return Ribbon(out, lanePath)
+    }
+
+    /**
+     * Band over the lanes the route can use (the contiguous block of allowed lanes around the recommended one) from
+     * the previous site to each site, smoothed, clamped to the drawn road.
+     */
+    private fun band(plan: List<LaneAdvice>, samples: List<S>, from: Double): Shape? {
+        val lo = DoubleArray(samples.size) { Double.NaN }
+        val hi = DoubleArray(samples.size) { Double.NaN }
+        var prev = from
+        for (a in plan) {
+            val allowed = a.allowed
+            var l = a.recommended; var r = a.recommended
+            while (l - 1 >= 0 && allowed.getOrElse(l - 1) { false }) l--
+            while (r + 1 < a.site.laneCount && allowed.getOrElse(r + 1) { false }) r++
+            val leftLat = a.site.lateral(l).toDouble(); val rightLat = a.site.lateral(r).toDouble()
+            for (i in samples.indices) {
+                val s = samples[i]
+                if (s.d < prev || s.d > a.site.distanceAlong || !lo[i].isNaN()) continue
+                val coreRight = s.right - s.rightPocketsT * s.w
+                lo[i] = (coreRight - (leftLat + 1) * s.w).coerceIn(s.left, s.right)
+                hi[i] = (coreRight - rightLat * s.w).coerceIn(s.left, s.right)
+            }
+            prev = a.site.distanceAlong
+        }
+        val idx = samples.indices.filter { !lo[it].isNaN() && hi[it] - lo[it] > 0.5 }
+        if (idx.size < 3) return null
+        val run = samples.slice(idx)
+        val l = movingAverage(run, idx.map { lo[it] }, 15.0)
+        val h = movingAverage(run, idx.map { hi[it] }, 15.0)
+        return polygon(run.mapIndexed { k, s -> s.at(l[k] + 0.15) }, run.mapIndexed { k, s -> s.at(h[k] - 0.15) }, Kind.ALLOWED)
+    }
+
+    /** Arrow polygon along [path] from [d0] to [d1]: 1.6 m body, 5 m head, drawn raised by the map. */
+    private fun turnArrow(path: Ribbon, d0: Double, d1: Double): Shape? {
+        if (d1 - d0 < 12) return null
+        val pts = generateSequence(d0) { it + 1.0 }.takeWhile { it <= d1 }.mapNotNull { d -> path.pointAt(d)?.let { d to it } }.toList()
+        if (pts.size < 8) return null
+        val headStart = d1 - 5.0
+        val left = ArrayList<LatLon>(); val right = ArrayList<LatLon>()
+        for (k in pts.indices) {
+            val (d, p) = pts[k]
+            if (d > headStart) break
+            val a = pts[max(0, k - 2)].second; val b = pts[min(pts.size - 1, k + 2)].second
+            val br = Geo.bearing(a, b)
+            left += Geo.destination(p, br - 90.0, 0.8); right += Geo.destination(p, br + 90.0, 0.8)
+        }
+        if (left.size < 2) return null
+        val base = pts.last { it.first <= headStart }.second
+        val tip = pts.last().second
+        val br = Geo.bearing(base, tip)
+        val head = listOf(Geo.destination(base, br - 90.0, 1.9), tip, Geo.destination(base, br + 90.0, 1.9))
+        val ring = left + head + right.reversed() + left.first()
+        return Shape(ring, Kind.TURN_ARROW, polygon = true)
     }
 
     /** Distance-weighted moving average of [v] over ±[radius] m along the samples. */
@@ -210,41 +296,63 @@ object LaneRibbonBuilder {
             val osm = route.laneCountAt(s.d)
             when {
                 next != null && next.distanceAlong - s.d < pocketLength(kind) -> {
-                    s.nominal = next.laneCount; s.rightPockets = next.rightPockets()
+                    s.nominal = next.laneCount; s.rightPockets = next.rightPockets(); s.leftPockets = next.leftPockets()
                 }
-                osm != null -> s.nominal = osm
+                osm != null -> {
+                    s.nominal = osm
+                    // OSM counts the turn lanes along the whole way: they are pockets all along, not lanes that merge.
+                    if (next != null && next.distanceAlong - s.d < 500 && osm >= next.laneCount) {
+                        s.rightPockets = next.rightPockets(); s.leftPockets = next.leftPockets()
+                    }
+                }
                 next != null && next.distanceAlong - s.d < 500 ->
                     s.nominal = (next.laneCount - next.leftPockets() - next.rightPockets()).coerceAtLeast(1)
                 else -> s.nominal = defaultLanes(kind)
             }
         }
         // Tapers: lanes appear before a change point and disappear after it, 15 m per lane (min 30 m).
-        val f = DoubleArray(samples.size) { samples[it].nominal.toDouble() }
+        // Right pockets taper over the same stretch, so lanes and pockets open in step.
+        val len = DoubleArray(samples.size) { i -> if (i == 0) 30.0 else max(30.0, 15.0 * abs(samples[i].nominal - samples[i - 1].nominal)) }
+        // Lanes that end *at* a junction (turn lanes leaving there) stop at the stop line instead of tapering
+        // into the next lane after the junction.
+        val endsAtJunction = BooleanArray(samples.size) { i -> sites.any { abs(it.distanceAlong - samples[i].d) < 8 } }
+        val f = taper(samples, { it.nominal }, len, endsAtJunction)
+        val rp = taper(samples, { it.rightPockets }, len, endsAtJunction)
+        val lp = taper(samples, { it.leftPockets }, len, endsAtJunction)
+        for (i in samples.indices) {
+            val s = samples[i]
+            s.lanes = f[i]
+            s.rightPocketsT = rp[i].coerceIn(0.0, max(0.0, s.lanes - 1))
+            s.leftPocketsT = lp[i].coerceIn(0.0, max(0.0, s.lanes - 1 - s.rightPocketsT))
+            // Through lanes keep their place; pockets grow outward (two-way: the left pocket takes the median).
+            val core = s.lanes - s.leftPocketsT - s.rightPocketsT
+            s.left = if (s.twoWay) -s.leftPocketsT * s.w else -core * s.w / 2.0 - s.leftPocketsT * s.w
+        }
+    }
+
+    /** Integer series → smooth series: increases ramp up *before* the change point, decreases ramp down after it. */
+    private fun taper(samples: List<S>, value: (S) -> Int, len: DoubleArray, stepDown: BooleanArray): DoubleArray {
+        val f = DoubleArray(samples.size) { value(samples[it]).toDouble() }
         for (i in 1 until samples.size) {
-            val a = samples[i - 1].nominal; val b = samples[i].nominal
+            val a = value(samples[i - 1]); val b = value(samples[i])
             if (a == b) continue
-            val len = max(30.0, 15.0 * abs(b - a))
+            val l = len[i]
             val di = samples[i].d
             if (b > a) {
                 var j = i - 1
-                while (j >= 0 && di - samples[j].d < len) {
-                    val t = 1 - (di - samples[j].d) / len
+                while (j >= 0 && di - samples[j].d < l) {
+                    val t = 1 - (di - samples[j].d) / l
                     f[j] = max(f[j], a + (b - a) * smooth(t)); j--
                 }
-            } else {
+            } else if (!stepDown[i]) {
                 var j = i
-                while (j < samples.size && samples[j].d - di < len) {
-                    val t = 1 - (samples[j].d - di) / len
+                while (j < samples.size && samples[j].d - di < l) {
+                    val t = 1 - (samples[j].d - di) / l
                     f[j] = max(f[j], b + (a - b) * smooth(t)); j++
                 }
             }
         }
-        // Lane width also eases between road kinds.
-        for (i in samples.indices) {
-            val s = samples[i]
-            s.lanes = f[i]
-            s.left = if (s.twoWay) 0.0 else -s.lanes * s.w / 2.0
-        }
+        return f
     }
 
     /** Painted arrows on every lane, 6–15 m before the stop line. */

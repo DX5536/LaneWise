@@ -179,5 +179,29 @@ class LanePlannerTest {
         assertTrue(ch.startAt < 400.0)
         assertNull(state.pendingChange)
     }
+
+    /**
+     * Owner's case (Celler Straße → left into Herschelstraße): 2 through lanes, a left-turn pocket opens before
+     * the junction (left | through | through+right). From the left through lane, entering the pocket is not a lane
+     * change, so no "move one lane left" and no change in the plan.
+     */
+    @Test
+    fun enteringATurnPocketIsNotALaneChange() {
+        val b = site(400.0, listOf(L, S, S or R), L, maneuver = true)
+        // OSM: one lane in driving direction until 84 m before the junction, then three.
+        val celler: (Double) -> Int? = { d -> if (d < 316.0) 1 else 3 }
+        val plan = LanePlanner().plan(listOf(b), LanePlanner.Options(currentLateral = 0, laneCountAt = celler))
+        assertEquals(0, plan[0].recommended)
+        assertEquals(0, plan[0].changeFromPrevious)            // the lanes open beside you: no lane change
+        // Car already on the 3-lane stretch in the right lane: now it is two real changes.
+        val late = LanePlanner().plan(listOf(b), LanePlanner.Options(currentLateral = 0, carDistance = 330.0, laneCountAt = celler))
+        assertEquals(2, late[0].changeFromPrevious)
+        // Without lane-count data every crossing counts (conservative).
+        assertEquals(2, LanePlanner().plan(listOf(b), LanePlanner.Options(currentLateral = 0))[0].changeFromPrevious)
+        // A right-turn pocket opening: 2 lanes, then left | straight | straight | right at the junction.
+        val c = site(400.0, listOf(L, S, S, R), R, maneuver = true)
+        val vahr = LanePlanner().plan(listOf(c), LanePlanner.Options(currentLateral = 0, laneCountAt = { d -> if (d < 360) 2 else 4 }))
+        assertEquals(0, vahr[0].changeFromPrevious)
+    }
 }
 

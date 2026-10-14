@@ -42,6 +42,8 @@ data class NavSnapshot(
     val signals: SignalCluster? = null,
     /** Painted bike lane next to the car lanes here (or within the next 50 m). */
     val bikeLane: BikeLaneSpan? = null,
+    /** Metres to where a solid line starts (lane changes no longer allowed), if within 250 m. */
+    val solidLineIn: Double? = null,
 )
 
 /** Something to say. [key] de-duplicates so each announcement is spoken once. */
@@ -104,7 +106,8 @@ class NavigationEngine(
         overActive = status == SpeedStatus.OVER
 
         val kind = route.roadSpanAt(along)?.kind ?: RoadKind.URBAN
-        val lanes = laneGuidance.update(route.laneSites, along, settings.avoidLaneChanges, settings.keepRight, route.laneChanges)
+        val lanes = laneGuidance.update(route.laneSites, along, settings.avoidLaneChanges, settings.keepRight, route.laneChanges,
+            route::laneCountAt.takeIf { route.laneCounts.isNotEmpty() })
         val arrived = remaining < 25
 
         val ahead = route.features.filter { it.distanceAlong > along - 5 && it.distanceAlong - along < 400 }
@@ -126,14 +129,22 @@ class NavigationEngine(
                 pedestrianLights = group.count { it.pedestrian },
                 greenArrow = group.any { it.greenArrow },
                 onDemand = group.isNotEmpty() && group.all { it.onDemand },
+                position = first.position,
                 inferredArrowSignals = exclusive,
             )
         }
         val bike = route.bikeLaneAt(along) ?: route.bikeLaneAt(along + 50)
 
         val snap = NavSnapshot(route, fix, along, remaining, remainingSec, next, distNext, after, limit, noLimit,
-            status, lanes, kind, offRoute, arrived, upcoming, signals, bike)
+            status, lanes, kind, offRoute, arrived, upcoming, signals, bike, solidLineIn = solidLineAhead(along))
         return snap to announcements(snap, phrases)
+    }
+
+    /** Distance to where lane changes stop being allowed (OSM `change:lanes`), within 250 m; null otherwise. */
+    private fun solidLineAhead(along: Double): Double? {
+        fun restricted(c: de.lanewise.lane.ChangeSpan) = c.perms.any { it != (de.lanewise.lane.ChangeSpan.LEFT or de.lanewise.lane.ChangeSpan.RIGHT) }
+        if (route.laneChanges.any { along >= it.from && along < it.to && restricted(it) }) return null   // already inside
+        return route.laneChanges.firstOrNull { it.from > along && it.from - along < 250 && restricted(it) }?.let { it.from - along }
     }
 
     private fun announcements(s: NavSnapshot, p: Phrases): List<Announcement> {

@@ -143,6 +143,32 @@ behaviour the LaneWise owner asked for. LaneWise: `LaneState.stayInLane`,
 
 ---
 
+### 4. What the driver sees (observed in a screen recording, Chongqing, AMAP phone app, 2026)
+
+Source: YouTube short `c7n9mf7jPl4` (@Chongqing_Insider), 104 s, 296×640, stepped frame by frame.
+
+- **No separate junction close-up.** The main map *is* the lane-level view for the whole drive; there is no
+  overlay box like LaneWise's `LaneScene3D`. Junction detail comes from the camera: it closes in and lowers
+  near a junction (at the stop line it is almost on top of the car), and zooms out to show ~1 km ahead on
+  stretches without decisions (on the last km the destination flag is in view).
+- **Where it has no data, it shows less.** Away from junctions, side roads are plain grey roads with edge
+  lines. Lane-level markings (stop lines, zebras, painted arrows, bus-lane text, reversible-lane
+  symbols) appear on the route and the junctions around it. It is not a full 3D city model.
+- **Two-level route carpet.** A wide, translucent green band covers every lane the route can use;
+  inside it a brighter strip marks the recommended lane. A lane change is drawn as a smooth S-curve of the
+  bright strip, and the band narrows to the turn lane(s) in the last ~150–300 m.
+- **Turn path through the junction.** From the stop line, a raised 3D arrow (white body, blue glow) sweeps
+  through the junction into the target lanes of the new road, with the green band continuing under it.
+- **Lane bar only when relevant.** The arrow row under the distance appears for the next junction with lane
+  data (current lane highlighted, unusable lanes grey) and disappears on plain stretches. Special lanes get
+  their own icons: bus lane, reversible "可变" lane.
+- **Warnings anchored on the road:** a "solid line ahead" bubble (前方实线 + »») at the point where lane
+  changes stop being allowed, a "slow down" chip (减速), and speed cameras and pedestrian signs as standing
+  pins. The speed circle turns green when within the limit.
+- **Traffic-light countdowns** (seconds to green/red per signal head, including a separate left-turn arrow and
+  "next cycle") from Chinese V2X/traffic-control feeds — no equivalent open data in Hannover today.
+- The car model sits *in its lane* (AMAP has lane-level positioning); compass letters ring the car.
+
 ## What LaneWise does differently (design decisions, not observations)
 
 * **Data**: OSM `turn:lanes` (fresh, community-maintained, excellent in Hannover) via OSRM, or

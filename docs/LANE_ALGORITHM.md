@@ -37,7 +37,8 @@ A layered graph: one layer per site in the horizon (≤ 8 sites, ≤ 4 km), one 
 | Cost term | Value | Purpose |
 | --- | --- | --- |
 | lane not allowed at a site | ∞ | must be in a usable lane |
-| each lane change between consecutive sites | 10 | the thing we minimise |
+| each lane change between consecutive sites | 10 | the thing we minimise; moving into lanes that open in between (road widens, turn pockets) is free when OSM lane counts show it |
+| change with no dashed stretch (OSM `change:lanes`) | 200 | never advise crossing a solid line |
 | change impossible in the gap | 25 per missing lane | uses 150 m/change (motorway), 120 (trunk), 80 (rural), 40 (urban) |
 | keep-right (motorway/trunk, optional) | 0.5 × lanes left of rightmost through lane | §7 StVO tie-breaker, never worth an extra change |
 | centring (urban) | 0.02 × distance from centre of allowed lanes | avoids edge lanes (bus/bike/parking) on ties |

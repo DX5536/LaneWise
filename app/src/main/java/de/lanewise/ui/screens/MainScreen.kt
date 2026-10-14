@@ -128,12 +128,15 @@ fun MainScreen(vm: MainViewModel, ui: UiState, settings: AppSettings, dark: Bool
                 .filter { settings.showBikeLanes || it.kind != de.lanewise.lane.LaneRibbonBuilder.Kind.BIKE }
             controller.setLaneShapes(shapes)
         }
+        // AMAP-style traffic-light pop-up at the next signalised junction (within 250 m, while navigating).
+        val sig = ui.nav?.signals?.takeIf { settings.showSigns && it.distance < 250 && ui.mode == Mode.NAVIGATING }
+        LaunchedEffect(sig?.position, sig?.vehicleLights, sig?.inferredArrowSignals, sig?.greenArrow) { controller.showSignalPopup(sig) }
         LaunchedEffect(ui.nav) {
             ui.nav?.let {
                 controller.updateNavigation(
                     it, settings.laneRibbonsOnMap, settings.mapPitch, topPadPx,
                     closeUpDistance = if (settings.junctionZoom) settings.laneSceneDistance.toDouble() else 0.0,
-                    showBikeLanes = settings.showBikeLanes,
+                    showBikeLanes = settings.showBikeLanes, immersive = settings.immersiveView,
                 )
             }
         }
@@ -465,6 +468,7 @@ private fun NavigationOverlay(
                             nav.signals?.let { de.lanewise.ui.hud.SignalChip(it, phrases.distance(it.distance)) }
                             nav.upcoming.filter { it.first.kind != de.lanewise.core.model.FeatureKind.TRAFFIC_SIGNALS }
                                 .forEach { (f, d) -> FeatureChip(f, phrases.distance(d)) }
+                            nav.solidLineIn?.let { de.lanewise.ui.hud.SolidLineChip(str.solidLineAhead, phrases.distance(it)) }
                         }
                     }
                 }
@@ -492,7 +496,7 @@ private fun NavigationOverlay(
             val distToSite = advice?.let { it.site.distanceAlong - nav.distanceAlong } ?: Double.MAX_VALUE
             val bikeHere = nav.bikeLane.takeIf { settings.showBikeLanes }
             if (advice != null && distToSite < 900) {
-                if (settings.showLaneScene && distToSite <= settings.laneSceneDistance && (advice.site.isManeuver || nav.lanes.pendingChange != null)) {
+                if (!settings.immersiveView && settings.showLaneScene && distToSite <= settings.laneSceneDistance && (advice.site.isManeuver || nav.lanes.pendingChange != null)) {
                     Spacer(Modifier.height(8.dp))
                     LaneScene3D(nav.lanes, phrases.distance(distToSite),
                         Modifier.fillMaxWidth(0.82f).height(140.dp).align(Alignment.CenterHorizontally),

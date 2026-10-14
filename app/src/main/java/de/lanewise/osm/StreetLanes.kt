@@ -83,54 +83,107 @@ object StreetLanes {
                 atNode.getOrPut(n) { ArrayList(4) } += k
             }
         }
+        // Road surfaces first: markings of one street stop where they enter another street's surface (junctions,
+        // carriageways merging), so lines never run across another road and meet its edge exactly.
+        val geo = streets.mapIndexed { k, st -> runCatching { Geometry(st, layouts[k]) }.getOrNull() }
         val out = ArrayList<Shape>()
         streets.forEachIndexed { k, st ->
+            val g = geo[k] ?: return@forEachIndexed
             val line = Polyline(st.geometry)
             val cuts = st.nodes.mapIndexedNotNull { i, n ->
                 if ((degree[n] ?: 0) < 3) return@mapIndexedNotNull null
                 val r = atNode[n].orEmpty().filter { it != k }.maxOfOrNull { layouts[it].extent } ?: return@mapIndexedNotNull null
                 Cut(line.cumulative[i], r + 0.8)
             }
-            runCatching { buildStreet(st, layouts[k], line, cuts, out) }
+            // Plain continuations of this way (shared node of degree 2) do not clip it.
+            val continuation = st.nodes.filter { (degree[it] ?: 0) == 2 }.flatMap { atNode[it].orEmpty() }.toSet()
+            val foreign = geo.indices.filter { j ->
+                j != k && j !in continuation && geo[j]?.let { o -> o.bbox.intersects(g.bbox) } == true
+            }.mapNotNull { geo[it] }
+            runCatching { buildStreet(st, layouts[k], line, cuts, g, foreign, out) }
         }
         out
     }
 
-    private fun buildStreet(st: OsmStreet, lay: Layout, line: Polyline, cuts: List<Cut>, out: MutableList<Shape>) {
+    /** Smoothed centre line, normals and road surface of one street. */
+    private class Geometry(st: OsmStreet, lay: Layout) {
+        val pts = smooth(Polyline(st.geometry))
+        val bearings = pts.indices.map { i ->
+            val a = pts[max(0, i - 2)]; val b = pts[min(pts.size - 1, i + 2)]
+            if (a == b) 0.0 else Geo.bearing(a, b)
+        }
+        fun at(i: Int, off: Double) = Geo.destination(pts[i], bearings[i] + 90.0, off)
+        val surface: List<LatLon> = pts.indices.map { at(it, lay.left - 0.3) } + pts.indices.reversed().map { at(it, lay.right + 0.3) } + at(0, lay.left - 0.3)
+        val bbox = Box(surface)
+
+        /** Ray casting in lat/lon (fine at street scale). */
+        fun contains(p: LatLon): Boolean {
+            if (!bbox.contains(p)) return false
+            var inside = false
+            var j = surface.size - 1
+            for (i in surface.indices) {
+                val a = surface[i]; val b = surface[j]
+                if ((a.lat > p.lat) != (b.lat > p.lat) && p.lon < (b.lon - a.lon) * (p.lat - a.lat) / (b.lat - a.lat) + a.lon) inside = !inside
+                j = i
+            }
+            return inside
+        }
+    }
+
+    private class Box(pts: List<LatLon>) {
+        val s = pts.minOf { it.lat }; val n = pts.maxOf { it.lat }
+        val w = pts.minOf { it.lon }; val e = pts.maxOf { it.lon }
+        fun contains(p: LatLon) = p.lat in s..n && p.lon in w..e
+        fun intersects(o: Box) = s <= o.n && o.s <= n && w <= o.e && o.w <= e
+    }
+
+    private fun buildStreet(
+        st: OsmStreet, lay: Layout, line: Polyline, cuts: List<Cut>, g: Geometry, foreign: List<Geometry>, out: MutableList<Shape>,
+    ) {
         val t = st.tags
         val oneway = lay.oneway
         val fwd = lay.fwd
         val bwd = lay.bwd
         val w = lay.w
         if (line.length < 8) return
-        val pts = smooth(line)
-        val bearings = pts.indices.map { i ->
-            val a = pts[max(0, i - 2)]; val b = pts[min(pts.size - 1, i + 2)]
-            if (a == b) 0.0 else Geo.bearing(a, b)
-        }
-        fun at(i: Int, off: Double) = Geo.destination(pts[i], bearings[i] + 90.0, off)
+        val pts = g.pts
+        fun at(i: Int, off: Double) = g.at(i, off)
         val idx = pts.indices.toList()
-        // Along-way distance of each smoothed point (scaled back to the raw way length).
-        val pd = DoubleArray(pts.size).also { c -> for (i in 1 until pts.size) c[i] = c[i - 1] + Geo.distance(pts[i - 1], pts[i]) }
-        val scale = if (pd.last() > 0) line.length / pd.last() else 1.0
-        fun inJunction(i: Int) = cuts.any { abs(pd[i] * scale - it.d) < it.r }
-        // Runs of points outside junctions: markings stop where another road crosses, as painted on the street.
-        val runs = ArrayList<List<Int>>()
-        var cur = ArrayList<Int>()
-        for (i in idx) {
-            if (!inJunction(i)) { cur += i; continue }
+        fun free(p: LatLon) = foreign.none { it.contains(p) }
+        /** Runs of consecutive points at lateral [off] that are not on another street's surface. */
+        fun runsAt(off: Double): List<List<LatLon>> {
+            val runs = ArrayList<List<LatLon>>()
+            var cur = ArrayList<LatLon>()
+            for (i in idx) {
+                val p = at(i, off)
+                if (free(p)) { cur += p; continue }
+                if (cur.size >= 2) runs += cur
+                cur = ArrayList()
+            }
             if (cur.size >= 2) runs += cur
-            cur = ArrayList()
+            return runs
         }
-        if (cur.size >= 2) runs += cur
-        fun lines(off: Double, kind: Kind, width: Double) = runs.forEach { r -> out += Shape(r.map { at(it, off) }, kind, false, width) }
-        fun strip(a: Double, b: Double, kind: Kind) = runs.forEach { r ->
-            out += Shape(r.map { at(it, a) } + r.reversed().map { at(it, b) } + at(r.first(), a), kind, true)
+        fun lines(off: Double, kind: Kind, width: Double) = runsAt(off).forEach { r -> out += Shape(r, kind, false, width) }
+        fun strip(a: Double, b: Double, kind: Kind) {
+            // Bike strips follow the outer line's free runs.
+            val ok = idx.map { free(at(it, a)) }
+            var start = -1
+            for (i in 0..idx.size) {
+                val f = i < idx.size && ok[i]
+                if (f && start < 0) start = i
+                if (!f && start >= 0) {
+                    if (i - start >= 2) {
+                        val r = (start until i).toList()
+                        out += Shape(r.map { at(it, a) } + r.reversed().map { at(it, b) } + at(r.first(), a), kind, true)
+                    }
+                    start = -1
+                }
+            }
         }
 
         val left = lay.left
         val right = lay.right
-        out += Shape(idx.map { at(it, left - 0.3) } + idx.reversed().map { at(it, right + 0.3) } + at(0, left - 0.3), Kind.SURFACE, true)
+        out += Shape(g.surface, Kind.SURFACE, true)
         lines(left, Kind.EDGE, 0.18)
         lines(right, Kind.EDGE, 0.18)
         // Centre line between directions, lane dividers within each direction.

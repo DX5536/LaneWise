@@ -26,6 +26,7 @@ import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.expressions.Expression
 import org.maplibre.android.style.layers.CircleLayer
+import org.maplibre.android.style.layers.FillExtrusionLayer
 import org.maplibre.android.style.layers.FillLayer
 import org.maplibre.android.style.layers.Layer
 import org.maplibre.android.style.layers.LineLayer
@@ -74,6 +75,7 @@ class MapController(private val context: Context) {
     private var shownAlong = Double.NaN
     private var shownBearing = Double.NaN
     private var shownZoom = Double.NaN
+    private var shownPitch = Double.NaN
     private var targetZoom = 17.6
     private var tweenPitch = 60.0
     private var tweenTopPad = 0.0
@@ -132,7 +134,7 @@ class MapController(private val context: Context) {
         s.addImage(IMG_CAR, carBitmap(if (isDark) 0xFF9A82FF.toInt() else 0xFF6C4CF5.toInt()))
         s.addImage(IMG_DEST, pinBitmap())
         FeatureKind.entries.forEach { s.addImage("lw-feat-${it.name}", RoadSignArt.feature(it, 64)) }
-        listOf(SRC_ROUTE, SRC_ALT, SRC_LANES, SRC_CAR, SRC_DEST, SRC_INC, SRC_FEAT).forEach { s.addSource(GeoJsonSource(it)) }
+        listOf(SRC_ROUTE, SRC_ALT, SRC_LANES, SRC_LANES_DYN, SRC_CAR, SRC_DEST, SRC_INC, SRC_FEAT, SRC_SIGNAL).forEach { s.addSource(GeoJsonSource(it)) }
 
         val below = "building-3d"
         fun add(l: Layer) { if (s.getLayer(below) != null) s.addLayerBelow(l, below) else s.addLayer(l) }
@@ -167,13 +169,13 @@ class MapController(private val context: Context) {
         ))
 
         // Lane-level geometry: polygons in real metres + thin lines.
-        fun fill(id: String, k: String, color: Int, opacity: Float) = add(FillLayer(id, SRC_LANES).withFilter(kind(k)).withProperties(
+        fun fill(id: String, k: String, color: Int, opacity: Float, src: String = SRC_LANES) = add(FillLayer(id, src).withFilter(kind(k)).withProperties(
             PropertyFactory.fillColor(color), PropertyFactory.fillOpacity(opacity), PropertyFactory.fillAntialias(true),
         ))
         fill("lane-surface", "SURFACE", if (isDark) 0xFF1C1F27.toInt() else 0xFF2B2F38.toInt(), 0.97f)
         fill("lane-bike", "BIKE", bikeColor, 0.9f)
-        fill("lane-allowed", "ALLOWED", 0xFFB8F33A.toInt(), 0.28f)
-        fill("lane-recommended", "RECOMMENDED", 0xFFB8F33A.toInt(), 0.85f)
+        fill("lane-allowed", "ALLOWED", 0xFFB8F33A.toInt(), 0.28f, SRC_LANES_DYN)
+        fill("lane-recommended", "RECOMMENDED", 0xFFB8F33A.toInt(), 0.85f, SRC_LANES_DYN)
         fill("lane-arrow", "ARROW", 0xFFFFFFFF.toInt(), 0.92f)
         add(LineLayer("lane-stop", SRC_LANES).withFilter(kind("STOP")).withProperties(
             PropertyFactory.lineColor("#FFFFFF"), PropertyFactory.lineWidth(metresToPixels()),
@@ -188,6 +190,17 @@ class MapController(private val context: Context) {
             PropertyFactory.lineColor("#FFFFFF"),
             PropertyFactory.lineWidth(Expression.interpolate(Expression.linear(), Expression.zoom(),
                 Expression.stop(15, 0.6f), Expression.stop(20, 2.5f))),
+        ))
+        // Raised turn arrow with a violet glow (AMAP's turn guidance through the junction).
+        add(LineLayer("lane-turn-arrow-glow", SRC_LANES_DYN).withFilter(kind("TURN_ARROW")).withProperties(
+            PropertyFactory.lineColor(if (isDark) "#9A82FF" else "#6C4CF5"),
+            PropertyFactory.lineWidth(Expression.interpolate(Expression.linear(), Expression.zoom(),
+                Expression.stop(15, 1.5f), Expression.stop(20, 7f))),
+            PropertyFactory.lineBlur(2f), PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
+        ))
+        add(FillExtrusionLayer("lane-turn-arrow", SRC_LANES_DYN).withFilter(kind("TURN_ARROW")).withProperties(
+            PropertyFactory.fillExtrusionColor("#FFFFFF"), PropertyFactory.fillExtrusionBase(0.05f),
+            PropertyFactory.fillExtrusionHeight(0.7f), PropertyFactory.fillExtrusionOpacity(0.95f),
         ))
         add(LineLayer("lane-edge", SRC_LANES).withFilter(kind("EDGE")).withProperties(
             PropertyFactory.lineColor(if (isDark) "#C9CDD8" else "#FFFFFF"),
@@ -211,6 +224,12 @@ class MapController(private val context: Context) {
             PropertyFactory.iconSize(Expression.interpolate(Expression.linear(), Expression.zoom(),
                 Expression.stop(13, 0.35f), Expression.stop(17, 0.6f), Expression.stop(19, 0.85f))),
         ).apply { minZoom = 13f })
+        // Traffic-light set-up of the next signalised junction (AMAP-style bubble above the junction).
+        s.addLayer(SymbolLayer("signal-popup", SRC_SIGNAL).withProperties(
+            PropertyFactory.iconImage(Expression.get("img")), PropertyFactory.iconAnchor(Property.ICON_ANCHOR_BOTTOM),
+            PropertyFactory.iconAllowOverlap(true), PropertyFactory.iconIgnorePlacement(true),
+            PropertyFactory.iconPitchAlignment(Property.ICON_PITCH_ALIGNMENT_VIEWPORT),
+        ))
         s.addLayer(SymbolLayer("dest", SRC_DEST).withProperties(
             PropertyFactory.iconImage(IMG_DEST), PropertyFactory.iconAnchor(Property.ICON_ANCHOR_BOTTOM),
             PropertyFactory.iconAllowOverlap(true), PropertyFactory.iconIgnorePlacement(true),
@@ -299,9 +318,11 @@ class MapController(private val context: Context) {
     }
 
     /** Lane-level shapes (route lanes while navigating, all nearby streets otherwise). */
-    fun setLaneShapes(shapes: List<LaneRibbonBuilder.Shape>) {
+    fun setLaneShapes(shapes: List<LaneRibbonBuilder.Shape>) = setShapes(SRC_LANES, shapes)
+
+    private fun setShapes(src: String, shapes: List<LaneRibbonBuilder.Shape>) {
         val s = style ?: return
-        (s.getSource(SRC_LANES) as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(shapes.map { sh ->
+        (s.getSource(src) as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(shapes.map { sh ->
             val geom = if (sh.polygon) Polygon.fromLngLats(listOf(sh.points.map { Point.fromLngLat(it.lon, it.lat) }))
             else line(sh.points)
             Feature.fromGeometry(geom).apply {
@@ -311,8 +332,45 @@ class MapController(private val context: Context) {
         }))
     }
 
+    /** Pop-up with the traffic-light set-up of [sig] at its junction, or none. */
+    fun showSignalPopup(sig: de.lanewise.core.model.SignalCluster?) {
+        val s = style ?: return
+        val src = s.getSource(SRC_SIGNAL) as? GeoJsonSource ?: return
+        val pos = sig?.position
+        if (sig == null || pos == null) { src.setGeoJson(FeatureCollection.fromFeatures(emptyList())); return }
+        val density = context.resources.displayMetrics.density
+        val bmp = de.lanewise.ui.hud.RoadSignArt.signalPopup(sig, density)
+        val id = "sig-${bmp.hashCode()}"
+        if (s.getImage(id) == null) s.addImage(id, bmp)
+        src.setGeoJson(Feature.fromGeometry(Point.fromLngLat(pos.lon, pos.lat)).apply { addStringProperty("img", id) })
+    }
+
     fun clearLanes() {
         (style?.getSource(SRC_LANES) as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(emptyList()))
+        (style?.getSource(SRC_LANES_DYN) as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(emptyList()))
+        roadRoute = null; shownChunks = emptySet()
+    }
+
+    // The route's road, pre-built per [ROAD_CHUNK] and kept: rebuilt only when the route (or its OSM data) changes.
+    private var roadRoute: Route? = null
+    private var roadBikes = true
+    private val roadChunks = HashMap<Int, List<LaneRibbonBuilder.Shape>>()
+    private var shownChunks: Set<Int> = emptySet()
+
+    private fun updateRoad(route: Route, along: Double, showBikeLanes: Boolean) {
+        if (route !== roadRoute || showBikeLanes != roadBikes) {
+            roadRoute = route; roadBikes = showBikeLanes; roadChunks.clear(); shownChunks = emptySet()
+        }
+        val last = (route.distance / ROAD_CHUNK).toInt()
+        val first = ((along - 300) / ROAD_CHUNK).toInt().coerceIn(0, last)
+        val want = (first..((along + 2500) / ROAD_CHUNK).toInt().coerceAtMost(last)).toSet()
+        if (want == shownChunks) return
+        for (c in want) roadChunks.getOrPut(c) {
+            LaneRibbonBuilder.buildRoad(route, c * ROAD_CHUNK, minOf(route.distance, (c + 1) * ROAD_CHUNK), showBikeLanes)
+        }
+        roadChunks.keys.retainAll { it in (first - 1)..(want.max() + 1) }
+        setShapes(SRC_LANES, want.sorted().flatMap { roadChunks[it].orEmpty() })
+        shownChunks = want
     }
 
     fun updateCar(position: LatLon, bearing: Double) {
@@ -327,7 +385,7 @@ class MapController(private val context: Context) {
      */
     fun updateNavigation(
         snap: NavSnapshot, showRibbons: Boolean, pitch: Float, topPaddingPx: Double,
-        closeUpDistance: Double = 50.0, showBikeLanes: Boolean = true,
+        closeUpDistance: Double = 50.0, showBikeLanes: Boolean = true, immersive: Boolean = false,
     ) {
         val s = style ?: return
         val now = SystemClock.uptimeMillis()
@@ -350,7 +408,20 @@ class MapController(private val context: Context) {
         lastSnapAt = now
         tweenPitch = pitch.toDouble()
         tweenTopPad = topPaddingPx
-        targetZoom = when {
+        if (immersive) {
+            // AMAP-style: the map is the junction view. Far from any decision the camera rises to show ~1 km ahead;
+            // approaching a turn or a lane change it closes in and looks down more steeply.
+            val fast = snap.roadKind == RoadKind.MOTORWAY || snap.roadKind == RoadKind.TRUNK
+            val lane = snap.lanes.pendingChange?.let { it.startAt - along }?.coerceAtLeast(0.0)
+            val decision = minOf(snap.distanceToNextStep, lane ?: Double.MAX_VALUE)
+            val far = if (fast) 1500.0 else 450.0
+            val near = if (fast) 300.0 else 90.0
+            val t = ((far - decision) / (far - near)).coerceIn(0.0, 1.0).let { it * it * (3 - 2 * it) }
+            val zFar = if (fast) 15.6 else 16.3
+            val zNear = if (fast) 17.4 else 18.6
+            targetZoom = zFar + (zNear - zFar) * t
+            tweenPitch = pitch.toDouble() - 15.0 * t
+        } else targetZoom = when {
             snap.distanceToNextStep < closeUpDistance -> 18.4
             snap.roadKind == RoadKind.MOTORWAY -> 16.6
             snap.roadKind == RoadKind.TRUNK -> 17.0
@@ -364,16 +435,21 @@ class MapController(private val context: Context) {
             (s.getLayer("lane-stop") as? LineLayer)?.setProperties(PropertyFactory.lineWidth(metresToPixels()))
         }
 
-        val r = if (snap.offRoute) null else LaneRibbonBuilder.build(route, snap.lanes, along, showBikeLanes = showBikeLanes)
+        val r = if (snap.offRoute) null else LaneRibbonBuilder.build(route, snap.lanes, along)
         ribbon = r
-        if (showRibbons && r != null) setLaneShapes(r.shapes) else clearLanes()
+        if (showRibbons && r != null) {
+            updateRoad(route, along, showBikeLanes)
+            setShapes(SRC_LANES_DYN, r.shapes)
+        } else clearLanes()
 
         if (!frameRunning) { frameRunning = true; choreographer.postFrameCallback(frame) }
     }
 
     fun stopTween() {
         tweenRoute = null; offRoutePos = null; ribbon = null
-        shownAlong = Double.NaN; shownBearing = Double.NaN; shownZoom = Double.NaN
+        (style?.getSource(SRC_LANES_DYN) as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(emptyList()))
+        roadRoute = null; shownChunks = emptySet()
+        shownAlong = Double.NaN; shownBearing = Double.NaN; shownZoom = Double.NaN; shownPitch = Double.NaN
     }
 
     /** One display frame: interpolate along the route, ease bearing and zoom, move car and camera. */
@@ -398,13 +474,14 @@ class MapController(private val context: Context) {
         shownBearing = if (shownBearing.isNaN()) targetBearing
         else (shownBearing + Geo.bearingDelta(shownBearing, targetBearing) * 0.12 + 360) % 360
         shownZoom = if (shownZoom.isNaN()) targetZoom else shownZoom + (targetZoom - shownZoom) * 0.04
+        shownPitch = if (shownPitch.isNaN()) tweenPitch else shownPitch + (tweenPitch - shownPitch) * 0.04
 
         updateCar(pos, shownBearing)
         if (following) {
             val cam = CameraPosition.Builder()
                 .target(LatLng(pos.lat, pos.lon))
                 .bearing(shownBearing)
-                .tilt(tweenPitch)
+                .tilt(shownPitch)
                 .zoom(shownZoom)
                 .padding(0.0, tweenTopPad, 0.0, 0.0)
                 .build()
@@ -465,6 +542,11 @@ class MapController(private val context: Context) {
         private const val SRC_ROUTE = "lw-route"
         private const val SRC_ALT = "lw-alt"
         private const val SRC_LANES = "lw-lanes"
+        /** Live highlight (recommended strip, usable-lane band, turn arrow); the road itself is in [SRC_LANES]. */
+        private const val SRC_LANES_DYN = "lw-lanes-live"
+        private const val SRC_SIGNAL = "lw-signal-popup"
+        /** The route's road is built and kept in pieces of this length (m). */
+        private const val ROAD_CHUNK = 1000.0
         private const val SRC_CAR = "lw-car"
         private const val SRC_DEST = "lw-dest"
         private const val SRC_INC = "lw-incidents"
