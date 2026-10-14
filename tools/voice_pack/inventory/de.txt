@@ -1,0 +1,303 @@
+In 10 Metern
+In 20 Metern
+In 30 Metern
+In 40 Metern
+In 50 Metern
+In 60 Metern
+In 70 Metern
+In 80 Metern
+In 90 Metern
+In 100 Metern
+In 150 Metern
+In 200 Metern
+In 250 Metern
+In 300 Metern
+In 350 Metern
+In 400 Metern
+In 450 Metern
+In 500 Metern
+In 550 Metern
+In 600 Metern
+In 650 Metern
+In 700 Metern
+In 750 Metern
+In 800 Metern
+In 850 Metern
+In 900 Metern
+In 950 Metern
+In 1,0 Kilometern
+In 1,1 Kilometern
+In 1,2 Kilometern
+In 1,3 Kilometern
+In 1,4 Kilometern
+In 1,5 Kilometern
+In 1,6 Kilometern
+In 1,7 Kilometern
+In 1,8 Kilometern
+In 1,9 Kilometern
+In 2,0 Kilometern
+In 2,1 Kilometern
+In 2,2 Kilometern
+In 2,3 Kilometern
+In 2,4 Kilometern
+In 2,5 Kilometern
+In 2,6 Kilometern
+In 2,7 Kilometern
+In 2,8 Kilometern
+In 2,9 Kilometern
+In 3,0 Kilometern
+In 3,1 Kilometern
+In 3,2 Kilometern
+In 3,3 Kilometern
+In 3,4 Kilometern
+In 3,5 Kilometern
+In 3,6 Kilometern
+In 3,7 Kilometern
+In 3,8 Kilometern
+In 3,9 Kilometern
+In 4,0 Kilometern
+In 4,1 Kilometern
+In 4,2 Kilometern
+In 4,3 Kilometern
+In 4,4 Kilometern
+In 4,5 Kilometern
+In 4,6 Kilometern
+In 4,7 Kilometern
+In 4,8 Kilometern
+In 4,9 Kilometern
+In 5,0 Kilometern
+In 5,1 Kilometern
+In 5,2 Kilometern
+In 5,3 Kilometern
+In 5,4 Kilometern
+In 5,5 Kilometern
+In 5,6 Kilometern
+In 5,7 Kilometern
+In 5,8 Kilometern
+In 5,9 Kilometern
+In 6,0 Kilometern
+In 6,1 Kilometern
+In 6,2 Kilometern
+In 6,3 Kilometern
+In 6,4 Kilometern
+In 6,5 Kilometern
+In 6,6 Kilometern
+In 6,7 Kilometern
+In 6,8 Kilometern
+In 6,9 Kilometern
+In 7,0 Kilometern
+In 7,1 Kilometern
+In 7,2 Kilometern
+In 7,3 Kilometern
+In 7,4 Kilometern
+In 7,5 Kilometern
+In 7,6 Kilometern
+In 7,7 Kilometern
+In 7,8 Kilometern
+In 7,9 Kilometern
+In 8,0 Kilometern
+In 8,1 Kilometern
+In 8,2 Kilometern
+In 8,3 Kilometern
+In 8,4 Kilometern
+In 8,5 Kilometern
+In 8,6 Kilometern
+In 8,7 Kilometern
+In 8,8 Kilometern
+In 8,9 Kilometern
+In 9,0 Kilometern
+In 9,1 Kilometern
+In 9,2 Kilometern
+In 9,3 Kilometern
+In 9,4 Kilometern
+In 9,5 Kilometern
+In 9,6 Kilometern
+In 9,7 Kilometern
+In 9,8 Kilometern
+In 9,9 Kilometern
+In 10 Kilometern
+In 11 Kilometern
+In 12 Kilometern
+In 13 Kilometern
+In 14 Kilometern
+In 15 Kilometern
+In 16 Kilometern
+In 17 Kilometern
+In 18 Kilometern
+In 19 Kilometern
+In 20 Kilometern
+In 21 Kilometern
+In 22 Kilometern
+In 23 Kilometern
+In 24 Kilometern
+In 25 Kilometern
+In 26 Kilometern
+In 27 Kilometern
+In 28 Kilometern
+In 29 Kilometern
+In 30 Kilometern
+In 31 Kilometern
+In 32 Kilometern
+In 33 Kilometern
+In 34 Kilometern
+In 35 Kilometern
+In 36 Kilometern
+In 37 Kilometern
+In 38 Kilometern
+In 39 Kilometern
+In 40 Kilometern
+In 41 Kilometern
+In 42 Kilometern
+In 43 Kilometern
+In 44 Kilometern
+In 45 Kilometern
+In 46 Kilometern
+In 47 Kilometern
+In 48 Kilometern
+In 49 Kilometern
+In 50 Kilometern
+In 51 Kilometern
+In 52 Kilometern
+In 53 Kilometern
+In 54 Kilometern
+In 55 Kilometern
+In 56 Kilometern
+In 57 Kilometern
+In 58 Kilometern
+In 59 Kilometern
+In 60 Kilometern
+Starten
+Starten auf
+Sie haben Ihr Ziel erreicht
+Wenden
+Wenden auf
+Scharf rechts abbiegen
+Scharf rechts abbiegen auf
+Rechts abbiegen
+Rechts abbiegen auf
+Leicht rechts abbiegen
+Leicht rechts abbiegen auf
+Geradeaus fahren
+Geradeaus fahren auf
+Leicht links abbiegen
+Leicht links abbiegen auf
+Links abbiegen
+Links abbiegen auf
+Scharf links abbiegen
+Scharf links abbiegen auf
+Weiter
+Weiter auf
+Einfädeln
+Einfädeln auf
+Auffahren
+Auffahren auf
+Links halten zur Ausfahrt
+Rechts halten zur Ausfahrt
+An der Gabelung links halten
+An der Gabelung links halten auf
+An der Gabelung rechts halten
+An der Gabelung rechts halten auf
+Am Ende der Straße wenden
+Am Ende der Straße wenden auf
+Am Ende der Straße scharf rechts abbiegen
+Am Ende der Straße scharf rechts abbiegen auf
+Am Ende der Straße rechts abbiegen
+Am Ende der Straße rechts abbiegen auf
+Am Ende der Straße leicht rechts abbiegen
+Am Ende der Straße leicht rechts abbiegen auf
+Am Ende der Straße geradeaus fahren
+Am Ende der Straße geradeaus fahren auf
+Am Ende der Straße leicht links abbiegen
+Am Ende der Straße leicht links abbiegen auf
+Am Ende der Straße links abbiegen
+Am Ende der Straße links abbiegen auf
+Am Ende der Straße scharf links abbiegen
+Am Ende der Straße scharf links abbiegen auf
+Im Kreisverkehr die Ausfahrt nehmen
+Im Kreisverkehr die Ausfahrt nehmen auf
+Im Kreisverkehr die 1. Ausfahrt nehmen
+Im Kreisverkehr die 1. Ausfahrt nehmen auf
+Im Kreisverkehr die 2. Ausfahrt nehmen
+Im Kreisverkehr die 2. Ausfahrt nehmen auf
+Im Kreisverkehr die 3. Ausfahrt nehmen
+Im Kreisverkehr die 3. Ausfahrt nehmen auf
+Im Kreisverkehr die 4. Ausfahrt nehmen
+Im Kreisverkehr die 4. Ausfahrt nehmen auf
+Im Kreisverkehr die 5. Ausfahrt nehmen
+Im Kreisverkehr die 5. Ausfahrt nehmen auf
+Im Kreisverkehr die 6. Ausfahrt nehmen
+Im Kreisverkehr die 6. Ausfahrt nehmen auf
+Im Kreisverkehr die 7. Ausfahrt nehmen
+Im Kreisverkehr die 7. Ausfahrt nehmen auf
+Im Kreisverkehr die 8. Ausfahrt nehmen
+Im Kreisverkehr die 8. Ausfahrt nehmen auf
+Kreisverkehr verlassen
+Kreisverkehr verlassen auf
+Richtung
+Wechseln Sie 4 Spuren nach rechts auf die linke Spur
+Wechseln Sie 3 Spuren nach rechts auf die linke Spur
+Wechseln Sie 2 Spuren nach rechts auf die linke Spur
+Wechseln Sie eine Spur nach rechts auf die linke Spur
+Wechseln Sie eine Spur nach links auf die linke Spur
+Wechseln Sie 2 Spuren nach links auf die linke Spur
+Wechseln Sie 3 Spuren nach links auf die linke Spur
+Wechseln Sie 4 Spuren nach links auf die linke Spur
+Wechseln Sie 4 Spuren nach rechts auf die rechte Spur
+Wechseln Sie 3 Spuren nach rechts auf die rechte Spur
+Wechseln Sie 2 Spuren nach rechts auf die rechte Spur
+Wechseln Sie eine Spur nach rechts auf die rechte Spur
+Wechseln Sie eine Spur nach links auf die rechte Spur
+Wechseln Sie 2 Spuren nach links auf die rechte Spur
+Wechseln Sie 3 Spuren nach links auf die rechte Spur
+Wechseln Sie 4 Spuren nach links auf die rechte Spur
+Wechseln Sie 4 Spuren nach rechts auf die 2. Spur von links
+Wechseln Sie 3 Spuren nach rechts auf die 2. Spur von links
+Wechseln Sie 2 Spuren nach rechts auf die 2. Spur von links
+Wechseln Sie eine Spur nach rechts auf die 2. Spur von links
+Wechseln Sie eine Spur nach links auf die 2. Spur von links
+Wechseln Sie 2 Spuren nach links auf die 2. Spur von links
+Wechseln Sie 3 Spuren nach links auf die 2. Spur von links
+Wechseln Sie 4 Spuren nach links auf die 2. Spur von links
+Wechseln Sie 4 Spuren nach rechts auf die 2. Spur von rechts
+Wechseln Sie 3 Spuren nach rechts auf die 2. Spur von rechts
+Wechseln Sie 2 Spuren nach rechts auf die 2. Spur von rechts
+Wechseln Sie eine Spur nach rechts auf die 2. Spur von rechts
+Wechseln Sie eine Spur nach links auf die 2. Spur von rechts
+Wechseln Sie 2 Spuren nach links auf die 2. Spur von rechts
+Wechseln Sie 3 Spuren nach links auf die 2. Spur von rechts
+Wechseln Sie 4 Spuren nach links auf die 2. Spur von rechts
+Wechseln Sie 4 Spuren nach rechts auf die 3. Spur von links
+Wechseln Sie 3 Spuren nach rechts auf die 3. Spur von links
+Wechseln Sie 2 Spuren nach rechts auf die 3. Spur von links
+Wechseln Sie eine Spur nach rechts auf die 3. Spur von links
+Wechseln Sie eine Spur nach links auf die 3. Spur von links
+Wechseln Sie 2 Spuren nach links auf die 3. Spur von links
+Wechseln Sie 3 Spuren nach links auf die 3. Spur von links
+Wechseln Sie 4 Spuren nach links auf die 3. Spur von links
+Wechseln Sie 4 Spuren nach rechts auf die 3. Spur von rechts
+Wechseln Sie 3 Spuren nach rechts auf die 3. Spur von rechts
+Wechseln Sie 2 Spuren nach rechts auf die 3. Spur von rechts
+Wechseln Sie eine Spur nach rechts auf die 3. Spur von rechts
+Wechseln Sie eine Spur nach links auf die 3. Spur von rechts
+Wechseln Sie 2 Spuren nach links auf die 3. Spur von rechts
+Wechseln Sie 3 Spuren nach links auf die 3. Spur von rechts
+Wechseln Sie 4 Spuren nach links auf die 3. Spur von rechts
+Wechseln Sie 4 Spuren nach rechts auf die 4. Spur von links
+Wechseln Sie 3 Spuren nach rechts auf die 4. Spur von links
+Wechseln Sie 2 Spuren nach rechts auf die 4. Spur von links
+Wechseln Sie eine Spur nach rechts auf die 4. Spur von links
+Wechseln Sie eine Spur nach links auf die 4. Spur von links
+Wechseln Sie 2 Spuren nach links auf die 4. Spur von links
+Wechseln Sie 3 Spuren nach links auf die 4. Spur von links
+Wechseln Sie 4 Spuren nach links auf die 4. Spur von links
+Wechseln Sie 4 Spuren nach rechts auf die 4. Spur von rechts
+Wechseln Sie 3 Spuren nach rechts auf die 4. Spur von rechts
+Wechseln Sie 2 Spuren nach rechts auf die 4. Spur von rechts
+Wechseln Sie eine Spur nach rechts auf die 4. Spur von rechts
+Wechseln Sie eine Spur nach links auf die 4. Spur von rechts
+Wechseln Sie 2 Spuren nach links auf die 4. Spur von rechts
+Wechseln Sie 3 Spuren nach links auf die 4. Spur von rechts
+Wechseln Sie 4 Spuren nach links auf die 4. Spur von rechts
+Bleiben Sie auf Ihrer Spur
+Route wird neu berechnet
+Achtung, Geschwindigkeit

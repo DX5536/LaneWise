@@ -55,3 +55,7 @@ build-apk/
 tools/aerial_lanes/work/
 tools/aerial_lanes/.venv/
 __pycache__/
+
+# Voice-pack pipeline (OmniVoice venv, rendered clips)
+tools/voice_pack/.venv/
+tools/voice_pack/work/

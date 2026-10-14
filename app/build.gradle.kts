@@ -72,6 +72,8 @@ android {
     }
     testOptions {
         unitTests.isReturnDefaultValues = true
+        // `-PupdateVoiceInventory` rewrites tools/voice_pack/inventory/*.txt (see VoiceInventoryTest).
+        unitTests.all { it.systemProperty("updateVoiceInventory", project.hasProperty("updateVoiceInventory").toString()) }
     }
 }
 

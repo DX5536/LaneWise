@@ -36,6 +36,8 @@ data class AppSettings(
     val satellite: Boolean = false,
     /** Lane counts measured from aerial photos where OSM has none or disagrees (assets/aerial_lanes.json). */
     val aerialLanes: Boolean = true,
+    /** Selected OmniVoice voice packs (ids, comma separated; at most one per language). Empty = Android TTS. */
+    val voicePacks: String = "",
     // Speed warnings
     val overSpeedWarning: Boolean = true,
     /** Tolerance above the limit before the red border shows (km/h). */
@@ -82,6 +84,7 @@ class SettingsRepository(private val context: Context) {
         val signs = booleanPreferencesKey("signs")
         val satellite = booleanPreferencesKey("satellite")
         val aerialLanes = booleanPreferencesKey("aerial_lanes")
+        val voicePacks = stringPreferencesKey("voice_packs")
         val over = booleanPreferencesKey("over_speed")
         val overOff = intPreferencesKey("over_speed_offset")
         val under = booleanPreferencesKey("under_speed")
@@ -118,6 +121,7 @@ class SettingsRepository(private val context: Context) {
             showSigns = p[K.signs] ?: d.showSigns,
             satellite = p[K.satellite] ?: d.satellite,
             aerialLanes = p[K.aerialLanes] ?: d.aerialLanes,
+            voicePacks = p[K.voicePacks] ?: d.voicePacks,
             overSpeedWarning = p[K.over] ?: d.overSpeedWarning,
             overSpeedOffset = p[K.overOff] ?: d.overSpeedOffset,
             underSpeedWarning = p[K.under] ?: d.underSpeedWarning,
@@ -155,6 +159,7 @@ class SettingsRepository(private val context: Context) {
             p[K.signs] = s.showSigns
             p[K.satellite] = s.satellite
             p[K.aerialLanes] = s.aerialLanes
+            p[K.voicePacks] = s.voicePacks
             p[K.over] = s.overSpeedWarning
             p[K.overOff] = s.overSpeedOffset
             p[K.under] = s.underSpeedWarning

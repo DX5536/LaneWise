@@ -82,6 +82,9 @@ data class UiState(
     val incidents: List<TrafficIncident> = emptyList(),
     val offlineGraphReady: Boolean = false,
     val offlineProgress: String? = null,
+    /** Installed OmniVoice packs and the download in progress (pack id to percent). */
+    val voicePacks: List<de.lanewise.nav.VoicePack> = emptyList(),
+    val voiceDownload: Pair<String, Int>? = null,
     val laneHint: String? = null,
     /** Countdown of the lane-change hint: 1 when it appears, 0 at the last point the change can be made. */
     val laneHintCountdown: Float? = null,
@@ -128,6 +131,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     init {
         viewModelScope.launch { loadGraph() }
         viewModelScope.launch { placesRepo.places.collect { p -> _ui.update { it.copy(places = p) } } }
+        viewModelScope.launch { refreshVoicePacks() }
+        viewModelScope.launch { settings.collect { s -> voice.setPacks(selectedPacks(s)) } }
         viewModelScope.launch {
             while (isActive) { _ui.update { it.copy(online = isOnline()) }; delay(10_000) }
         }
@@ -435,6 +440,39 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (!f.exists()) return
         graph = withContext(Dispatchers.IO) { runCatching { OfflineGraph.load(f) }.getOrNull() }
         _ui.update { it.copy(offlineGraphReady = graph != null) }
+    }
+
+    private suspend fun refreshVoicePacks() {
+        val packs = withContext(Dispatchers.IO) { de.lanewise.nav.VoicePack.installed(ctx) }
+        _ui.update { it.copy(voicePacks = packs) }
+        voice.setPacks(selectedPacks(settings.value))
+    }
+
+    private fun selectedPacks(s: AppSettings): List<de.lanewise.nav.VoicePack> {
+        val ids = s.voicePacks.split(',').filter { it.isNotBlank() }.toSet()
+        return _ui.value.voicePacks.filter { it.id in ids }
+    }
+
+    /** Select an installed pack for its language, or `null` to use Android TTS for [language] ("de", "en", "vi"). */
+    fun selectVoicePack(language: String, id: String?) = updateSettings { st ->
+        val others = st.voicePacks.split(',').filter { it.isNotBlank() }
+            .filter { pid -> _ui.value.voicePacks.firstOrNull { it.id == pid }?.language != language }
+        st.copy(voicePacks = (others + listOfNotNull(id)).joinToString(","))
+    }
+
+    fun downloadVoicePack(id: String) {
+        if (_ui.value.voiceDownload != null) return
+        viewModelScope.launch {
+            try {
+                _ui.update { it.copy(voiceDownload = id to 0) }
+                val pack = de.lanewise.nav.VoicePack.download(ctx, id) { pct -> _ui.update { it.copy(voiceDownload = id to pct) } }
+                _ui.update { it.copy(voiceDownload = null) }
+                refreshVoicePacks()
+                selectVoicePack(pack.language, pack.id)
+            } catch (e: Exception) {
+                _ui.update { it.copy(voiceDownload = null, message = "${strings.dlFailed}: ${e.message}") }
+            }
+        }
     }
 
     fun downloadOfflineRegion() {

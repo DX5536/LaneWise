@@ -19,7 +19,8 @@ de.lanewise
 ├── traffic/                          Autobahn GmbH API, TomTom, HERE, Mobilithek DATEX II
 ├── location/Location.kt              raw GNSS (LocationManager GPS_PROVIDER + GnssStatus), simulator
 ├── nav/                              NavigationEngine (snap, reroute, speed status, announcements),
-│                                     Phrases (DE/EN), VoiceGuide (TTS)
+│                                     Phrases (DE/EN/VI, voice segments), VoiceGuide (OmniVoice packs → Android TTS),
+│                                     VoicePack, VoiceInventory (tools/voice_pack)
 ├── search/Geocoder.kt                Photon (OSM) search, Germany only
 ├── settings/Settings.kt              DataStore-backed AppSettings
 └── ui/
@@ -42,7 +43,7 @@ NavigationEngine.update ──► snap to route, progress, speed status, off-rou
         ▼
 NavSnapshot ──► UI state ──► MapController.updateNavigation (camera + LaneRibbonBuilder layers)
         │                └► HUD (banner, lane bar, 3D scene, speed sign, red border)
-        └► announcements ──► VoiceGuide (TTS)
+        └► announcements ──► VoiceGuide (OmniVoice clips, else TTS)
 off-route ×3 ──► reroute (10 s throttle)       speed limits: Overpass, 40 km windows
 traffic every 5 min (Autobahn/TomTom/HERE/Mobilithek)
 ```

@@ -60,53 +60,79 @@ class Phrases(private val lang: AppLanguage) {
     private fun cap(s: String) = s.replaceFirstChar { it.uppercase(locale) }
 
     /** Main instruction for a step, e.g. "Rechts abbiegen auf Celler Straße". */
-    fun instruction(step: RouteStep): String {
+    fun instruction(step: RouteStep): String = instructionParts(step).joinToString(" ")
+
+    /**
+     * The instruction as voice segments: a fixed phrase (with "auf"/"onto"/"vào" when a road follows), then the
+     * road ref and name, then "Richtung" + destination. Each segment is one clip in an OmniVoice voice pack
+     * (see tools/voice_pack); [de.lanewise.nav.VoiceGuide] chains them.
+     */
+    fun instructionParts(step: RouteStep): List<String> {
         val m = step.maneuver
-        val road = listOfNotNull(step.ref, step.name.takeIf { it.isNotBlank() }).joinToString(" ").ifBlank { null }
-        val onto = road?.let { t(" auf $it", " onto $it", " vào $it") } ?: ""
-        val toward = step.destinations?.let { t(" Richtung $it", " towards $it", " hướng $it") } ?: ""
-        val exit = step.exitNumber?.let { t(" Ausfahrt $it", " exit $it", " số $it") } ?: ""
+        val road = listOfNotNull(step.ref?.takeIf { it.isNotBlank() }, step.name.takeIf { it.isNotBlank() })
+        val toward = step.destinations?.takeIf { it.isNotBlank() }?.let { listOf(t("Richtung", "towards", "hướng"), it) } ?: emptyList()
         return when (m.type) {
-            ManeuverType.DEPART -> t("Starten$onto", "Head out$onto", "Xuất phát$onto")
+            ManeuverType.ARRIVE -> listOf(core(step, false))
+            ManeuverType.OFF_RAMP -> listOf(core(step, false)) + listOfNotNull(step.exitNumber?.takeIf { it.isNotBlank() }) + toward
+            ManeuverType.ON_RAMP, ManeuverType.FORK -> listOf(core(step, road.isNotEmpty())) + road + toward
+            else -> listOf(core(step, road.isNotEmpty())) + road
+        }
+    }
+
+    /** The fixed phrase of a manoeuvre; [onto] appends the preposition before a road name. */
+    fun core(step: RouteStep, onto: Boolean): String {
+        val m = step.maneuver
+        val on = if (onto) t(" auf", " onto", " vào") else ""
+        return when (m.type) {
+            ManeuverType.DEPART -> t("Starten", "Head out", "Xuất phát") + on
             ManeuverType.ARRIVE -> t("Sie haben Ihr Ziel erreicht", "You have arrived", "Bạn đã đến nơi")
-            ManeuverType.ON_RAMP -> t("Auffahren$onto", "Take the ramp$onto", "Đi vào đường dẫn$onto") + toward
+            ManeuverType.ON_RAMP -> t("Auffahren", "Take the ramp", "Đi vào đường dẫn") + on
             ManeuverType.OFF_RAMP -> t(
-                "${cap(side(m.modifier))} halten zur$exit",
-                "Take$exit on the ${side(m.modifier)}",
-                "Đi theo lối ra$exit bên ${side(m.modifier)}",
-            ) + toward
+                "${cap(side(m.modifier))} halten zur Ausfahrt",
+                "Take the exit on the ${side(m.modifier)}",
+                "Đi theo lối ra bên ${side(m.modifier)}",
+            )
             ManeuverType.FORK -> t(
                 "An der Gabelung ${side(m.modifier)} halten",
                 "Keep ${side(m.modifier)} at the fork",
                 "Tại ngã ba, đi về bên ${side(m.modifier)}",
-            ) + onto + toward
-            ManeuverType.MERGE -> t("Einfädeln$onto", "Merge$onto", "Nhập làn$onto")
+            ) + on
+            ManeuverType.MERGE -> t("Einfädeln", "Merge", "Nhập làn") + on
             ManeuverType.ROUNDABOUT -> {
                 val n = m.exit
                 t(
-                    "Im Kreisverkehr ${n?.let { "die $it. Ausfahrt" } ?: "die Ausfahrt"} nehmen$onto",
-                    "At the roundabout take the ${n?.let { ordinal(it) + " " } ?: ""}exit$onto",
-                    "Tại vòng xuyến, đi lối ra ${n?.let { "thứ $it" } ?: ""}$onto",
-                )
+                    "Im Kreisverkehr ${n?.let { "die $it. Ausfahrt" } ?: "die Ausfahrt"} nehmen",
+                    "At the roundabout take the ${n?.let { ordinal(it) + " " } ?: ""}exit",
+                    "Tại vòng xuyến, đi lối ra${n?.let { " thứ $it" } ?: ""}",
+                ) + on
             }
-            ManeuverType.EXIT_ROUNDABOUT -> t("Kreisverkehr verlassen$onto", "Exit the roundabout$onto", "Ra khỏi vòng xuyến$onto")
+            ManeuverType.EXIT_ROUNDABOUT -> t("Kreisverkehr verlassen", "Exit the roundabout", "Ra khỏi vòng xuyến") + on
             ManeuverType.END_OF_ROAD -> t(
-                "Am Ende der Straße ${dir(m.modifier)}$onto",
-                "At the end of the road ${dir(m.modifier)}$onto",
-                "Cuối đường, ${dir(m.modifier)}$onto",
-            )
+                "Am Ende der Straße ${dir(m.modifier)}",
+                "At the end of the road ${dir(m.modifier)}",
+                "Cuối đường, ${dir(m.modifier)}",
+            ) + on
             ManeuverType.NEW_NAME, ManeuverType.CONTINUE ->
-                if (m.modifier == Modifier.STRAIGHT) t("Weiter$onto", "Continue$onto", "Tiếp tục$onto")
-                else cap(dir(m.modifier)) + onto
-            else -> cap(dir(m.modifier)) + onto
+                (if (m.modifier == Modifier.STRAIGHT) t("Weiter", "Continue", "Tiếp tục") else cap(dir(m.modifier))) + on
+            else -> cap(dir(m.modifier)) + on
         }
     }
 
-    fun spoken(step: RouteStep, distM: Double?): String {
-        val core = instruction(step)
-        if (distM == null) return core
-        val sep = if (lang == AppLanguage.VIETNAMESE) ", " else " "
-        return "${spokenDistance(distM)}$sep${core.replaceFirstChar { it.lowercase(locale) }}"
+    fun spoken(step: RouteStep, distM: Double?): String = spokenParts(step, distM).joinToString(" ")
+
+    /** Voice segments of an announcement: distance phrase (Vietnamese adds the comma there) + instruction parts. */
+    fun spokenParts(step: RouteStep, distM: Double?): List<String> {
+        val parts = instructionParts(step)
+        if (distM == null) return parts
+        val dist = spokenDistance(distM) + if (lang == AppLanguage.VIETNAMESE) "," else ""
+        return listOf(dist, parts.first().replaceFirstChar { it.lowercase(locale) }) + parts.drop(1)
+    }
+
+    /** Every distance phrase [spokenDistance] can produce (for voice packs). */
+    fun allSpokenDistances(): List<String> {
+        val metres = (1..9).map { it * 10.0 } + (2..20).map { it * 50.0 }
+        val km = (10..99).map { it * 100.0 } + (10..60).map { it * 1000.0 }
+        return (metres + km).map { spokenDistance(it) + if (lang == AppLanguage.VIETNAMESE) "," else "" }.distinct()
     }
 
     fun laneChange(c: LaneChangeInstruction, laneCount: Int): String {

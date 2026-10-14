@@ -45,7 +45,8 @@ data class NavSnapshot(
 )
 
 /** Something to say. [key] de-duplicates so each announcement is spoken once. */
-data class Announcement(val key: String, val text: String, val priority: Int = 0)
+/** Something to say; [parts] are the voice-pack segments (their concatenation is [text]). */
+data class Announcement(val key: String, val text: String, val priority: Int = 0, val parts: List<String> = listOf(text))
 
 /**
  * Turns GNSS fixes into navigation state. Pure Kotlin (no Android) so it is unit-testable and can be
@@ -139,7 +140,7 @@ class NavigationEngine(
         val out = ArrayList<Announcement>()
         val step = s.nextStep
         if (s.arrived) {
-            say(out, "arrive", p.instruction(route.steps.last()))
+            say(out, "arrive", p.instructionParts(route.steps.last()))
             return out
         }
         if (step != null && step.maneuver.type != ManeuverType.DEPART) {
@@ -150,27 +151,27 @@ class NavigationEngine(
             val id = step.distanceAlong.toInt()
             val d = s.distanceToNextStep
             when {
-                d <= now -> say(out, "$id-now", p.instruction(step), 2)
-                d <= near -> say(out, "$id-near", p.spoken(step, d), 1)
-                d <= far && d > near + 100 -> say(out, "$id-far", p.spoken(step, d))
+                d <= now -> say(out, "$id-now", p.instructionParts(step), 2)
+                d <= near -> say(out, "$id-near", p.spokenParts(step, d), 1)
+                d <= far && d > near + 100 -> say(out, "$id-far", p.spokenParts(step, d))
             }
         }
         // Lane advice — the "advanced lane assist" voice.
         val change = s.lanes.pendingChange
         if (change != null && s.distanceAlong >= change.startAt - 50) {
-            say(out, "lane-${change.site.distanceAlong.toInt()}-${change.targetLane}", p.laneChange(change, change.site.laneCount), 3)
+            say(out, "lane-${change.site.distanceAlong.toInt()}-${change.targetLane}", listOf(p.laneChange(change, change.site.laneCount)), 3)
         } else {
             val a = s.lanes.nextAdvice
             if (a != null && s.lanes.stayInLane && a.site.isManeuver) {
                 val dist = a.site.distanceAlong - s.distanceAlong
                 val restrictive = a.allowed.count { it } < a.site.laneCount
-                if (restrictive && dist in 80.0..400.0) say(out, "stay-${a.site.distanceAlong.toInt()}", p.stayInLane())
+                if (restrictive && dist in 80.0..400.0) say(out, "stay-${a.site.distanceAlong.toInt()}", listOf(p.stayInLane()))
             }
         }
         return out
     }
 
-    private fun say(out: MutableList<Announcement>, key: String, text: String, prio: Int = 0) {
-        if (spoken.add(key)) out += Announcement(key, text, prio)
+    private fun say(out: MutableList<Announcement>, key: String, parts: List<String>, prio: Int = 0) {
+        if (spoken.add(key)) out += Announcement(key, parts.joinToString(" "), prio, parts)
     }
 }

@@ -1,0 +1,303 @@
+In 10 metres
+In 20 metres
+In 30 metres
+In 40 metres
+In 50 metres
+In 60 metres
+In 70 metres
+In 80 metres
+In 90 metres
+In 100 metres
+In 150 metres
+In 200 metres
+In 250 metres
+In 300 metres
+In 350 metres
+In 400 metres
+In 450 metres
+In 500 metres
+In 550 metres
+In 600 metres
+In 650 metres
+In 700 metres
+In 750 metres
+In 800 metres
+In 850 metres
+In 900 metres
+In 950 metres
+In 1.0 kilometres
+In 1.1 kilometres
+In 1.2 kilometres
+In 1.3 kilometres
+In 1.4 kilometres
+In 1.5 kilometres
+In 1.6 kilometres
+In 1.7 kilometres
+In 1.8 kilometres
+In 1.9 kilometres
+In 2.0 kilometres
+In 2.1 kilometres
+In 2.2 kilometres
+In 2.3 kilometres
+In 2.4 kilometres
+In 2.5 kilometres
+In 2.6 kilometres
+In 2.7 kilometres
+In 2.8 kilometres
+In 2.9 kilometres
+In 3.0 kilometres
+In 3.1 kilometres
+In 3.2 kilometres
+In 3.3 kilometres
+In 3.4 kilometres
+In 3.5 kilometres
+In 3.6 kilometres
+In 3.7 kilometres
+In 3.8 kilometres
+In 3.9 kilometres
+In 4.0 kilometres
+In 4.1 kilometres
+In 4.2 kilometres
+In 4.3 kilometres
+In 4.4 kilometres
+In 4.5 kilometres
+In 4.6 kilometres
+In 4.7 kilometres
+In 4.8 kilometres
+In 4.9 kilometres
+In 5.0 kilometres
+In 5.1 kilometres
+In 5.2 kilometres
+In 5.3 kilometres
+In 5.4 kilometres
+In 5.5 kilometres
+In 5.6 kilometres
+In 5.7 kilometres
+In 5.8 kilometres
+In 5.9 kilometres
+In 6.0 kilometres
+In 6.1 kilometres
+In 6.2 kilometres
+In 6.3 kilometres
+In 6.4 kilometres
+In 6.5 kilometres
+In 6.6 kilometres
+In 6.7 kilometres
+In 6.8 kilometres
+In 6.9 kilometres
+In 7.0 kilometres
+In 7.1 kilometres
+In 7.2 kilometres
+In 7.3 kilometres
+In 7.4 kilometres
+In 7.5 kilometres
+In 7.6 kilometres
+In 7.7 kilometres
+In 7.8 kilometres
+In 7.9 kilometres
+In 8.0 kilometres
+In 8.1 kilometres
+In 8.2 kilometres
+In 8.3 kilometres
+In 8.4 kilometres
+In 8.5 kilometres
+In 8.6 kilometres
+In 8.7 kilometres
+In 8.8 kilometres
+In 8.9 kilometres
+In 9.0 kilometres
+In 9.1 kilometres
+In 9.2 kilometres
+In 9.3 kilometres
+In 9.4 kilometres
+In 9.5 kilometres
+In 9.6 kilometres
+In 9.7 kilometres
+In 9.8 kilometres
+In 9.9 kilometres
+In 10 kilometres
+In 11 kilometres
+In 12 kilometres
+In 13 kilometres
+In 14 kilometres
+In 15 kilometres
+In 16 kilometres
+In 17 kilometres
+In 18 kilometres
+In 19 kilometres
+In 20 kilometres
+In 21 kilometres
+In 22 kilometres
+In 23 kilometres
+In 24 kilometres
+In 25 kilometres
+In 26 kilometres
+In 27 kilometres
+In 28 kilometres
+In 29 kilometres
+In 30 kilometres
+In 31 kilometres
+In 32 kilometres
+In 33 kilometres
+In 34 kilometres
+In 35 kilometres
+In 36 kilometres
+In 37 kilometres
+In 38 kilometres
+In 39 kilometres
+In 40 kilometres
+In 41 kilometres
+In 42 kilometres
+In 43 kilometres
+In 44 kilometres
+In 45 kilometres
+In 46 kilometres
+In 47 kilometres
+In 48 kilometres
+In 49 kilometres
+In 50 kilometres
+In 51 kilometres
+In 52 kilometres
+In 53 kilometres
+In 54 kilometres
+In 55 kilometres
+In 56 kilometres
+In 57 kilometres
+In 58 kilometres
+In 59 kilometres
+In 60 kilometres
+Head out
+Head out onto
+You have arrived
+Make a U-turn
+Make a U-turn onto
+Turn sharp right
+Turn sharp right onto
+Turn right
+Turn right onto
+Bear right
+Bear right onto
+Continue straight
+Continue straight onto
+Bear left
+Bear left onto
+Turn left
+Turn left onto
+Turn sharp left
+Turn sharp left onto
+Continue
+Continue onto
+Merge
+Merge onto
+Take the ramp
+Take the ramp onto
+Take the exit on the left
+Take the exit on the right
+Keep left at the fork
+Keep left at the fork onto
+Keep right at the fork
+Keep right at the fork onto
+At the end of the road make a U-turn
+At the end of the road make a U-turn onto
+At the end of the road turn sharp right
+At the end of the road turn sharp right onto
+At the end of the road turn right
+At the end of the road turn right onto
+At the end of the road bear right
+At the end of the road bear right onto
+At the end of the road continue straight
+At the end of the road continue straight onto
+At the end of the road bear left
+At the end of the road bear left onto
+At the end of the road turn left
+At the end of the road turn left onto
+At the end of the road turn sharp left
+At the end of the road turn sharp left onto
+At the roundabout take the exit
+At the roundabout take the exit onto
+At the roundabout take the 1st exit
+At the roundabout take the 1st exit onto
+At the roundabout take the 2nd exit
+At the roundabout take the 2nd exit onto
+At the roundabout take the 3rd exit
+At the roundabout take the 3rd exit onto
+At the roundabout take the 4th exit
+At the roundabout take the 4th exit onto
+At the roundabout take the 5th exit
+At the roundabout take the 5th exit onto
+At the roundabout take the 6th exit
+At the roundabout take the 6th exit onto
+At the roundabout take the 7th exit
+At the roundabout take the 7th exit onto
+At the roundabout take the 8th exit
+At the roundabout take the 8th exit onto
+Exit the roundabout
+Exit the roundabout onto
+towards
+Move 4 lanes to the right into the left lane
+Move 3 lanes to the right into the left lane
+Move 2 lanes to the right into the left lane
+Move one lane to the right into the left lane
+Move one lane to the left into the left lane
+Move 2 lanes to the left into the left lane
+Move 3 lanes to the left into the left lane
+Move 4 lanes to the left into the left lane
+Move 4 lanes to the right into the right lane
+Move 3 lanes to the right into the right lane
+Move 2 lanes to the right into the right lane
+Move one lane to the right into the right lane
+Move one lane to the left into the right lane
+Move 2 lanes to the left into the right lane
+Move 3 lanes to the left into the right lane
+Move 4 lanes to the left into the right lane
+Move 4 lanes to the right into the 2nd lane from the left
+Move 3 lanes to the right into the 2nd lane from the left
+Move 2 lanes to the right into the 2nd lane from the left
+Move one lane to the right into the 2nd lane from the left
+Move one lane to the left into the 2nd lane from the left
+Move 2 lanes to the left into the 2nd lane from the left
+Move 3 lanes to the left into the 2nd lane from the left
+Move 4 lanes to the left into the 2nd lane from the left
+Move 4 lanes to the right into the 2nd lane from the right
+Move 3 lanes to the right into the 2nd lane from the right
+Move 2 lanes to the right into the 2nd lane from the right
+Move one lane to the right into the 2nd lane from the right
+Move one lane to the left into the 2nd lane from the right
+Move 2 lanes to the left into the 2nd lane from the right
+Move 3 lanes to the left into the 2nd lane from the right
+Move 4 lanes to the left into the 2nd lane from the right
+Move 4 lanes to the right into the 3rd lane from the left
+Move 3 lanes to the right into the 3rd lane from the left
+Move 2 lanes to the right into the 3rd lane from the left
+Move one lane to the right into the 3rd lane from the left
+Move one lane to the left into the 3rd lane from the left
+Move 2 lanes to the left into the 3rd lane from the left
+Move 3 lanes to the left into the 3rd lane from the left
+Move 4 lanes to the left into the 3rd lane from the left
+Move 4 lanes to the right into the 3rd lane from the right
+Move 3 lanes to the right into the 3rd lane from the right
+Move 2 lanes to the right into the 3rd lane from the right
+Move one lane to the right into the 3rd lane from the right
+Move one lane to the left into the 3rd lane from the right
+Move 2 lanes to the left into the 3rd lane from the right
+Move 3 lanes to the left into the 3rd lane from the right
+Move 4 lanes to the left into the 3rd lane from the right
+Move 4 lanes to the right into the 4th lane from the left
+Move 3 lanes to the right into the 4th lane from the left
+Move 2 lanes to the right into the 4th lane from the left
+Move one lane to the right into the 4th lane from the left
+Move one lane to the left into the 4th lane from the left
+Move 2 lanes to the left into the 4th lane from the left
+Move 3 lanes to the left into the 4th lane from the left
+Move 4 lanes to the left into the 4th lane from the left
+Move 4 lanes to the right into the 4th lane from the right
+Move 3 lanes to the right into the 4th lane from the right
+Move 2 lanes to the right into the 4th lane from the right
+Move one lane to the right into the 4th lane from the right
+Move one lane to the left into the 4th lane from the right
+Move 2 lanes to the left into the 4th lane from the right
+Move 3 lanes to the left into the 4th lane from the right
+Move 4 lanes to the left into the 4th lane from the right
+Stay in your lane
+Recalculating route
+Watch your speed
