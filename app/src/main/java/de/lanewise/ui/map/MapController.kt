@@ -141,6 +141,7 @@ class MapController(private val context: Context) {
         style = null
         m.setStyle(Style.Builder().fromUri(styleUri(isDark))) { s ->
             style = s
+            buildingHeight = null; buildingBase = null; cutAt = null
             // New style = empty sources: force the next navigation update to hand over road + highlight again.
             geomKey = null; shownChunks = emptySet()
             setupLayers(s, isDark)
@@ -340,6 +341,31 @@ class MapController(private val context: Context) {
         if (!roadName) (style?.getSource(SRC_LABEL) as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(emptyList()))
         if (softBuildings != optSoftBuildings) { optSoftBuildings = softBuildings; style?.let { applyBuildings(it) } }
         geomKey = null   // rebuild road + highlight with the new options at the next update
+    }
+
+    // Buildings at the car are flattened: the 3D car is depth-tested against the 3D buildings, and with the GPS
+    // position inside or right next to a building (parking, indoors) the building swallowed the car.
+    private var buildingHeight: Expression? = null
+    private var buildingBase: Expression? = null
+    private var cutAt: LatLon? = null
+
+    private fun cutBuildingsAt(s: Style, p: LatLon) {
+        val last = cutAt
+        if (last != null && Geo.distance(last, p) < 4.0) return
+        cutAt = p
+        val layer = s.getLayer("building-3d") as? FillExtrusionLayer ?: return
+        if (buildingHeight == null) {
+            buildingHeight = layer.fillExtrusionHeight.expression
+            buildingBase = layer.fillExtrusionBase.expression
+        }
+        val h = buildingHeight ?: return
+        val near = Expression.lt(
+            Expression.coalesce(Expression.distance(Point.fromLngLat(p.lon, p.lat)), Expression.literal(1e9)),
+            Expression.literal(BUILDING_CLEARANCE))
+        layer.setProperties(
+            PropertyFactory.fillExtrusionHeight(Expression.switchCase(near, Expression.literal(0f), h)),
+            PropertyFactory.fillExtrusionBase(Expression.switchCase(near, Expression.literal(0f), buildingBase ?: Expression.literal(0f))),
+        )
     }
 
     /** 3D buildings see-through while navigating (option), so the road stays in front (Baidu / AMAP). */
@@ -595,6 +621,7 @@ class MapController(private val context: Context) {
         val s = style ?: return
         lastCarPos = position; lastCarBearing = bearing
         if (car3d) {
+            cutBuildingsAt(s, position)
             val blocks = CarModel.blocks(position, bearing, CarModel.DEFAULT_EXAGGERATION * carScale)
             (s.getSource(SRC_CAR3D) as? GeoJsonSource)?.setGeoJsonSync(FeatureCollection.fromFeatures(blocks.map { b ->
                 Feature.fromGeometry(Polygon.fromLngLats(listOf(b.ring.map { Point.fromLngLat(it.lon, it.lat) }))).apply {
@@ -860,6 +887,8 @@ class MapController(private val context: Context) {
         private const val SRC_LABEL = "lw-car-label"
         private const val SRC_ABPOI = "lw-ab-poi"
         private const val CHEV_SPACING = 11.0
+        /** Buildings closer than this to the car (m, 0 = car inside) are drawn flat so they cannot hide the 3D car. */
+        private const val BUILDING_CLEARANCE = 9.0
         private const val SRC_DEST = "lw-dest"
         private const val SRC_INC = "lw-incidents"
         private const val SRC_FEAT = "lw-features"

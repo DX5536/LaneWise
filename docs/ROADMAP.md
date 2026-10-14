@@ -1,6 +1,6 @@
 # Status & roadmap
 
-_Last updated: 2026-10-15 (v0.4.4: Bilibili ideas as options, Autobahn icons; v0.4.3: automatic light/dark by the sun, 3D car + car size, Bilibili UI review; v0.4.2: Schulenburger Landstraße lane, smooth camera, auto zoom)._
+_Last updated: 2026-10-15 (v0.4.2: Schulenburger Landstraße lane, smooth camera, auto zoom, automatic light/dark, 3D car, Bilibili ideas as options, Autobahn icons)._
 
 ## Done (v0.1)
 - [x] Reverse-engineering notes for Petal Maps 4.7 and AMAP 17.00 lane guidance (`docs/REVERSE_ENGINEERING.md`)
@@ -185,7 +185,7 @@ _Last updated: 2026-10-15 (v0.4.4: Bilibili ideas as options, Autobahn icons; v0
       `RouteScorerTest`.
 - [x] `RouteRenderLiveTest` takes `LANEWISE_FROM` / `LANEWISE_TO` (`lat,lon`) to check any route.
 
-## Done (v0.4.2, 2026-10-14) — owner's video Musterstraße 1 → Musterweg 3, Langenhagen (13 km, demo ×4, classic view)
+## Done (v0.4.2, part 1, 2026-10-14) — owner's video Musterstraße 1 → Musterweg 3, Langenhagen (13 km, demo ×4, classic view)
 - [x] **Wrong lane on Schulenburger Landstraße → right into Beneckeallee** (video 3:35–3:55): after the junction with
       `left | through | through;right` the road has two lanes (OSM) for 350 m, then `through | right`. The right-only
       lane was treated as a turn pocket (lateral −1), so the plan kept the car in the *left* lane and asked "move one
@@ -207,7 +207,7 @@ _Last updated: 2026-10-15 (v0.4.4: Bilibili ideas as options, Autobahn icons; v0
       (15.5–19, default 17.5), tilt stays as set. Auto zoom in the classic view zooms out less (motorway 16.8, trunk /
       > 70 km/h 17.2, was 16.6 / 17.0).
 
-## Done (v0.4.3, 2026-10-15)
+## Done (v0.4.2, part 2, 2026-10-15)
 - [x] **Automatic light/dark mode** (new default theme "Automatic (sunrise/sunset)", DE/EN/VI): dark while the sun is
       below −3° at the car's position (Hannover before the first fix), re-checked every minute; no internet or system
       setting needed (`core/geo/Sun.kt`, NOAA formulas, `SunTest`). System / Light / Dark still selectable.
@@ -216,6 +216,9 @@ _Last updated: 2026-10-15 (v0.4.4: Bilibili ideas as options, Autobahn icons; v0
       layer), rotating with the heading, with a violet glow underneath (`ui/map/CarModel.kt`, `CarModelTest`). Drawn
       2.4 × life size (a real car is ~6 dp long at zoom 17). Off = the flat arrow puck.
 - [x] **Car / arrow size** slider (×0.5 … ×2, Appearance) for both the 3D car and the arrow.
+- [x] **3D car no longer hidden by 3D buildings**: buildings within 9 m of the car (or containing it — GPS indoors /
+      in a courtyard) are drawn flat (`building-3d` height via MapLibre's `distance` expression, updated every 4 m).
+- [x] App version 0.4.2 (`appVersion`).
 - [x] Map style switch (light ↔ dark, now also at sunset while driving) re-sends road + highlight to the new style
       (sources start empty; the 25 m rebuild step would otherwise leave the road missing until the plan changed).
 
@@ -224,7 +227,7 @@ What they do (all lane-level, light theme by day):
 - Banner styled as a **road guide sign** (green on motorways in China — for Germany: blue Autobahn / yellow
   Bundesstraße), turn arrow + distance + name; the **lane arrows sit directly under it in the same card**, white
   arrows, recommended lanes bright. (LaneWise already docks the lane bar under the banner.)
-- **3D car** (white SUV/sedan) with a soft blue ring around it, roughly one lane wide — done in v0.4.3.
+- **3D car** (white SUV/sedan) with a soft blue ring around it, roughly one lane wide — done in v0.4.2.
 - **Recommended-lane carpet**: teal/green gradient that starts at the car and fades out ~200 m ahead, with animated
   chevrons inside it showing the direction of travel; the route's turn is a blue arrow ribbon on the road.
 - **Road furniture in 3D**: toll plaza with per-lane booths and ETC labels painted on the lanes, traffic-light poles
@@ -236,9 +239,9 @@ What they do (all lane-level, light theme by day):
 - HUD: speed in a circle top-left; **section-control panel** (current / average speed, km left); vertical
   **route progress bar** on the right edge; current road name + speed-limit chip just below the car; bottom bar
   with distance · time · tolls · arrival, "overview" and "exit" buttons; voice/feedback button on the left.
-Candidates 1–6 are done in v0.4.4 (below), each as an option.
+Candidates 1–6 are done in v0.4.2 part 3 (below), each as an option.
 
-## Done (v0.4.4, 2026-10-15) — Bilibili ideas as options + Autobahn icons
+## Done (v0.4.2, part 3, 2026-10-15) — Bilibili ideas as options + Autobahn icons
 Settings → "Lane view extras" (all on by default, DE/EN/VI):
 - [x] **Lane strip fades out** between 220 and 340 m ahead of the car (12 m pieces with falling opacity,
       `LaneRibbonBuilder.build(fade = true)`).
@@ -264,7 +267,7 @@ Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which
 
 ## Video review — still open
 - [ ] Owner: check the 3D car (size, colours, behaviour in tunnels / under bridges) and the automatic theme on the phone.
-- [ ] Owner: check the v0.4.4 options on the phone — chevron speed/colour, fade distance, label position under the
+- [ ] Owner: check the v0.4.2 lane-view options on the phone — chevron speed/colour, fade distance, label position under the
       3D car, pole size; closed lanes only show on a route through active Autobahn roadworks.
 - [ ] Re-check on the phone: puck/camera smoothness with the new dead reckoning (demo ×4 and a real drive), and that
       the highlight never lags behind the car with the 25 m rebuild step.
