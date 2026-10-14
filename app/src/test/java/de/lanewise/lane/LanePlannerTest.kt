@@ -203,5 +203,17 @@ class LanePlannerTest {
         val vahr = LanePlanner().plan(listOf(c), LanePlanner.Options(currentLateral = 0, laneCountAt = { d -> if (d < 360) 2 else 4 }))
         assertEquals(0, vahr[0].changeFromPrevious)
     }
+
+    /** Lanes OSRM put on the intersection 50 m before a left turn whose junction has none: they are the turn lanes. */
+    @Test
+    fun laneDataBeforeAnUnmappedTurnIsUsedForTheTurn() {
+        val before = LaneSite(2530.0, listOf(L, S or R), listOf(false, true), S, false, RoadKind.URBAN)
+        val fixed = attachTurnsToLaneSites(listOf(before), listOf(2580.0 to L)).single()
+        assertTrue(fixed.isManeuver)
+        assertEquals(L, fixed.turn)
+        assertEquals(0, LanePlanner().plan(listOf(fixed), LanePlanner.Options())[0].recommended)
+        // Far away (> 80 m) or with a site at the turn itself: unchanged.
+        assertEquals(S, attachTurnsToLaneSites(listOf(before), listOf(2700.0 to L)).single().turn)
+    }
 }
 

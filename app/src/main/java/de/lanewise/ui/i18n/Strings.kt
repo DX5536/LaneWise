@@ -58,6 +58,8 @@ data class Strings(
     val laneSceneSub: String,
     val immersiveView: String,
     val immersiveViewSub: String,
+    val streetsWhileDriving: String,
+    val streetsWhileDrivingSub: String,
     val solidLineAhead: String,
     val junctionZoom: String,
     val closeUpFrom: String,
@@ -142,6 +144,7 @@ data class Strings(
     val voiceDownloading: String,
     val voiceInstalledClips: String,
     val voiceTest: String,
+    val voiceNotPublished: String,
 ) {
     fun feature(k: FeatureKind) = when (k) {
         FeatureKind.TRAFFIC_SIGNALS -> trafficLight
@@ -179,6 +182,7 @@ val DE = Strings(
     laneScene = "3D-Kreuzungsansicht", laneSceneSub = "Perspektivische Spuransicht kurz vor Abbiegungen.",
     immersiveView = "Spurenkarte (wie AMAP)", immersiveViewSub = "Keine Kreuzungsbox: die Karte zoomt an Kreuzungen und Spurwechseln heran und auf freier Strecke heraus. Aus = klassische Ansicht.",
     solidLineAhead = "Durchgezogene Linie",
+    streetsWhileDriving = "Straßen beim Fahren zeigen (wie Petal)", streetsWhileDrivingSub = "Zeigt während der Navigation alle Straßen mit Spuren und Kreuzungen; nur die Route wird hervorgehoben. Aus = nur die Spuren der Route.",
     junctionZoom = "Karte vor Kreuzungen heranzoomen", closeUpFrom = "Nahansicht ab", beforeJunction = "m vor der Kreuzung",
     laneRibbons = "Spurbänder auf der Karte", laneRibbonsSub = "Fahrspuren und empfohlene Spur direkt in der 3D-Karte.",
     bikeLanes = "Radwege", showBikeLanes = "Radfahr- und Schutzstreifen anzeigen",
@@ -221,7 +225,7 @@ val DE = Strings(
     aerialLanes = "Spuren aus Luftbildern", aerialLanesSub = "Spuranzahl aus amtlichen Luftbildern erkannt – nur wo OSM keine Angabe hat oder abweicht.",
     voiceSystem = "Android-Stimme (Systemsprachausgabe)",
     voicePacksText = "OmniVoice-Stimmen sind am PC vorberechnet: natürlicher Klang, offline, ohne Verzögerung. Straßen außerhalb der Region Hannover spricht die Android-Stimme.",
-    voiceDownload = "Herunterladen", voiceDownloading = "Wird heruntergeladen", voiceInstalledClips = "Ansagen", voiceTest = "Stimme testen",
+    voiceDownload = "Herunterladen", voiceDownloading = "Wird heruntergeladen", voiceInstalledClips = "Ansagen", voiceTest = "Stimme testen", voiceNotPublished = "Dieses Stimmpaket ist noch nicht veröffentlicht. Am PC rendern und per USB installieren (tools/voice_pack/04_push.py) oder als GitHub-Release voices-v1 hochladen.",
 )
 
 val EN = Strings(
@@ -241,6 +245,7 @@ val EN = Strings(
     laneScene = "3D junction view", laneSceneSub = "Perspective lane view shortly before turns.",
     immersiveView = "Lane map (AMAP style)", immersiveViewSub = "No junction box: the map zooms in at junctions and lane changes and out on open road. Off = classic view.",
     solidLineAhead = "Solid line",
+    streetsWhileDriving = "Show streets while driving (Petal style)", streetsWhileDrivingSub = "Draws all streets with lanes and junctions during navigation; only the route is highlighted. Off = only the route's own lanes.",
     junctionZoom = "Zoom map in before junctions", closeUpFrom = "Close-up from", beforeJunction = "m before the junction",
     laneRibbons = "Lane ribbons on the map", laneRibbonsSub = "Lanes and the recommended lane directly in the 3D map.",
     bikeLanes = "Bike lanes", showBikeLanes = "Show on-street bike lanes",
@@ -283,7 +288,7 @@ val EN = Strings(
     aerialLanes = "Lanes from aerial photos", aerialLanesSub = "Lane counts detected in official aerial photos – only where OSM has none or disagrees.",
     voiceSystem = "Android voice (system text-to-speech)",
     voicePacksText = "OmniVoice voices are pre-rendered on a PC: natural sound, offline, no delay. Streets outside the Hannover region use the Android voice.",
-    voiceDownload = "Download", voiceDownloading = "Downloading", voiceInstalledClips = "phrases", voiceTest = "Test voice",
+    voiceDownload = "Download", voiceDownloading = "Downloading", voiceInstalledClips = "phrases", voiceTest = "Test voice", voiceNotPublished = "This voice pack is not published yet. Render it on the PC and install it over USB (tools/voice_pack/04_push.py), or upload it as GitHub release voices-v1.",
 )
 
 val VI = Strings(
@@ -303,6 +308,7 @@ val VI = Strings(
     laneScene = "Chế độ xem ngã tư 3D", laneSceneSub = "Hiển thị làn đường phối cảnh ngay trước khi rẽ.",
     immersiveView = "Bản đồ làn (kiểu AMAP)", immersiveViewSub = "Không có khung ngã tư: bản đồ phóng to ở ngã tư và khi chuyển làn, thu nhỏ trên đường thẳng. Tắt = giao diện cổ điển.",
     solidLineAhead = "Vạch liền",
+    streetsWhileDriving = "Hiện đường phố khi lái (kiểu Petal)", streetsWhileDrivingSub = "Vẽ tất cả đường phố với làn và ngã tư khi dẫn đường; chỉ tô sáng lộ trình. Tắt = chỉ làn của lộ trình.",
     junctionZoom = "Phóng to bản đồ trước ngã tư", closeUpFrom = "Cận cảnh từ", beforeJunction = "m trước ngã tư",
     laneRibbons = "Dải làn trên bản đồ", laneRibbonsSub = "Làn đường và làn đề xuất ngay trên bản đồ 3D.",
     bikeLanes = "Làn xe đạp", showBikeLanes = "Hiển thị làn xe đạp trên lòng đường",
@@ -345,5 +351,5 @@ val VI = Strings(
     aerialLanes = "Làn đường từ ảnh hàng không", aerialLanesSub = "Số làn nhận diện từ ảnh hàng không chính thức – chỉ khi OSM không có hoặc khác.",
     voiceSystem = "Giọng Android (đọc văn bản của hệ thống)",
     voicePacksText = "Giọng OmniVoice được tạo sẵn trên máy tính: tự nhiên, ngoại tuyến, không chờ. Đường ngoài vùng Hannover dùng giọng Android.",
-    voiceDownload = "Tải xuống", voiceDownloading = "Đang tải", voiceInstalledClips = "câu", voiceTest = "Nghe thử",
+    voiceDownload = "Tải xuống", voiceDownloading = "Đang tải", voiceInstalledClips = "câu", voiceTest = "Nghe thử", voiceNotPublished = "Gói giọng này chưa được phát hành. Hãy tạo trên máy tính và cài qua USB (tools/voice_pack/04_push.py) hoặc tải lên GitHub release voices-v1.",
 )

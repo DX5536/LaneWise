@@ -386,6 +386,7 @@ class MapController(private val context: Context) {
     fun updateNavigation(
         snap: NavSnapshot, showRibbons: Boolean, pitch: Float, topPaddingPx: Double,
         closeUpDistance: Double = 50.0, showBikeLanes: Boolean = true, immersive: Boolean = false,
+        streetsMode: Boolean = false,
     ) {
         val s = style ?: return
         val now = SystemClock.uptimeMillis()
@@ -417,7 +418,8 @@ class MapController(private val context: Context) {
             val far = if (fast) 1500.0 else 450.0
             val near = if (fast) 300.0 else 90.0
             val t = ((far - decision) / (far - near)).coerceIn(0.0, 1.0).let { it * it * (3 - 2 * it) }
-            val zFar = if (fast) 15.6 else 16.3
+            // Moderate zoom-out only: lanes must stay readable on open road (16.3 showed ~1.5 km and lost the lanes).
+            val zFar = if (fast) 16.4 else 17.1
             val zNear = if (fast) 17.4 else 18.6
             targetZoom = zFar + (zNear - zFar) * t
             tweenPitch = pitch.toDouble() - 15.0 * t
@@ -438,7 +440,8 @@ class MapController(private val context: Context) {
         val r = if (snap.offRoute) null else LaneRibbonBuilder.build(route, snap.lanes, along)
         ribbon = r
         if (showRibbons && r != null) {
-            updateRoad(route, along, showBikeLanes)
+            // Streets mode: the street layer (all streets around the car) stays, only the highlight is the route's.
+            if (streetsMode) shownChunks = emptySet() else updateRoad(route, along, showBikeLanes)
             setShapes(SRC_LANES_DYN, r.shapes)
         } else clearLanes()
 

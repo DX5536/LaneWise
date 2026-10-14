@@ -107,6 +107,8 @@ fun MainScreen(vm: MainViewModel, ui: UiState, settings: AppSettings, dark: Bool
 
         MapLayer(controller, dark) { following = false }
 
+        // Demo / Let's go: leave the route overview and follow the car right away.
+        LaunchedEffect(ui.mode) { if (ui.mode == Mode.NAVIGATING) { controller.recenter(); following = true } }
         // Keep map data in sync with state.
         LaunchedEffect(dark) { controller.setDark(dark) }
         LaunchedEffect(settings.bikeLaneColor) { controller.setBikeColor(settings.bikeLaneColor) }
@@ -120,8 +122,9 @@ fun MainScreen(vm: MainViewModel, ui: UiState, settings: AppSettings, dark: Bool
         LaunchedEffect(ui.incidents) { controller.showIncidents(ui.incidents) }
         // Without an active route: lanes and markings of all nearby streets (like Petal / AMAP).
         // While navigating only the route's lanes are drawn (updateNavigation).
-        LaunchedEffect(ui.nearbyStreets, ui.mode, settings.laneRibbonsOnMap, settings.showBikeLanes, settings.aerialLanes) {
-            if (ui.mode == Mode.NAVIGATING) return@LaunchedEffect
+        LaunchedEffect(ui.nearbyStreets, ui.mode, settings.laneRibbonsOnMap, settings.showBikeLanes, settings.aerialLanes,
+            settings.streetsWhileDriving) {
+            if (ui.mode == Mode.NAVIGATING && !settings.streetsWhileDriving) return@LaunchedEffect
             if (!settings.laneRibbonsOnMap) { controller.clearLanes(); return@LaunchedEffect }
             val streets = if (settings.aerialLanes) vm.aerialLanes().let { a -> ui.nearbyStreets.map(a::apply) } else ui.nearbyStreets
             val shapes = de.lanewise.osm.StreetLanes.build(streets)
@@ -137,6 +140,7 @@ fun MainScreen(vm: MainViewModel, ui: UiState, settings: AppSettings, dark: Bool
                     it, settings.laneRibbonsOnMap, settings.mapPitch, topPadPx,
                     closeUpDistance = if (settings.junctionZoom) settings.laneSceneDistance.toDouble() else 0.0,
                     showBikeLanes = settings.showBikeLanes, immersive = settings.immersiveView,
+                    streetsMode = settings.streetsWhileDriving,
                 )
             }
         }
@@ -474,7 +478,10 @@ private fun NavigationOverlay(
                 }
                 val advice = nav.lanes.nextAdvice
                 val distToSite = advice?.let { it.site.distanceAlong - nav.distanceAlong } ?: Double.MAX_VALUE
-                val showLanes = advice != null && distToSite < 900
+                // Only lanes that belong to the coming manoeuvre (or junctions before it): never the lanes of a junction
+                // after the next turn (e.g. "turn left" here, lanes of a right turn 600 m later).
+                val showLanes = advice != null && distToSite < 900 &&
+                    (next == null || advice.site.distanceAlong <= next.distanceAlong + 10)
                 ManeuverBanner(
                     step = next,
                     distanceText = phrases.distance(nav.distanceToNextStep),
@@ -516,7 +523,9 @@ private fun NavigationOverlay(
             OutlinedButton(
                 onClick = onRecenter,
                 modifier = Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 16.dp, bottom = 110.dp),
-            ) { Text(str.recenter) }
+                border = androidx.compose.foundation.BorderStroke(2.dp, Color(0xFFB8F33A)),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFB8F33A)),
+            ) { Text(str.recenter, fontWeight = FontWeight.Bold) }
         }
         if (ui.simulating) {
             Text(str.demoBadge, Modifier.align(Alignment.CenterEnd).padding(end = 12.dp).clip(RoundedCornerShape(8.dp))

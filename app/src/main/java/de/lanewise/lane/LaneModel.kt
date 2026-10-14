@@ -216,3 +216,23 @@ data class ChangeSpan(val from: Double, val to: Double, val perms: List<Int>) {
         }
     }
 }
+
+/**
+ * OSRM puts lane data on each intersection it passes. When the junction where the route actually turns has no
+ * lane data of its own, the lanes of the intersection just before it (≤ 80 m) are the turn lanes — but OSRM marks
+ * them for going *straight* there (e.g. [left | straight+right] valid = straight, then "turn left" 50 m later),
+ * and the lane bar would recommend the wrong lane. Such a site is re-targeted to the upcoming turn.
+ * [turns] are (route distance, LaneDir bit) of real turns.
+ */
+fun attachTurnsToLaneSites(sites: List<LaneSite>, turns: List<Pair<Double, Int>>): List<LaneSite> {
+    val out = sites.toMutableList()
+    for ((d, bit) in turns) {
+        if (bit == LaneDir.STRAIGHT || out.any { kotlin.math.abs(it.distanceAlong - d) < 15 }) continue
+        val i = out.indexOfLast { it.distanceAlong < d && d - it.distanceAlong <= 80 && !it.isManeuver }
+        if (i < 0) continue
+        val s = out[i]
+        if (s.lanes.none { LaneDir.permits(it, bit) }) continue
+        out[i] = s.copy(turn = bit, isManeuver = true, providerValid = null)
+    }
+    return out
+}

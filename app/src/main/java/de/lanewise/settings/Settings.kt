@@ -25,6 +25,8 @@ data class AppSettings(
     val showLaneScene: Boolean = true,
     /** AMAP-style navigation view: no junction box, the camera zooms in at decisions and out on plain stretches. */
     val immersiveView: Boolean = true,
+    /** Petal style: draw the real streets around the car while navigating too; only the route highlight on top. */
+    val streetsWhileDriving: Boolean = false,
     /** Show the 3D junction close-up (and zoom the map in) only this close to the junction (m). */
     val laneSceneDistance: Int = 50,
     /** Zoom the map camera in when approaching a junction. */
@@ -61,7 +63,7 @@ data class AppSettings(
     val avoidMotorways: Boolean = false,
     // Guidance
     val voice: Boolean = true,
-    val language: AppLanguage = AppLanguage.GERMAN,
+    val language: AppLanguage = AppLanguage.ENGLISH,
     val offlineRegion: String = "hannover",
     val mapPitch: Float = 60f,
 )
@@ -86,6 +88,7 @@ class SettingsRepository(private val context: Context) {
         val signs = booleanPreferencesKey("signs")
         val satellite = booleanPreferencesKey("satellite")
         val immersive = booleanPreferencesKey("immersive_view")
+        val streetsDriving = booleanPreferencesKey("streets_while_driving")
         val aerialLanes = booleanPreferencesKey("aerial_lanes")
         val voicePacks = stringPreferencesKey("voice_packs")
         val over = booleanPreferencesKey("over_speed")
@@ -117,6 +120,7 @@ class SettingsRepository(private val context: Context) {
             keepRight = p[K.keepRight] ?: d.keepRight,
             showLaneScene = p[K.laneScene] ?: d.showLaneScene,
             immersiveView = p[K.immersive] ?: d.immersiveView,
+            streetsWhileDriving = p[K.streetsDriving] ?: d.streetsWhileDriving,
             laneSceneDistance = p[K.laneSceneDist] ?: d.laneSceneDistance,
             junctionZoom = p[K.junctionZoom] ?: d.junctionZoom,
             laneRibbonsOnMap = p[K.ribbons] ?: d.laneRibbonsOnMap,
@@ -156,6 +160,7 @@ class SettingsRepository(private val context: Context) {
             p[K.keepRight] = s.keepRight
             p[K.laneScene] = s.showLaneScene
             p[K.immersive] = s.immersiveView
+            p[K.streetsDriving] = s.streetsWhileDriving
             p[K.laneSceneDist] = s.laneSceneDistance
             p[K.junctionZoom] = s.junctionZoom
             p[K.ribbons] = s.laneRibbonsOnMap

@@ -83,6 +83,17 @@ _Last updated: 2026-10-14 (v0.3: crash fix, rendering fixes, aerial-lane pipelin
       arrow signals (inferred from turn-only lanes, dashed outline = unconfirmed), Grünpfeil (Zeichen 720),
       pedestrian lights × count, push button. Source: OSM (`highway=traffic_signals`, `crossing`, `button_operated`,
       `red_turn:right`, `traffic_sign=DE:720`) — there is no national signal database in Germany.
+- [x] Owner's test route (Brüderstraße 4 → Hauptstraße 3 Langenhagen) as an opt-in live check
+      (`LANEWISE_LIVE=1`, `RouteRenderLiveTest`): highlight inside the road, no folded lines, lane advice per turn.
+- [x] Turn junctions: only the turn lanes continue as a connector into the new road (left turns join its left side,
+      right turns its right side); the other lanes end at the stop line, no markings inside the junction.
+      Offset lines drop points that would run backwards (no folding on the inside of tight turns).
+- [x] Lane bar only for the coming manoeuvre: never the lanes of a junction after the next turn (Melanchthonstraße
+      case); OSRM lanes on the intersection ≤ 80 m before an unmapped turn are re-targeted to that turn.
+- [x] Default language English; Demo / Los geht's follows the car immediately; Recenter button with lime outline;
+      clear message while voice packs are not published.
+- [x] Setting "Show streets while driving (Petal style)", off by default: during navigation the street layer (all
+      OSM streets within 450 m, refetched every 250 m) replaces the route-only road; the route highlight stays on top.
 - [x] Lane-change hint is a countdown too: bright lime shrinks to the deadline (end of the dashed stretch / junction)
 
 ## Aerial lanes — next sessions

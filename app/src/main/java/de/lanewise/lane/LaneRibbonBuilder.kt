@@ -49,6 +49,7 @@ object LaneRibbonBuilder {
         var rightPocketsT = 0.0  // tapered like [lanes], so the planned lane does not move while a pocket opens
         var leftPockets = 0
         var leftPocketsT = 0.0
+        var junction = false     // inside a turn junction: only the connector of the turn lanes, no markings
         var left = 0.0           // offset of left carriageway edge (m, + = right of centre line)
         val right get() = left + lanes * w
         fun at(off: Double) = Geo.destination(p, bearing + 90.0, off)
@@ -96,14 +97,14 @@ object LaneRibbonBuilder {
         val out = ArrayList<Shape>()
 
         // Road surface.
-        out += polygon(samples.map { it.at(it.left - 0.3) }, samples.map { it.at(it.right + 0.3) }, Kind.SURFACE)
+        out += polygon(line(samples) { it.left - 0.3 }, line(samples) { it.right + 0.3 }, Kind.SURFACE)
 
         // Bike lanes right of the outermost car lane.
         if (showBikeLanes && route.bikeLanes.isNotEmpty()) {
             runs(samples) { route.bikeLaneAt(it.d) }.forEach { (span, run) ->
                 val bw = if (span.exclusive) 1.6 else 1.3
-                out += polygon(run.map { it.at(it.right + 0.35) }, run.map { it.at(it.right + 0.35 + bw) }, Kind.BIKE)
-                out += Shape(run.map { it.at(it.right + 0.2) }, Kind.EDGE, polygon = false, widthM = 0.15)
+                out += polygon(line(run) { it.right + 0.35 }, line(run) { it.right + 0.35 + bw }, Kind.BIKE)
+                out += Shape(line(run) { it.right + 0.2 }, Kind.EDGE, polygon = false, widthM = 0.15)
             }
         }
 
@@ -114,12 +115,15 @@ object LaneRibbonBuilder {
         for (k in 1 until maxLanes) {
             // Solid: last 30 m before a junction, or where OSM `change:lanes` forbids crossing this line.
             fun solidAt(s: S) = nearSite(s.d) || route.laneChangeAt(s.d)?.solidBoundary(k, s.nominal) == true
-            runs(samples) { s -> if (s.lanes >= k + 0.85) solidAt(s) else null }.forEach { (solid, run) ->
-                out += Shape(run.map { it.at(it.left + k * it.w) }, if (solid) Kind.DIVIDER_SOLID else Kind.DIVIDER, false, 0.15)
+            runs(samples) { s -> if (s.lanes >= k + 0.85 && !s.junction) solidAt(s) else null }.forEach { (solid, run) ->
+                out += Shape(line(run) { it.left + k * it.w }, if (solid) Kind.DIVIDER_SOLID else Kind.DIVIDER, false, 0.15)
             }
         }
-        out += Shape(samples.map { it.at(it.left) }, Kind.EDGE, false, 0.18)
-        out += Shape(samples.map { it.at(it.right) }, Kind.EDGE, false, 0.18)
+        // Edges stop at a turn junction: the connector through it is drawn as surface only.
+        runs(samples) { if (it.junction) null else true }.forEach { (_, run) ->
+            out += Shape(line(run) { it.left }, Kind.EDGE, false, 0.18)
+            out += Shape(line(run) { it.right }, Kind.EDGE, false, 0.18)
+        }
 
         // Stop lines and painted arrows of the sites in this piece.
         val allSites = route.laneSites.sortedBy { it.distanceAlong }
@@ -163,9 +167,11 @@ object LaneRibbonBuilder {
         if (plan.isNotEmpty()) {
             val hw = samples.map { it.w * 0.36 }
             val endIdx = samples.indexOfLast { it.d <= plan.last().site.distanceAlong + 40 }.coerceAtLeast(1)
+            val strip = samples.subList(0, endIdx + 1)
+            val pos = strip.indices.associateBy { strip[it] }
             out += polygon(
-                (0..endIdx).map { samples[it].at(centres[it] - hw[it]) },
-                (0..endIdx).map { samples[it].at(centres[it] + hw[it]) },
+                line(strip) { centres[pos[it]!!] - hw[pos[it]!!] },
+                line(strip) { centres[pos[it]!!] + hw[pos[it]!!] },
                 Kind.RECOMMENDED,
             )
             // Soft band under the lime strip: every lane the route can use up to each site (AMAP's two-level carpet).
@@ -211,7 +217,8 @@ object LaneRibbonBuilder {
         val run = samples.slice(idx)
         val l = movingAverage(run, idx.map { lo[it] }, 15.0)
         val h = movingAverage(run, idx.map { hi[it] }, 15.0)
-        return polygon(run.mapIndexed { k, s -> s.at(l[k] + 0.15) }, run.mapIndexed { k, s -> s.at(h[k] - 0.15) }, Kind.ALLOWED)
+        val pos = run.indices.associateBy { run[it] }
+        return polygon(line(run) { l[pos[it]!!] + 0.15 }, line(run) { h[pos[it]!!] - 0.15 }, Kind.ALLOWED)
     }
 
     /** Arrow polygon along [path] from [d0] to [d1]: 1.6 m body, 5 m head, drawn raised by the map. */
@@ -235,6 +242,21 @@ object LaneRibbonBuilder {
         val head = listOf(Geo.destination(base, br - 90.0, 1.9), tip, Geo.destination(base, br + 90.0, 1.9))
         val ring = left + head + right.reversed() + left.first()
         return Shape(ring, Kind.TURN_ARROW, polygon = true)
+    }
+
+    /**
+     * Offset line along [samples]; points that would run backwards against the road (the loop an offset forms on the
+     * inside of a tight turn) are dropped, so edges and lanes never fold over themselves.
+     */
+    private fun line(samples: List<S>, off: (S) -> Double): List<LatLon> {
+        val out = ArrayList<LatLon>(samples.size)
+        for (s in samples) {
+            val p = s.at(off(s))
+            val last = out.lastOrNull()
+            if (last != null && Geo.distance(last, p) > 0.05 && abs(Geo.bearingDelta(Geo.bearing(last, p), s.bearing)) > 90) continue
+            out += p
+        }
+        return out
     }
 
     /** Distance-weighted moving average of [v] over ±[radius] m along the samples. */
@@ -328,6 +350,53 @@ object LaneRibbonBuilder {
             val core = s.lanes - s.leftPocketsT - s.rightPocketsT
             s.left = if (s.twoWay) -s.leftPocketsT * s.w else -core * s.w / 2.0 - s.leftPocketsT * s.w
         }
+        connectTurnLanes(route, samples)
+    }
+
+    /**
+     * At a turn, only the lanes used for the turn continue through the junction (AMAP): the connector starts on the
+     * turn lanes at the stop line and joins the new road on its left side (left turn) or right side (right turn) —
+     * the German "turn into the corresponding lane" rule. The other lanes end at the stop line.
+     */
+    private fun connectTurnLanes(route: Route, samples: List<S>) {
+        for (site in route.laneSites) {
+            if (!site.isManeuver || site.turn == LaneDir.STRAIGHT) continue
+            val allowed = site.allowed()
+            val first = allowed.indexOfFirst { it }
+            val last = allowed.indexOfLast { it }
+            if (first < 0) continue
+            val n = (last - first + 1).toDouble()
+            val i0 = samples.indexOfFirst { it.d >= site.distanceAlong - 1 }
+            if (i0 < 0) continue
+            val j = junctionLength(route, site.distanceAlong)
+            val i1 = samples.indexOfLast { it.d <= site.distanceAlong + j }
+            if (i1 <= i0 + 1 || i1 >= samples.size - 1) continue
+            val s0 = samples[i0]
+            val end = samples[i1 + 1]
+            val startLeft = s0.left + first * s0.w
+            val left = site.turn and LaneDir.ANY_LEFT != 0
+            val endLeft = if (left) end.left else end.right - n * end.w
+            for (i in i0..i1) {
+                val s = samples[i]
+                val t = smooth((s.d - s0.d) / (end.d - s0.d))
+                s.junction = true
+                s.lanes = n
+                s.leftPocketsT = 0.0; s.rightPocketsT = 0.0
+                s.w = s0.w + (end.w - s0.w) * t
+                s.left = startLeft + (endLeft - startLeft) * t
+            }
+        }
+    }
+
+    /** Length (m) from the site until the route has done most of the turn — the junction area. */
+    private fun junctionLength(route: Route, d: Double): Double {
+        val line = route.geometry
+        val bIn = line.bearingAt(max(0.0, d - 15))
+        val total = abs(Geo.bearingDelta(bIn, line.bearingAt(min(line.length, d + 40))))
+        if (total < 20) return 10.0
+        var x = 4.0
+        while (x < 45 && abs(Geo.bearingDelta(bIn, line.bearingAt(min(line.length, d + x)))) < 0.85 * total) x += 2
+        return (x + 6).coerceIn(10.0, 45.0)
     }
 
     /** Integer series → smooth series: increases ramp up *before* the change point, decreases ramp down after it. */

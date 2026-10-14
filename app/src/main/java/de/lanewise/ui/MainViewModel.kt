@@ -155,6 +155,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private fun onFix(fix: Fix) {
         _ui.update { it.copy(fix = fix) }
         if (_ui.value.mode != Mode.NAVIGATING) { updateBrowseLimit(fix); updateNearbyStreets(fix.position); return }
+        if (settings.value.streetsWhileDriving) updateNearbyStreets(fix.position)
         val e = engine ?: return
         val s = settings.value
         voice.setLanguage(s.language)
@@ -485,7 +486,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 refreshVoicePacks()
                 selectVoicePack(pack.language, pack.id)
             } catch (e: Exception) {
-                _ui.update { it.copy(voiceDownload = null, message = "${strings.dlFailed}: ${e.message}") }
+                val msg = if (e.message?.contains("404") == true) strings.voiceNotPublished else "${strings.dlFailed}: ${e.message}"
+                _ui.update { it.copy(voiceDownload = null, message = msg) }
             }
         }
     }
