@@ -98,7 +98,11 @@ import java.util.Date
 import java.util.Locale
 
 @Composable
-fun MainScreen(vm: MainViewModel, ui: UiState, settings: AppSettings, dark: Boolean, onOpenSettings: () -> Unit) {
+fun MainScreen(
+    vm: MainViewModel, ui: UiState, settings: AppSettings, dark: Boolean, onOpenSettings: () -> Unit,
+    /** Settings is open on top: the map's per-frame car / camera loop pauses. */
+    covered: Boolean = false,
+) {
     val context = LocalContext.current
     val controller = remember { MapController(context) }
     var following by remember { mutableStateOf(true) }
@@ -110,7 +114,12 @@ fun MainScreen(vm: MainViewModel, ui: UiState, settings: AppSettings, dark: Bool
         MapLayer(controller, dark) { following = false }
 
         // Demo / Let's go: leave the route overview and follow the car right away.
-        LaunchedEffect(ui.mode) { if (ui.mode == Mode.NAVIGATING) { controller.recenter(); following = true } }
+        // Leaving navigation (end, arrival, demo over) stops the per-frame car / camera loop right away — it used to run
+        // on until the next real GPS fix, which indoors may never come, and kept the UI thread busy (Settings froze).
+        LaunchedEffect(ui.mode) {
+            if (ui.mode == Mode.NAVIGATING) { controller.recenter(); following = true } else controller.stopTween()
+        }
+        LaunchedEffect(covered) { controller.paused = covered }
         // Keep map data in sync with state.
         LaunchedEffect(dark) { controller.setDark(dark) }
         LaunchedEffect(settings.stripFade, settings.laneChevrons, settings.roadFurniture, settings.closedLanes, settings.softBuildings, settings.roadNameChip) {

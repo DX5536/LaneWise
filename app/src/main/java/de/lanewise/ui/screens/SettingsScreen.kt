@@ -96,12 +96,12 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, ui: UiState, onBack: () ->
             Toggle(str.satellite, str.satelliteSub, s.satellite) { v -> set { it.copy(satellite = v) } }
             LabeledSlider(str.cameraPitch, s.mapPitch, 0f..70f, "${s.mapPitch.toInt()}°") { v -> set { it.copy(mapPitch = v) } }
             Toggle(str.car3d, str.car3dSub, s.car3d) { v -> set { it.copy(car3d = v) } }
-            LabeledSlider(str.carSize, s.carScale, 0.5f..2f, "×%.1f".format(s.carScale)) { v ->
+            LabeledSlider(str.carSize, s.carScale, 0.5f..2f, "×%.1f".format(s.carScale), step = 0.1f) { v ->
                 set { it.copy(carScale = Math.round(v * 10) / 10f) }
             }
             Toggle(str.autoZoom, str.autoZoomSub, s.autoZoom) { v -> set { it.copy(autoZoom = v) } }
             if (!s.autoZoom) {
-                LabeledSlider(str.fixedZoom, s.fixedZoom, 15.5f..19f, "%.1f".format(s.fixedZoom)) { v ->
+                LabeledSlider(str.fixedZoom, s.fixedZoom, 15.5f..19f, "%.1f".format(s.fixedZoom), step = 0.1f) { v ->
                     set { it.copy(fixedZoom = Math.round(v * 10) / 10f) }
                 }
             }
@@ -261,13 +261,18 @@ private fun Radio(label: String, selected: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun LabeledSlider(label: String, value: Float, range: ClosedFloatingPointRange<Float>, valueText: String, onChange: (Float) -> Unit) {
+private fun LabeledSlider(
+    label: String, value: Float, range: ClosedFloatingPointRange<Float>, valueText: String,
+    /** Rounding step of the value (1 = whole numbers; 0.1 for zoom level and car size). */
+    step: Float = 1f,
+    onChange: (Float) -> Unit,
+) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(label, Modifier.weight(1f), fontSize = 14.sp)
         Text(valueText, fontWeight = FontWeight.Bold, fontSize = 14.sp)
     }
     // Continuous slider (no tick dots); values are rounded here.
-    Slider(value = value, onValueChange = { onChange(kotlin.math.round(it)) }, valueRange = range)
+    Slider(value = value, onValueChange = { onChange(kotlin.math.round(it / step) * step) }, valueRange = range)
 }
 
 @Composable

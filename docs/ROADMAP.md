@@ -219,6 +219,10 @@ _Last updated: 2026-10-15 (v0.4.2: Schulenburger Landstraße lane, smooth camera
 - [x] **3D car no longer hidden by 3D buildings**: buildings within 9 m of the car (or containing it — GPS indoors /
       in a courtyard) are drawn flat (`building-3d` height via MapLibre's `distance` expression, updated every 4 m).
 - [x] App version 0.4.2 (`appVersion`).
+- [x] **Settings froze after a demo** (owner): the per-frame car / camera loop was only stopped by the next real GPS fix
+      (rare indoors), so after the demo it kept updating car, chevrons and label synchronously every frame and starved
+      the UI thread. It now stops as soon as navigation ends, and pauses while Settings covers the map.
+- [x] Zoom-level and car-size sliders moved in whole steps only (the shared slider rounded to integers); now 0.1 steps.
 - [x] Map style switch (light ↔ dark, now also at sunset while driving) re-sends road + highlight to the new style
       (sources start empty; the 25 m rebuild step would otherwise leave the road missing until the plan changed).
 

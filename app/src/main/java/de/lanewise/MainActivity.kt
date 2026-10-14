@@ -80,7 +80,7 @@ class MainActivity : ComponentActivity() {
                 ) {
                     // The map stays composed underneath settings so it is not torn down and reloaded.
                     Box(Modifier.fillMaxSize()) {
-                        MainScreen(vm, ui, settings, dark, onOpenSettings = { showSettings = true })
+                        MainScreen(vm, ui, settings, dark, onOpenSettings = { showSettings = true }, covered = showSettings)
                         if (showSettings) SettingsScreen(vm, settings, ui, onBack = { showSettings = false })
                     }
                 }

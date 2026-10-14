@@ -89,6 +89,15 @@ class MapController(private val context: Context) {
     private var offRoutePos: LatLon? = null
     private var offRouteBearing = 0.0
     private var frameRunning = false
+
+    /** True while the map is covered (Settings): no per-frame work; resumes where the car should be by then. */
+    var paused = false
+        set(value) {
+            field = value
+            if (!value && !frameRunning && (tweenRoute != null || offRoutePos != null)) {
+                frameRunning = true; choreographer.postFrameCallback(frame)
+            }
+        }
     /** Lane geometry is built off the UI thread (it was the demo's stutter); one build at a time, latest request wins. */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var geomJob: Job? = null
@@ -98,7 +107,7 @@ class MapController(private val context: Context) {
     private val choreographer by lazy { Choreographer.getInstance() }
     private val frame = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) {
-            if (tweenRoute == null && offRoutePos == null) { frameRunning = false; lastFrameNanos = 0L; return }
+            if (paused || (tweenRoute == null && offRoutePos == null)) { frameRunning = false; lastFrameNanos = 0L; return }
             val dt = if (lastFrameNanos == 0L) 1.0 / 60 else ((frameTimeNanos - lastFrameNanos) / 1e9).coerceIn(0.001, 0.1)
             lastFrameNanos = frameTimeNanos
             stepTween(dt)
@@ -716,7 +725,7 @@ class MapController(private val context: Context) {
             requestGeometry(snap, along, showRibbons, showBikeLanes, streetsMode)
         }
 
-        if (!frameRunning) { frameRunning = true; choreographer.postFrameCallback(frame) }
+        if (!frameRunning && !paused) { frameRunning = true; choreographer.postFrameCallback(frame) }
     }
 
     fun stopTween() {
