@@ -101,6 +101,8 @@ data class UiState(
     /** Metres driven on earlier routes of this journey (re-routes), so the journey progress bar keeps counting. */
     val journeyDriven: Double = 0.0,
     val originResults: List<Place> = emptyList(),
+    /** Start search: null = idle, true = running, false = done (empty results → "no results"). */
+    val originSearching: Boolean? = null,
     /** Traffic lights / signs around the car for the browse map (a route brings its own). */
     val nearbyFeatures: List<de.lanewise.core.model.RoadFeature> = emptyList(),
 ) {
@@ -260,18 +262,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Search for a start point (route preview "From"). */
     fun onOriginQuery(q: String) {
         originJob?.cancel()
-        if (q.length < 3) { _ui.update { it.copy(originResults = emptyList()) }; return }
+        if (q.length < 3) { _ui.update { it.copy(originResults = emptyList(), originSearching = null) }; return }
         originJob = viewModelScope.launch {
             delay(350)
+            _ui.update { it.copy(originSearching = true) }
             val res = runCatching { geocoder.search(q, _ui.value.fix?.position) }
-            _ui.update { it.copy(originResults = res.getOrDefault(emptyList()),
+            _ui.update { it.copy(originResults = res.getOrDefault(emptyList()), originSearching = false,
                 message = res.exceptionOrNull()?.let { e -> "${strings.searchFailed}: ${e.message}" }) }
         }
     }
 
     /** Route from [place] instead of the current position; null = back to the GPS position. Recomputes the routes. */
     fun chooseOrigin(place: Place?) {
-        _ui.update { it.copy(origin = place, originResults = emptyList()) }
+        _ui.update { it.copy(origin = place, originResults = emptyList(), originSearching = null) }
         if (_ui.value.destination != null) computeRoutes()
     }
 

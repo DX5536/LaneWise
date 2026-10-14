@@ -437,6 +437,11 @@ private fun StartPickerDialog(vm: MainViewModel, ui: UiState, onDismiss: () -> U
                 Spacer(Modifier.height(8.dp))
                 Text("◎  " + str.myPosition, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.fillMaxWidth().clickable { vm.chooseOrigin(null); onDismiss() }.padding(vertical = 10.dp))
+                when {
+                    ui.originSearching == true -> Text(str.searching, fontSize = 13.sp, modifier = Modifier.padding(vertical = 6.dp))
+                    ui.originSearching == false && ui.originResults.isEmpty() ->
+                        Text(str.noResults, fontSize = 13.sp, modifier = Modifier.padding(vertical = 6.dp))
+                }
                 ui.originResults.take(6).forEach { p ->
                     Column(Modifier.fillMaxWidth().clickable { vm.chooseOrigin(p); onDismiss() }.padding(vertical = 8.dp)) {
                         Text(p.title, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)

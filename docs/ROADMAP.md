@@ -175,6 +175,14 @@ _Last updated: 2026-10-14 (v0.4: turn restrictions offline, guidance with the sc
       junction (other heads within 40 m are skipped; never where a lane site already has one). `stopLineAtTrafficLightWithoutLanes`.
 - [x] **Start point**: "From: My position" in the route preview; tap to search any start (Demo then drives from there).
       "Let's go" from elsewhere re-routes from the GPS position once you drive. DE/EN/VI.
+- [x] Search finds "grazerstr 2" / "Cellerstraße 10": adjective street names are also searched split ("Grazer Straße"),
+      as OSM writes them — Photon only returned Grazerstraße 2 in Austria (filtered out). Start picker shows
+      "Searching …" / "Nothing found". `GeocoderTest`.
+- [x] **ETA +3 h fixed** (owner: Miss Saigon → Asia Haus showed 3 h 26 min, "6 closures"): since the TomTom key, TomTom
+      road closures (icon category 8) came in, and any closure with an end point within 35 m of the route added 30 min —
+      closed side streets crossing the route at junctions. An incident now counts only if ≥ 30 m of it runs along the
+      route (within 20 m, parallel); TomTom incidents add nothing to a TomTom traffic ETA (already included).
+      `RouteScorerTest`.
 - [x] `RouteRenderLiveTest` takes `LANEWISE_FROM` / `LANEWISE_TO` (`lat,lon`) to check any route.
 
 ## Video review — still open

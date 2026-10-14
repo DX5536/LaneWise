@@ -21,6 +21,8 @@ object RouteScorer {
             val hits = incidents.filter { onRoute(r, it) }
             var penalty = 0.0
             for (i in hits) {
+                // A TomTom traffic ETA already contains TomTom's own incidents; don't count them twice.
+                if ((r.trafficEta || r.provider == "tomtom") && i.source == "TomTom") continue
                 penalty += when {
                     i.blocked || i.kind == IncidentKind.CLOSURE -> 1800.0
                     i.kind == IncidentKind.ACCIDENT -> (i.delaySeconds ?: 420).toDouble()
@@ -33,9 +35,32 @@ object RouteScorer {
             r.copy(trafficPenalty = penalty, incidents = hits)
         }.sortedBy { it.effectiveDuration }
 
-    private fun onRoute(r: Route, i: TrafficIncident): Boolean {
-        val pts = if (i.geometry.isNotEmpty()) listOf(i.geometry.first(), i.location, i.geometry.last()) else listOf(i.location)
-        return pts.any { p -> r.geometry.project(p)?.let { abs(it.signedOffset) < 35.0 } == true }
+    /**
+     * An incident is on the route only if it runs *along* it: at least 30 m of its line within 20 m of the route and
+     * parallel to it (either direction). Touching the route is not enough — closed side streets crossing it at a
+     * junction added 30 min each (owner's screenshot: "6 closures", +182 min on a 13 km town route).
+     * Point incidents (no line) must lie within 20 m.
+     */
+    internal fun onRoute(r: Route, i: TrafficIncident): Boolean {
+        val line = i.geometry
+        if (line.size < 2) return r.geometry.project(i.location)?.let { abs(it.signedOffset) < 20.0 } == true
+        var along = 0.0
+        for (k in 0 until line.size - 1) {
+            val a = line[k]; val b = line[k + 1]
+            val len = de.lanewise.core.geo.Geo.distance(a, b)
+            if (len < 0.5) continue
+            val n = kotlin.math.ceil(len / 10.0).toInt()
+            val segBearing = de.lanewise.core.geo.Geo.bearing(a, b)
+            for (j in 0 until n) {
+                val t = (j + 0.5) / n
+                val p = de.lanewise.core.geo.LatLon(a.lat + (b.lat - a.lat) * t, a.lon + (b.lon - a.lon) * t)
+                val pr = r.geometry.project(p) ?: continue
+                if (abs(pr.signedOffset) > 20.0) continue
+                val diff = abs(de.lanewise.core.geo.Geo.bearingDelta(segBearing, r.geometry.bearingAt(pr.distanceAlong)))
+                if (diff < 35.0 || diff > 145.0) along += len / n
+            }
+        }
+        return along >= 30.0
     }
 
     /** Rough count of sites where the route forces the driver out of the through lanes. */
