@@ -31,6 +31,9 @@ import org.maplibre.android.style.layers.Layer
 import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.layers.PropertyFactory
+import org.maplibre.android.style.layers.RasterLayer
+import org.maplibre.android.style.sources.RasterSource
+import org.maplibre.android.style.sources.TileSet
 import org.maplibre.android.style.layers.SymbolLayer
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Feature
@@ -57,6 +60,7 @@ class MapController(private val context: Context) {
     private var bikeColor: Int = 0xFFE5484D.toInt()
     private var lastFeatures: List<RoadFeature> = emptyList()
     private var featuresVisible = true
+    private var satelliteOn = false
 
     // --- tween state --------------------------------------------------------------------------------
     private var tweenRoute: Route? = null
@@ -114,6 +118,7 @@ class MapController(private val context: Context) {
             style = s
             setupLayers(s, isDark)
             showFeatures(lastFeatures, featuresVisible)
+            setSatellite(satelliteOn)
         }
     }
 
@@ -129,6 +134,14 @@ class MapController(private val context: Context) {
 
         val below = "building-3d"
         fun add(l: Layer) { if (s.getLayer(below) != null) s.addLayerBelow(l, below) else s.addLayer(l) }
+
+        // Official aerial imagery of Niedersachsen (LGLN DOP20, 20 cm, CC BY 4.0) via WMS in web-mercator tiles.
+        s.addSource(RasterSource(SRC_SAT, TileSet("2.2.0", DOP20_WMS).apply {
+            attribution = "Luftbild: LGLN (2026), CC BY 4.0"
+            minZoom = 10f; maxZoom = 20f
+            setBounds(6.6f, 51.29f, 11.6f, 53.9f)
+        }, 256))
+        add(RasterLayer("satellite", SRC_SAT).withProperties(PropertyFactory.visibility(Property.NONE)))
 
         add(LineLayer("alt-line", SRC_ALT).withProperties(
             PropertyFactory.lineColor(if (isDark) "#5A6175" else "#A3A9BA"),
@@ -246,6 +259,16 @@ class MapController(private val context: Context) {
             if (!visible) emptyList() else list.map {
                 Feature.fromGeometry(Point.fromLngLat(it.position.lon, it.position.lat)).apply { addStringProperty("kind", it.kind.name) }
             }))
+    }
+
+    /** Aerial imagery on/off; 3D buildings are hidden while it is on (they would cover the photo). */
+    fun setSatellite(on: Boolean) {
+        satelliteOn = on
+        val s = style ?: return
+        s.getLayer("satellite")?.setProperties(PropertyFactory.visibility(if (on) Property.VISIBLE else Property.NONE))
+        s.getLayer("building-3d")?.setProperties(PropertyFactory.visibility(if (on) Property.NONE else Property.VISIBLE))
+        // Lane surface becomes translucent so the real road shows through.
+        (s.getLayer("lane-surface") as? FillLayer)?.setProperties(PropertyFactory.fillOpacity(if (on) 0.35f else 0.97f))
     }
 
     fun setBikeColor(argb: Int) {
@@ -441,6 +464,9 @@ class MapController(private val context: Context) {
         private const val SRC_DEST = "lw-dest"
         private const val SRC_INC = "lw-incidents"
         private const val SRC_FEAT = "lw-features"
+        private const val SRC_SAT = "lw-satellite"
+        private const val DOP20_WMS = "https://opendata.lgln.niedersachsen.de/doorman/noauth/dop_wms?SERVICE=WMS&VERSION=1.3.0" +
+            "&REQUEST=GetMap&LAYERS=ni_dop20&STYLES=&CRS=EPSG:3857&BBOX={bbox-epsg-3857}&WIDTH=256&HEIGHT=256&FORMAT=image/jpeg"
         private const val IMG_CAR = "lw-car-img"
         private const val IMG_DEST = "lw-dest-img"
     }

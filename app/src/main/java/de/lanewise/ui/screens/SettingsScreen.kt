@@ -90,6 +90,7 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, ui: UiState, onBack: () ->
                 Radio(when (m) { ThemeMode.SYSTEM -> str.themeSystem; ThemeMode.LIGHT -> str.themeLight; ThemeMode.DARK -> str.themeDark },
                     s.theme == m) { set { it.copy(theme = m) } }
             }
+            Toggle(str.satellite, str.satelliteSub, s.satellite) { v -> set { it.copy(satellite = v) } }
             LabeledSlider(str.cameraPitch, s.mapPitch, 0f..70f, "${s.mapPitch.toInt()}°") { v -> set { it.copy(mapPitch = v) } }
         }
 

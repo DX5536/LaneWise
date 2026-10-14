@@ -110,6 +110,7 @@ fun MainScreen(vm: MainViewModel, ui: UiState, settings: AppSettings, dark: Bool
         // Keep map data in sync with state.
         LaunchedEffect(dark) { controller.setDark(dark) }
         LaunchedEffect(settings.bikeLaneColor) { controller.setBikeColor(settings.bikeLaneColor) }
+        LaunchedEffect(settings.satellite, dark) { controller.setSatellite(settings.satellite) }
         LaunchedEffect(ui.routes, ui.selected, ui.mode, ui.destination, settings.showSigns) {
             val main = ui.selectedRoute
             controller.showRoutes(main, ui.routes.filterIndexed { i, _ -> i != ui.selected }, ui.destination?.position)
@@ -146,7 +147,7 @@ fun MainScreen(vm: MainViewModel, ui: UiState, settings: AppSettings, dark: Bool
         }
 
         when (ui.mode) {
-            Mode.BROWSE -> BrowseOverlay(vm, ui, onOpenSettings, onRecenter = { controller.recenter(); following = true })
+            Mode.BROWSE -> BrowseOverlay(vm, ui, settings, onOpenSettings, onRecenter = { controller.recenter(); following = true })
             Mode.PREVIEW -> PreviewOverlay(vm, ui, phrases)
             Mode.NAVIGATING -> ui.nav?.let { nav ->
                 NavigationOverlay(vm, ui, nav, settings, phrases, following,
@@ -199,7 +200,7 @@ private fun MapLayer(controller: MapController, dark: Boolean, onPanned: () -> U
 // --- Browse -------------------------------------------------------------------------------------
 
 @Composable
-private fun BrowseOverlay(vm: MainViewModel, ui: UiState, onOpenSettings: () -> Unit, onRecenter: () -> Unit) {
+private fun BrowseOverlay(vm: MainViewModel, ui: UiState, settings: AppSettings, onOpenSettings: () -> Unit, onRecenter: () -> Unit) {
     val c = LocalLaneColors.current
     val str = LocalStrings.current
     var showFavorites by remember { mutableStateOf(false) }
@@ -262,6 +263,13 @@ private fun BrowseOverlay(vm: MainViewModel, ui: UiState, onOpenSettings: () -> 
             }
         }
         GnssBadge(ui.gnss, ui.online, Modifier.align(Alignment.BottomStart).padding(16.dp))
+        // Layer toggle: map ↔ official aerial imagery (LGLN DOP20).
+        Box(
+            Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 84.dp).size(56.dp).clip(CircleShape)
+                .background(if (settings.satellite) MaterialTheme.colorScheme.primary else c.chip)
+                .clickable { vm.updateSettings { it.copy(satellite = !it.satellite) } },
+            contentAlignment = Alignment.Center,
+        ) { Icon(painterResource(R.drawable.ic_layers), str.satellite, tint = if (settings.satellite) Color.White else c.onChip) }
         Box(
             Modifier.align(Alignment.BottomEnd).padding(16.dp).size(56.dp).clip(CircleShape).background(c.chip).clickable(onClick = onRecenter),
             contentAlignment = Alignment.Center,

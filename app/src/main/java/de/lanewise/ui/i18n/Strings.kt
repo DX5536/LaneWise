@@ -129,6 +129,8 @@ data class Strings(
     val savePlace: String,
     val name: String,
     val save: String,
+    val satellite: String,
+    val satelliteSub: String,
 ) {
     fun feature(k: FeatureKind) = when (k) {
         FeatureKind.TRAFFIC_SIGNALS -> trafficLight
@@ -189,7 +191,7 @@ val DE = Strings(
     downloadRegion = "Region herunterladen", offlineReady = "Offline-Routing bereit ✓", offlineNone = "Noch keine Offline-Daten",
     voice = "Sprachansagen", voiceEnabled = "Sprachansagen",
     attribution = "Kartendaten © OpenStreetMap-Mitwirkende · Kacheln: OpenFreeMap · Routing: FOSSGIS OSRM · " +
-        "Verkehr: Die Autobahn GmbH des Bundes, TomTom, HERE, Mobilithek · Schrift: Quicksand (OFL)",
+        "Verkehr: Die Autobahn GmbH des Bundes, TomTom, HERE, Mobilithek · Luftbild: LGLN (2026) CC BY 4.0 · Schrift: Quicksand (OFL)",
     dlStart = "Starte Download …", dlTiles = "Kartenkacheln", dlTilesLight = "(hell)", dlTilesDark = "(dunkel)",
     dlReady = "Offline-Region bereit", dlFailed = "Offline-Download fehlgeschlagen",
     dlRoads = "Lade Straßennetz von OpenStreetMap …", dlRead = "%d Straßenabschnitte gelesen …",
@@ -202,6 +204,7 @@ val DE = Strings(
     setWorkHint = "Noch keine Arbeit gespeichert. Suche die Adresse und tippe in der Routenvorschau auf „★ Speichern“ → Arbeit.",
     noFavorites = "Noch keine Orte gespeichert. Tippe in der Routenvorschau auf „★ Speichern“.",
     delete = "Löschen", savePlace = "Ort speichern", name = "Name", save = "Speichern",
+    satellite = "Luftbild", satelliteSub = "Amtliches Luftbild Niedersachsen (LGLN DOP20, 20 cm) unter den Fahrspuren.",
 )
 
 val EN = Strings(
@@ -244,7 +247,7 @@ val EN = Strings(
     downloadRegion = "Download region", offlineReady = "Offline routing ready ✓", offlineNone = "No offline data yet",
     voice = "Voice guidance", voiceEnabled = "Voice guidance",
     attribution = "Map data © OpenStreetMap contributors · Tiles: OpenFreeMap · Routing: FOSSGIS OSRM · " +
-        "Traffic: Die Autobahn GmbH des Bundes, TomTom, HERE, Mobilithek · Font: Quicksand (OFL)",
+        "Traffic: Die Autobahn GmbH des Bundes, TomTom, HERE, Mobilithek · Aerial: LGLN (2026) CC BY 4.0 · Font: Quicksand (OFL)",
     dlStart = "Starting download …", dlTiles = "Map tiles", dlTilesLight = "(light)", dlTilesDark = "(dark)",
     dlReady = "Offline region ready", dlFailed = "Offline download failed",
     dlRoads = "Downloading road network from OpenStreetMap …", dlRead = "%d road segments read …",
@@ -257,6 +260,7 @@ val EN = Strings(
     setWorkHint = "No work place saved yet. Search the address and tap “★ Save” in the route preview → Work.",
     noFavorites = "No saved places yet. Tap “★ Save” in the route preview.",
     delete = "Delete", savePlace = "Save place", name = "Name", save = "Save",
+    satellite = "Aerial imagery", satelliteSub = "Official Lower Saxony aerial photos (LGLN DOP20, 20 cm) under the lanes.",
 )
 
 val VI = Strings(
@@ -299,7 +303,7 @@ val VI = Strings(
     downloadRegion = "Tải khu vực", offlineReady = "Lộ trình ngoại tuyến sẵn sàng ✓", offlineNone = "Chưa có dữ liệu ngoại tuyến",
     voice = "Hướng dẫn bằng giọng nói", voiceEnabled = "Hướng dẫn bằng giọng nói",
     attribution = "Dữ liệu bản đồ © những người đóng góp OpenStreetMap · Ô bản đồ: OpenFreeMap · Lộ trình: FOSSGIS OSRM · " +
-        "Giao thông: Die Autobahn GmbH des Bundes, TomTom, HERE, Mobilithek · Phông chữ: Quicksand (OFL)",
+        "Giao thông: Die Autobahn GmbH des Bundes, TomTom, HERE, Mobilithek · Ảnh hàng không: LGLN (2026) CC BY 4.0 · Phông chữ: Quicksand (OFL)",
     dlStart = "Bắt đầu tải …", dlTiles = "Ô bản đồ", dlTilesLight = "(sáng)", dlTilesDark = "(tối)",
     dlReady = "Khu vực ngoại tuyến sẵn sàng", dlFailed = "Tải ngoại tuyến thất bại",
     dlRoads = "Đang tải mạng lưới đường từ OpenStreetMap …", dlRead = "Đã đọc %d đoạn đường …",
@@ -312,4 +316,5 @@ val VI = Strings(
     setWorkHint = "Chưa lưu nơi làm việc. Hãy tìm địa chỉ rồi nhấn „★ Lưu“ trong phần xem trước lộ trình → Công ty.",
     noFavorites = "Chưa có địa điểm nào được lưu. Nhấn „★ Lưu“ trong phần xem trước lộ trình.",
     delete = "Xóa", savePlace = "Lưu địa điểm", name = "Tên", save = "Lưu",
+    satellite = "Ảnh vệ tinh", satelliteSub = "Ảnh hàng không chính thức của Niedersachsen (LGLN DOP20, 20 cm) dưới các làn đường.",
 )

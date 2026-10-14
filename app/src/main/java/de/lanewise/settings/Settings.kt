@@ -32,6 +32,8 @@ data class AppSettings(
     /** ARGB colour of the on-street bike lane strip (default: German red bike-lane paint). */
     val bikeLaneColor: Int = BIKE_COLORS.first(),
     val showSigns: Boolean = true,
+    /** Official aerial imagery (LGLN DOP20, Niedersachsen) under the lane layers. */
+    val satellite: Boolean = false,
     // Speed warnings
     val overSpeedWarning: Boolean = true,
     /** Tolerance above the limit before the red border shows (km/h). */
@@ -76,6 +78,7 @@ class SettingsRepository(private val context: Context) {
         val bikes = booleanPreferencesKey("bike_lanes")
         val bikeColor = intPreferencesKey("bike_lane_color")
         val signs = booleanPreferencesKey("signs")
+        val satellite = booleanPreferencesKey("satellite")
         val over = booleanPreferencesKey("over_speed")
         val overOff = intPreferencesKey("over_speed_offset")
         val under = booleanPreferencesKey("under_speed")
@@ -110,6 +113,7 @@ class SettingsRepository(private val context: Context) {
             showBikeLanes = p[K.bikes] ?: d.showBikeLanes,
             bikeLaneColor = p[K.bikeColor] ?: d.bikeLaneColor,
             showSigns = p[K.signs] ?: d.showSigns,
+            satellite = p[K.satellite] ?: d.satellite,
             overSpeedWarning = p[K.over] ?: d.overSpeedWarning,
             overSpeedOffset = p[K.overOff] ?: d.overSpeedOffset,
             underSpeedWarning = p[K.under] ?: d.underSpeedWarning,
@@ -145,6 +149,7 @@ class SettingsRepository(private val context: Context) {
             p[K.bikes] = s.showBikeLanes
             p[K.bikeColor] = s.bikeLaneColor
             p[K.signs] = s.showSigns
+            p[K.satellite] = s.satellite
             p[K.over] = s.overSpeedWarning
             p[K.overOff] = s.overSpeedOffset
             p[K.under] = s.underSpeedWarning
