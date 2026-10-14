@@ -105,6 +105,8 @@ data class UiState(
     val originSearching: Boolean? = null,
     /** Traffic lights / signs around the car for the browse map (a route brings its own). */
     val nearbyFeatures: List<de.lanewise.core.model.RoadFeature> = emptyList(),
+    /** Autobahn GmbH rest/parking areas, chargers, webcams (kinds enabled in Settings). */
+    val autobahnPois: List<de.lanewise.core.model.AutobahnPoi> = emptyList(),
 ) {
     val selectedRoute get() = routes.getOrNull(selected)
 }
@@ -302,6 +304,32 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun cancelPreview() = _ui.update { it.copy(mode = Mode.BROWSE, routes = emptyList(), destination = null, query = "", origin = null, originResults = emptyList()) }
 
     fun clearMessage() = _ui.update { it.copy(message = null) }
+
+    fun showMessage(text: String) = _ui.update { it.copy(message = text) }
+
+    private var poiJob: kotlinx.coroutines.Job? = null
+    private var poiKey: Pair<Set<de.lanewise.core.model.AutobahnPoiKind>, Set<String>>? = null
+
+    /**
+     * Loads the enabled Autobahn icon kinds for the motorways around Hannover plus those on [route] (refs "A 2" → A2).
+     * Only reloads when the kinds or the motorways change.
+     */
+    fun loadAutobahnPois(kinds: Set<de.lanewise.core.model.AutobahnPoiKind>, route: Route?) {
+        val roads = (de.lanewise.traffic.AutobahnApiSource.HANNOVER_AUTOBAHNS + route?.steps.orEmpty()
+            .mapNotNull { it.ref }.flatMap { it.split(";", ",") }.map { it.replace(" ", "").trim() }
+            .filter { it.matches(Regex("A\\d{1,3}")) }).toSet()
+        val key = kinds to roads
+        if (key == poiKey) return
+        poiKey = key
+        poiJob?.cancel()
+        if (kinds.isEmpty()) { _ui.update { it.copy(autobahnPois = emptyList()) }; return }
+        if (!isOnline()) { poiKey = null; return }
+        poiJob = viewModelScope.launch {
+            val pois = runCatching { de.lanewise.traffic.AutobahnApiSource().pois(roads, kinds) }.getOrNull()
+            if (pois == null) { poiKey = null; return@launch }
+            _ui.update { it.copy(autobahnPois = pois) }
+        }
+    }
 
     // --- routing --------------------------------------------------------------------------------
     private fun providers(s: AppSettings, online: Boolean): List<RoutingProvider> {

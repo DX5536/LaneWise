@@ -13,7 +13,9 @@ de.lanewise
 │   ├── LaneModel.kt                  LaneDir bitmask, LaneSite (lateral coords, pockets), LaneAdvice
 │   ├── LanePlanner.kt                DP over lane sites, minimises lane changes
 │   ├── LaneGuidance.kt               runtime: re-plan per fix, assumed lane, timed change instruction
-│   └── LaneRibbonBuilder.kt          route road (buildRoad, per km) + live highlight (build) on a fixed grid
+│   ├── LaneRibbonBuilder.kt          route road (buildRoad, per km) + live highlight (build) on a fixed grid,
+│   │                                 options: strip fade, chevrons, zebras + signal poles, closed lanes
+│   └── LaneClosure.kt                closed lanes along the route (Autobahn GmbH roadworks lane symbols)
 ├── routing/                          RoutingProvider, OSRM (FOSSGIS), TomTom, RouteScorer (traffic)
 ├── offline/                          OSM graph builder (Overpass), compact graph, A* router, tile packs
 ├── speed/SpeedLimitProvider.kt       OSM maxspeed along the route corridor (Overpass)

@@ -75,6 +75,19 @@ data class AppSettings(
     val car3d: Boolean = true,
     /** Size of the car / arrow on the map (× default). */
     val carScale: Float = 1f,
+    // Lane view extras (Baidu / AMAP ideas, each optional): strip fades out ahead, moving chevrons, guide-sign banner
+    // colours, road name under the car, closed lanes (Autobahn roadworks), zebras + signal poles, see-through buildings.
+    val stripFade: Boolean = true,
+    val laneChevrons: Boolean = true,
+    val signColors: Boolean = true,
+    val roadNameChip: Boolean = true,
+    val closedLanes: Boolean = true,
+    val roadFurniture: Boolean = true,
+    val softBuildings: Boolean = true,
+    // Autobahn GmbH map icons.
+    val abWebcams: Boolean = false,
+    val abParking: Boolean = false,
+    val abCharging: Boolean = false,
 )
 
 /** Selectable bike-lane colours: red, orange, blue, green, magenta. */
@@ -95,6 +108,16 @@ class SettingsRepository(private val context: Context) {
         val fixedZoom = floatPreferencesKey("fixed_zoom")
         val car3d = booleanPreferencesKey("car_3d")
         val carScale = floatPreferencesKey("car_scale")
+        val stripFade = booleanPreferencesKey("strip_fade")
+        val laneChevrons = booleanPreferencesKey("lane_chevrons")
+        val signColors = booleanPreferencesKey("sign_colors")
+        val roadNameChip = booleanPreferencesKey("road_name_chip")
+        val closedLanes = booleanPreferencesKey("closed_lanes")
+        val roadFurniture = booleanPreferencesKey("road_furniture")
+        val softBuildings = booleanPreferencesKey("soft_buildings")
+        val abWebcams = booleanPreferencesKey("ab_webcams")
+        val abParking = booleanPreferencesKey("ab_parking")
+        val abCharging = booleanPreferencesKey("ab_charging")
         val ribbons = booleanPreferencesKey("lane_ribbons")
         val bikes = booleanPreferencesKey("bike_lanes")
         val bikeColor = intPreferencesKey("bike_lane_color")
@@ -166,6 +189,16 @@ class SettingsRepository(private val context: Context) {
             fixedZoom = p[K.fixedZoom] ?: d.fixedZoom,
             car3d = p[K.car3d] ?: d.car3d,
             carScale = p[K.carScale] ?: d.carScale,
+            stripFade = p[K.stripFade] ?: d.stripFade,
+            laneChevrons = p[K.laneChevrons] ?: d.laneChevrons,
+            signColors = p[K.signColors] ?: d.signColors,
+            roadNameChip = p[K.roadNameChip] ?: d.roadNameChip,
+            closedLanes = p[K.closedLanes] ?: d.closedLanes,
+            roadFurniture = p[K.roadFurniture] ?: d.roadFurniture,
+            softBuildings = p[K.softBuildings] ?: d.softBuildings,
+            abWebcams = p[K.abWebcams] ?: d.abWebcams,
+            abParking = p[K.abParking] ?: d.abParking,
+            abCharging = p[K.abCharging] ?: d.abCharging,
         )
     }
 
@@ -210,6 +243,16 @@ class SettingsRepository(private val context: Context) {
             p[K.fixedZoom] = s.fixedZoom
             p[K.car3d] = s.car3d
             p[K.carScale] = s.carScale
+            p[K.stripFade] = s.stripFade
+            p[K.laneChevrons] = s.laneChevrons
+            p[K.signColors] = s.signColors
+            p[K.roadNameChip] = s.roadNameChip
+            p[K.closedLanes] = s.closedLanes
+            p[K.roadFurniture] = s.roadFurniture
+            p[K.softBuildings] = s.softBuildings
+            p[K.abWebcams] = s.abWebcams
+            p[K.abParking] = s.abParking
+            p[K.abCharging] = s.abCharging
         }
     }
 }

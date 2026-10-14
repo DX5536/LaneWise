@@ -122,6 +122,22 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, ui: UiState, onBack: () ->
             Toggle(str.laneRibbons, str.laneRibbonsSub, s.laneRibbonsOnMap) { v -> set { it.copy(laneRibbonsOnMap = v) } }
         }
 
+        Section(str.lookExtras) {
+            Toggle(str.stripFade, str.stripFadeSub, s.stripFade) { v -> set { it.copy(stripFade = v) } }
+            Toggle(str.laneChevrons, str.laneChevronsSub, s.laneChevrons) { v -> set { it.copy(laneChevrons = v) } }
+            Toggle(str.signColors, str.signColorsSub, s.signColors) { v -> set { it.copy(signColors = v) } }
+            Toggle(str.roadNameChip, str.roadNameChipSub, s.roadNameChip) { v -> set { it.copy(roadNameChip = v) } }
+            Toggle(str.closedLanes, str.closedLanesSub, s.closedLanes) { v -> set { it.copy(closedLanes = v) } }
+            Toggle(str.roadFurniture, str.roadFurnitureSub, s.roadFurniture) { v -> set { it.copy(roadFurniture = v) } }
+            Toggle(str.softBuildings, str.softBuildingsSub, s.softBuildings) { v -> set { it.copy(softBuildings = v) } }
+        }
+
+        Section(str.abIcons) {
+            Toggle(str.abParking, null, s.abParking) { v -> set { it.copy(abParking = v) } }
+            Toggle(str.abCharging, null, s.abCharging) { v -> set { it.copy(abCharging = v) } }
+            Toggle(str.abWebcams, str.abWebcamsSub, s.abWebcams) { v -> set { it.copy(abWebcams = v) } }
+        }
+
         Section(str.bikeLanes) {
             Toggle(str.showBikeLanes, str.showBikeLanesSub, s.showBikeLanes) { v -> set { it.copy(showBikeLanes = v) } }
             Toggle(str.aerialLanes, str.aerialLanesSub, s.aerialLanes) { v -> set { it.copy(aerialLanes = v) } }

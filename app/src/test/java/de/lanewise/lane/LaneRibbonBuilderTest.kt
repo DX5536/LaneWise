@@ -5,6 +5,7 @@ import de.lanewise.core.geo.LatLon
 import de.lanewise.core.geo.Polyline
 import de.lanewise.core.model.LaneCountSpan
 import de.lanewise.core.model.Route
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.abs
@@ -127,5 +128,24 @@ class LaneRibbonBuilderTest {
             assertTrue("moved ${Geo.distance(x, y)} m at $d", Geo.distance(x, y) < 0.05)
         }
     }
-}
 
+    /** Lane-view extras: closed lanes (Autobahn roadworks), zebra + signal pole, chevrons on the planned lane. */
+    @Test
+    fun roadExtrasAreBuiltWhereTheyBelong() {
+        val r = route(emptyList(), 3)
+        val closure = LaneClosure(300.0, 500.0, listOf(false, true, true))
+        val shapes = LaneRibbonBuilder.buildRoad(r, 0.0, 1000.0, extras = LaneRibbonBuilder.RoadExtras(closures = listOf(closure)))
+        val tint = shapes.filter { it.kind == LaneRibbonBuilder.Kind.CLOSED_LANE }
+        assertEquals(1, tint.size)
+        assertTrue(shapes.count { it.kind == LaneRibbonBuilder.Kind.CLOSED_X } >= 8)
+        // The tint lies over the leftmost lane, between 300 and 500 m.
+        val along = tint[0].points.mapNotNull { r.geometry.project(it) }
+        assertTrue(along.all { it.distanceAlong in 290.0..510.0 })
+        assertTrue(along.all { it.signedOffset < 0 })
+        // Chevrons follow the lane path and fade with distance.
+        val ribbon = LaneRibbonBuilder.build(r, LaneState.EMPTY, 100.0)
+        val chev = LaneRibbonBuilder.chevrons(ribbon, 100.0, 3.0)
+        assertEquals(7, chev.size)
+        assertTrue(chev.zipWithNext().all { (a, b) -> b.opacity < a.opacity })
+    }
+}

@@ -113,6 +113,19 @@ fun MainScreen(vm: MainViewModel, ui: UiState, settings: AppSettings, dark: Bool
         LaunchedEffect(ui.mode) { if (ui.mode == Mode.NAVIGATING) { controller.recenter(); following = true } }
         // Keep map data in sync with state.
         LaunchedEffect(dark) { controller.setDark(dark) }
+        LaunchedEffect(settings.stripFade, settings.laneChevrons, settings.roadFurniture, settings.closedLanes, settings.softBuildings, settings.roadNameChip) {
+            controller.setLookOptions(settings.stripFade, settings.laneChevrons, settings.roadFurniture, settings.closedLanes,
+                settings.softBuildings, settings.roadNameChip)
+        }
+        LaunchedEffect(settings.abParking, settings.abCharging, settings.abWebcams, ui.selectedRoute) {
+            val kinds = buildSet {
+                if (settings.abParking) add(de.lanewise.core.model.AutobahnPoiKind.PARKING)
+                if (settings.abCharging) add(de.lanewise.core.model.AutobahnPoiKind.CHARGING)
+                if (settings.abWebcams) add(de.lanewise.core.model.AutobahnPoiKind.WEBCAM)
+            }
+            vm.loadAutobahnPois(kinds, ui.selectedRoute)
+        }
+        LaunchedEffect(ui.autobahnPois) { controller.showAutobahnPois(ui.autobahnPois) }
         LaunchedEffect(settings.car3d, settings.carScale) { controller.setCarAppearance(settings.car3d, settings.carScale.toDouble()) }
         LaunchedEffect(settings.bikeLaneColor) { controller.setBikeColor(settings.bikeLaneColor) }
         LaunchedEffect(settings.satellite, dark) { controller.setSatellite(settings.satellite) }
@@ -157,7 +170,9 @@ fun MainScreen(vm: MainViewModel, ui: UiState, settings: AppSettings, dark: Bool
         val currentMode by rememberUpdatedState(ui.mode)
         DisposableEffect(controller) {
             controller.onMapLongPress = { p -> if (currentMode == Mode.BROWSE) vm.chooseDestination(p) }
-            onDispose { controller.onMapLongPress = null }
+            // Tap on an Autobahn icon: its name and details as a message.
+            controller.onPoiTap = { title, sub -> vm.showMessage(listOf(title, sub).filter { it.isNotBlank() }.joinToString(" · ")) }
+            onDispose { controller.onMapLongPress = null; controller.onPoiTap = null }
         }
 
         when (ui.mode) {
@@ -551,6 +566,7 @@ private fun NavigationOverlay(
                     countdown = next?.let { countdownFraction(nav) },
                     lanesBelow = showLanes,
                     belowLeft = nav.signals?.takeIf { settings.showSigns && it.distance < 250 }?.let { sig -> { de.lanewise.ui.hud.SignalCard(sig) } },
+                    signColors = settings.signColors,
                 ) {
                     if (showLanes && advice != null) {
                         Spacer(Modifier.height(3.dp))

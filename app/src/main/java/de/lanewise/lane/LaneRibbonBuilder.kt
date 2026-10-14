@@ -20,10 +20,18 @@ import kotlin.math.roundToInt
  */
 object LaneRibbonBuilder {
 
-    enum class Kind { SURFACE, BIKE, RECOMMENDED, ALLOWED, ARROW, EDGE, DIVIDER, DIVIDER_SOLID, STOP, TURN_ARROW }
+    enum class Kind {
+        SURFACE, BIKE, RECOMMENDED, ALLOWED, ARROW, EDGE, DIVIDER, DIVIDER_SOLID, STOP, TURN_ARROW,
+        /** Zebra stripes, signal poles and heads (extruded), closed-lane tint and cross, moving chevrons. */
+        ZEBRA, POLE, SIGNAL_HEAD, CLOSED_LANE, CLOSED_X, CHEVRON,
+    }
 
-    /** Either a closed polygon (fill) or an open line; [widthM] is used for lines only. */
-    data class Shape(val points: List<LatLon>, val kind: Kind, val polygon: Boolean, val widthM: Double = 0.15)
+    /** Either a closed polygon (fill) or an open line; [widthM] is used for lines only; [opacity] multiplies the layer's. */
+    data class Shape(val points: List<LatLon>, val kind: Kind, val polygon: Boolean, val widthM: Double = 0.15,
+                     val opacity: Double = 1.0)
+
+    /** Optional road details: zebra crossings + traffic-light poles ([furniture]) and closed lanes. */
+    data class RoadExtras(val furniture: Boolean = false, val closures: List<LaneClosure> = emptyList())
 
     fun laneWidth(kind: RoadKind) = when (kind) {
         RoadKind.MOTORWAY -> 3.75
@@ -74,6 +82,10 @@ object LaneRibbonBuilder {
     /** Sample grid spacing (m). Samples sit at fixed route distances, so geometry never shifts between frames. */
     private const val GRID = 6.0
 
+    /** Fade of the recommended strip ahead of the car (option): full until FADE_FROM, gone at FADE_TO (m). */
+    const val FADE_FROM = 220.0
+    const val FADE_TO = 340.0
+
     /** Samples on the fixed route grid covering [from]..[to] (plus smoothing context), with lane data. */
     private fun gridSamples(route: Route, from: Double, to: Double): List<S> {
         val a = max(0.0, kotlin.math.floor(from / GRID) * GRID)
@@ -89,7 +101,7 @@ object LaneRibbonBuilder {
      * not depend on the car, so the map builds it once per piece of route (see MapController) — no regeneration and
      * no jitter while driving; only [build]'s highlight moves.
      */
-    fun buildRoad(route: Route, from: Double, to: Double, showBikeLanes: Boolean = true): List<Shape> {
+    fun buildRoad(route: Route, from: Double, to: Double, showBikeLanes: Boolean = true, extras: RoadExtras = RoadExtras()): List<Shape> {
         val all = gridSamples(route, from - 120, to + 120)          // context for smoothing and tapers
         if (all.size < 3) return emptyList()
         val samples = all.filter { it.d >= from - GRID && it.d <= to + GRID }   // one sample overlap with neighbours
@@ -146,6 +158,89 @@ object LaneRibbonBuilder {
             if (abs(s.d - (sig.distanceAlong - 2)) > 6 || s.junction) continue
             out += Shape(listOf(s.at(s.left), s.at(s.right)), Kind.STOP, false, 0.6)
         }
+        if (extras.furniture) furniture(route, all, from, to, out)
+        for (c in extras.closures) closedLanes(c, samples, out)
+        return out
+    }
+
+    /**
+     * Zebra crossings (OSM `crossing` nodes on the route: 0.5 m stripes, 0.5 m gaps, 3 m long, across the drawn road)
+     * and a traffic-light pole with its head at the right road edge of every signalised stop line (Baidu / AMAP).
+     */
+    private fun furniture(route: Route, all: List<S>, from: Double, to: Double, out: MutableList<Shape>) {
+        fun sampleAt(d: Double) = all.minByOrNull { abs(it.d - d) }?.takeIf { abs(it.d - d) <= GRID && !it.junction }
+        for (f in route.features.filter { it.kind == de.lanewise.core.model.FeatureKind.CROSSING && it.distanceAlong >= from && it.distanceAlong < to }) {
+            val s = sampleAt(f.distanceAlong) ?: continue
+            var x = s.left + 0.3
+            while (x + 0.5 <= s.right - 0.1) {
+                val a = s.at(x); val b = s.at(x + 0.5)
+                out += Shape(listOf(Geo.destination(a, s.bearing, -1.5), Geo.destination(b, s.bearing, -1.5),
+                    Geo.destination(b, s.bearing, 1.5), Geo.destination(a, s.bearing, 1.5), Geo.destination(a, s.bearing, -1.5)),
+                    Kind.ZEBRA, polygon = true)
+                x += 1.0
+            }
+        }
+        val signals = route.features.filter { it.kind == de.lanewise.core.model.FeatureKind.TRAFFIC_SIGNALS && !it.pedestrian }
+            .sortedBy { it.distanceAlong }
+        for (sig in signals.filter { it.distanceAlong >= from && it.distanceAlong < to }) {
+            if (signals.any { it.distanceAlong < sig.distanceAlong && sig.distanceAlong - it.distanceAlong < 40 }) continue
+            // At the stop line of the junction's lane site if there is one just after the signal, else at the signal.
+            val stop = route.laneSites.firstOrNull { it.distanceAlong - sig.distanceAlong in -15.0..40.0 }?.distanceAlong ?: sig.distanceAlong
+            val s = sampleAt(stop - 2) ?: continue
+            val base = s.at(s.right + 0.9)
+            out += box(base, s.bearing, 0.35, 0.35, Kind.POLE)
+            out += box(Geo.destination(base, s.bearing, -0.25), s.bearing, 0.5, 0.95, Kind.SIGNAL_HEAD)
+        }
+    }
+
+    /** Red tint over each closed lane of [c] plus a cross every 40 m (Autobahn GmbH roadworks). */
+    private fun closedLanes(c: LaneClosure, samples: List<S>, out: MutableList<Shape>) {
+        val run = samples.filter { it.d >= c.from && it.d <= c.to && !it.junction }
+        if (run.size < 2) return
+        val n = c.open.size
+        for ((i, open) in c.open.withIndex()) {
+            if (open) continue
+            // Aligned at the right edge: closure lane i is drawn lane (lanes - n + i).
+            fun lo(s: S) = s.right - (n - i) * s.w + 0.25
+            fun hi(s: S) = s.right - (n - i - 1) * s.w - 0.25
+            if (run.any { lo(it) < it.left - 0.1 }) continue
+            out += polygon(line(run) { lo(it) }, line(run) { hi(it) }, Kind.CLOSED_LANE)
+            var d = run.first().d + 10
+            while (d < run.last().d - 5) {
+                val s = run.minBy { abs(it.d - d) }
+                val m = s.at((lo(s) + hi(s)) / 2)
+                for (rot in listOf(45.0, -45.0)) out += box(m, s.bearing + rot, 0.45, 2.6, Kind.CLOSED_X)
+                d += 40
+            }
+        }
+    }
+
+    /** Rectangle [width] x [length] m centred on [c], long side along [bearing]. */
+    private fun box(c: LatLon, bearing: Double, width: Double, length: Double, kind: Kind): Shape {
+        val f = Geo.destination(c, bearing, length / 2); val b = Geo.destination(c, bearing, -length / 2)
+        val pts = listOf(Geo.destination(b, bearing - 90, width / 2), Geo.destination(b, bearing + 90, width / 2),
+            Geo.destination(f, bearing + 90, width / 2), Geo.destination(f, bearing - 90, width / 2))
+        return Shape(pts + pts.first(), kind, polygon = true)
+    }
+
+    /**
+     * Chevrons (^ shapes) moving along the planned lane ([path]) from the car: [count] of them [spacing] m apart,
+     * shifted forward by [phase] m (0 <= phase < spacing), sized for a lane of [laneWidth] m, fading out with distance.
+     * Built every display frame by the map, so it must stay cheap.
+     */
+    fun chevrons(path: Ribbon, car: Double, phase: Double, count: Int = 7, spacing: Double = 11.0, laneWidth: Double = 3.0): List<Shape> {
+        val out = ArrayList<Shape>(count)
+        val half = laneWidth * 0.26
+        for (k in 0 until count) {
+            val d = car + 9 + k * spacing + phase
+            val p = path.pointAt(d) ?: break
+            val ahead = path.pointAt(d + 2) ?: break
+            val br = Geo.bearing(p, ahead)
+            fun at(x: Double, y: Double) = Geo.destination(Geo.destination(p, br, y), br + 90, x)
+            val ring = listOf(at(-half, -0.2), at(0.0, 0.7), at(half, -0.2), at(half, -0.8), at(0.0, 0.05), at(-half, -0.8))
+            val fade = 1.0 - (d - car - 9) / (count * spacing)
+            out += Shape(ring + ring.first(), Kind.CHEVRON, polygon = true, opacity = fade.coerceIn(0.0, 1.0))
+        }
         return out
     }
 
@@ -155,6 +250,8 @@ object LaneRibbonBuilder {
      */
     fun build(
         route: Route, state: LaneState, carDistance: Double, ahead: Double = 1200.0, behind: Double = 60.0,
+        /** Let the recommended strip fade out between [FADE_FROM] and [FADE_TO] m ahead of the car (Baidu style). */
+        fade: Boolean = false,
     ): Ribbon {
         val from = max(0.0, carDistance - behind)
         val to = min(route.geometry.length, carDistance + ahead)
@@ -180,11 +277,25 @@ object LaneRibbonBuilder {
             val endIdx = samples.indexOfLast { it.d <= plan.last().site.distanceAlong + 40 }.coerceAtLeast(1)
             val strip = samples.subList(0, endIdx + 1)
             val pos = strip.indices.associateBy { strip[it] }
-            out += polygon(
-                line(strip) { centres[pos[it]!!] - hw[pos[it]!!] },
-                line(strip) { centres[pos[it]!!] + hw[pos[it]!!] },
-                Kind.RECOMMENDED,
-            )
+            fun piece(run: List<S>, opacity: Double) {
+                if (run.size < 2) return
+                out += polygon(
+                    line(run) { centres[pos[it]!!] - hw[pos[it]!!] },
+                    line(run) { centres[pos[it]!!] + hw[pos[it]!!] },
+                    Kind.RECOMMENDED,
+                ).copy(opacity = opacity)
+            }
+            if (!fade) piece(strip, 1.0)
+            else {
+                // Solid up to FADE_FROM, then 12 m pieces getting fainter, nothing beyond FADE_TO.
+                piece(strip.filter { it.d <= carDistance + FADE_FROM }, 1.0)
+                var d0 = carDistance + FADE_FROM
+                while (d0 < carDistance + FADE_TO) {
+                    val run = strip.filter { it.d >= d0 - 0.1 && it.d <= d0 + 12.1 }
+                    piece(run, 1.0 - (d0 + 6 - carDistance - FADE_FROM) / (FADE_TO - FADE_FROM))
+                    d0 += 12
+                }
+            }
             // Soft band under the lime strip: every lane the route can use up to each site (AMAP's two-level carpet).
             band(plan, samples, carDistance - behind)?.let { out += it }
         }

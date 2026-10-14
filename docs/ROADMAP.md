@@ -1,6 +1,6 @@
 # Status & roadmap
 
-_Last updated: 2026-10-15 (v0.4.3: automatic light/dark by the sun, 3D car + car size, Bilibili UI review; v0.4.2: Schulenburger Landstraße lane, smooth camera, auto zoom)._
+_Last updated: 2026-10-15 (v0.4.4: Bilibili ideas as options, Autobahn icons; v0.4.3: automatic light/dark by the sun, 3D car + car size, Bilibili UI review; v0.4.2: Schulenburger Landstraße lane, smooth camera, auto zoom)._
 
 ## Done (v0.1)
 - [x] Reverse-engineering notes for Petal Maps 4.7 and AMAP 17.00 lane guidance (`docs/REVERSE_ENGINEERING.md`)
@@ -236,17 +236,36 @@ What they do (all lane-level, light theme by day):
 - HUD: speed in a circle top-left; **section-control panel** (current / average speed, km left); vertical
   **route progress bar** on the right edge; current road name + speed-limit chip just below the car; bottom bar
   with distance · time · tolls · arrival, "overview" and "exit" buttons; voice/feedback button on the left.
-Candidates for LaneWise (ordered by value / effort):
-1. Fade the lime strip out ~250 m ahead of the car and add moving chevrons (direction cue) — cheap, highlight only.
-2. Banner colour by road class (blue Autobahn, yellow Bundesstraße, white otherwise) — German guide-sign colours.
-3. Current road name + speed limit chip under the car (OSM `name`, `maxspeed`).
-4. Closed lanes from Autobahn GmbH roadworks (`/roadworks` texts often name the lanes) and TomTom `LANE_CLOSED`
-   incidents as red ✕ on the lane surface.
-5. Zebra crossings and stop-line traffic-light poles from OSM nodes on the route road (data is already fetched).
-6. Lighter / translucent 3D buildings in navigation (style), so the road dominates.
+Candidates 1–6 are done in v0.4.4 (below), each as an option.
+
+## Done (v0.4.4, 2026-10-15) — Bilibili ideas as options + Autobahn icons
+Settings → "Lane view extras" (all on by default, DE/EN/VI):
+- [x] **Lane strip fades out** between 220 and 340 m ahead of the car (12 m pieces with falling opacity,
+      `LaneRibbonBuilder.build(fade = true)`).
+- [x] **Moving chevrons** in the recommended lane: 7 chevrons, 11 m apart, gliding forward at ~7 m/s on the lane path,
+      fading with distance; rebuilt every display frame (`LaneRibbonBuilder.chevrons`, own source, synchronous).
+- [x] **Banner in guide-sign colours**: blue / white for the road after the manoeuvre with an `A …` ref, yellow / black
+      for `B …` (`Hud.guideSign`); otherwise the app colours.
+- [x] **Road name under the car**: current street (or ref) and speed limit as a text label just below the car.
+- [x] **Closed lanes** from Autobahn GmbH roadworks: `impact.symbols` (ARROW_UP / CLOSED per lane, after the last
+      SEPARATE, shoulder after BORDER_RIGHT dropped) → `TrafficIncident.laneOpen`; `LaneClosure.along` keeps
+      active (not `future`) roadworks whose line runs ≥ 30 m along the route in the same direction within 14 m;
+      closed lanes get a red tint and a red ✕ every 40 m, aligned at the right road edge. Crossovers (all lanes of
+      the carriageway closed) are not drawn. TomTom `LANE_CLOSED` has no lane index, so it is not used.
+      `AutobahnLanesTest`, `roadExtrasAreBuiltWhereTheyBelong`.
+- [x] **Zebra crossings and signal poles**: OSM `crossing` nodes on the route → 0.5 m stripes across the drawn road;
+      a grey pole with a dark signal head (extruded, 5 m) at the right edge of each signalised stop line.
+- [x] **See-through buildings while driving**: `building-3d` opacity 0.35 during navigation (0.85 otherwise).
+Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which ones):
+- [x] **Rest and parking areas** (`parking_lorry`, blue P), **EV charging stations** (`electric_charging_station`,
+      green lightning), **webcams** (`webcam`) for A2 / A7 / A37 / A352 / A39 and the motorways on the selected route;
+      tap an icon for its name and details (car/truck spaces, charge points, power, operator).
+      Note: the API currently returns **no webcams** on any motorway checked (A1, A2, A3, A7, A8, A9, A37, A39, A352).
 
 ## Video review — still open
 - [ ] Owner: check the 3D car (size, colours, behaviour in tunnels / under bridges) and the automatic theme on the phone.
+- [ ] Owner: check the v0.4.4 options on the phone — chevron speed/colour, fade distance, label position under the
+      3D car, pole size; closed lanes only show on a route through active Autobahn roadworks.
 - [ ] Re-check on the phone: puck/camera smoothness with the new dead reckoning (demo ×4 and a real drive), and that
       the highlight never lags behind the car with the 25 m rebuild step.
 - [ ] Philipsbornstraße (video 2:45): only the route line, no lane surface — OSM has no lane data on most of it;

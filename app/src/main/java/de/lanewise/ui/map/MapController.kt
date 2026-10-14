@@ -63,6 +63,7 @@ class MapController(private val context: Context) {
         private set
     var onUserPannedMap: (() -> Unit)? = null
     var onMapLongPress: ((LatLon) -> Unit)? = null
+    var onPoiTap: ((String, String) -> Unit)? = null
     private var lastLat = 52.37
     private var bikeColor: Int = 0xFFE5484D.toInt()
     private var lastFeatures: List<RoadFeature> = emptyList()
@@ -119,6 +120,12 @@ class MapController(private val context: Context) {
                     onUserPannedMap?.invoke()
                 }
             }
+            m.addOnMapClickListener { ll ->
+                val pt = m.projection.toScreenLocation(ll)
+                val hit = onPoiTap?.let { autobahnPoiAt(pt.x, pt.y) }
+                if (hit != null) onPoiTap?.invoke(hit.first, hit.second)
+                hit != null
+            }
             m.addOnMapLongClickListener { ll ->
                 onMapLongPress?.invoke(LatLon(ll.latitude, ll.longitude)); true
             }
@@ -149,8 +156,9 @@ class MapController(private val context: Context) {
     private fun setupLayers(s: Style, isDark: Boolean) {
         s.addImage(IMG_CAR, carBitmap(if (isDark) 0xFF9A82FF.toInt() else 0xFF6C4CF5.toInt()))
         s.addImage(IMG_DEST, pinBitmap())
+        de.lanewise.core.model.AutobahnPoiKind.entries.forEach { s.addImage("lw-ab-${it.name}", abPoiBitmap(it)) }
         FeatureKind.entries.forEach { s.addImage("lw-feat-${it.name}", RoadSignArt.feature(it, 64)) }
-        listOf(SRC_ROUTE, SRC_ALT, SRC_LANES, SRC_LANES_DYN, SRC_CAR, SRC_CAR3D, SRC_DEST, SRC_INC, SRC_FEAT, SRC_SIGNAL).forEach { s.addSource(GeoJsonSource(it)) }
+        listOf(SRC_ROUTE, SRC_ALT, SRC_LANES, SRC_LANES_DYN, SRC_CHEV, SRC_CAR, SRC_CAR3D, SRC_LABEL, SRC_ABPOI, SRC_DEST, SRC_INC, SRC_FEAT, SRC_SIGNAL).forEach { s.addSource(GeoJsonSource(it)) }
 
         val below = "building-3d"
         fun add(l: Layer) { if (s.getLayer(below) != null) s.addLayerBelow(l, below) else s.addLayer(l) }
@@ -194,8 +202,21 @@ class MapController(private val context: Context) {
         // Highlight: lime on the dark map, violet on the light map (lime has too little contrast on light grey).
         val highlight = if (isDark) 0xFFB8F33A.toInt() else 0xFF6C4CF5.toInt()
         fill("lane-allowed", "ALLOWED", highlight, if (isDark) 0.28f else 0.3f, SRC_LANES_DYN)
-        fill("lane-recommended", "RECOMMENDED", highlight, if (isDark) 0.85f else 0.95f, SRC_LANES_DYN)
+        add(FillLayer("lane-recommended", SRC_LANES_DYN).withFilter(kind("RECOMMENDED")).withProperties(
+            PropertyFactory.fillColor(highlight), PropertyFactory.fillAntialias(true),
+            // Pieces of the strip fade out ahead of the car (option): opacity per feature ("o").
+            PropertyFactory.fillOpacity(Expression.product(Expression.literal(if (isDark) 0.85f else 0.95f),
+                Expression.coalesce(Expression.toNumber(Expression.get("o")), Expression.literal(1f)))),
+        ))
+        add(FillLayer("lane-chevron", SRC_CHEV).withFilter(kind("CHEVRON")).withProperties(
+            PropertyFactory.fillColor(if (isDark) 0xFF1C1F27.toInt() else 0xFFFFFFFF.toInt()), PropertyFactory.fillAntialias(true),
+            PropertyFactory.fillOpacity(Expression.product(Expression.literal(0.8f),
+                Expression.coalesce(Expression.toNumber(Expression.get("o")), Expression.literal(1f)))),
+        ))
         fill("lane-arrow", "ARROW", 0xFFFFFFFF.toInt(), 0.92f)
+        fill("lane-zebra", "ZEBRA", 0xFFFFFFFF.toInt(), 0.9f)
+        fill("lane-closed", "CLOSED_LANE", 0xFFE5484D.toInt(), 0.32f)
+        fill("lane-closed-x", "CLOSED_X", 0xFFE5484D.toInt(), 0.95f)
         add(LineLayer("lane-stop", SRC_LANES).withFilter(kind("STOP")).withProperties(
             PropertyFactory.lineColor("#FFFFFF"), PropertyFactory.lineWidth(metresToPixels()),
         ))
@@ -220,6 +241,13 @@ class MapController(private val context: Context) {
         add(FillExtrusionLayer("lane-turn-arrow", SRC_LANES_DYN).withFilter(kind("TURN_ARROW")).withProperties(
             PropertyFactory.fillExtrusionColor("#FFFFFF"), PropertyFactory.fillExtrusionBase(0.05f),
             PropertyFactory.fillExtrusionHeight(0.7f), PropertyFactory.fillExtrusionOpacity(0.95f),
+        ))
+        // Traffic-light poles with their heads at the stop lines (option "zebra crossings and signal poles").
+        add(FillExtrusionLayer("lane-poles", SRC_LANES).withFilter(Expression.any(kind("POLE"), kind("SIGNAL_HEAD"))).withProperties(
+            PropertyFactory.fillExtrusionColor(Expression.match(Expression.get("k"), col("#8A90A0"), Expression.stop("SIGNAL_HEAD", col("#15171C")))),
+            PropertyFactory.fillExtrusionBase(Expression.match(Expression.get("k"), Expression.literal(0f), Expression.stop("SIGNAL_HEAD", Expression.literal(3.6f)))),
+            PropertyFactory.fillExtrusionHeight(Expression.match(Expression.get("k"), Expression.literal(5.2f), Expression.stop("SIGNAL_HEAD", Expression.literal(5.0f)))),
+            PropertyFactory.fillExtrusionOpacity(1f),
         ))
         add(LineLayer("lane-edge", SRC_LANES).withFilter(kind("EDGE")).withProperties(
             PropertyFactory.lineColor(if (isDark) "#C9CDD8" else "#FFFFFF"),
@@ -275,7 +303,74 @@ class MapController(private val context: Context) {
             PropertyFactory.fillExtrusionOpacity(1f),
             PropertyFactory.fillExtrusionVerticalGradient(true),
         ))
+        // Current road name (+ speed limit) under the car (option).
+        s.addLayer(SymbolLayer("car-label", SRC_LABEL).withProperties(
+            PropertyFactory.textField(Expression.get("t")), PropertyFactory.textFont(arrayOf("Noto Sans Bold")),
+            PropertyFactory.textSize(13f), PropertyFactory.textColor(if (isDark) "#FFFFFF" else "#1C1F27"),
+            PropertyFactory.textHaloColor(if (isDark) "#1C1F27" else "#FFFFFF"), PropertyFactory.textHaloWidth(2.5f),
+            PropertyFactory.textAnchor(Property.TEXT_ANCHOR_TOP), PropertyFactory.textOffset(arrayOf(0f, 3.4f)),
+            PropertyFactory.textPitchAlignment(Property.TEXT_PITCH_ALIGNMENT_VIEWPORT),
+            PropertyFactory.textAllowOverlap(true), PropertyFactory.textIgnorePlacement(true),
+        ))
+        s.addLayer(SymbolLayer("ab-poi", SRC_ABPOI).withProperties(
+            PropertyFactory.iconImage(Expression.concat(Expression.literal("lw-ab-"), Expression.get("kind"))),
+            PropertyFactory.iconAnchor(Property.ICON_ANCHOR_BOTTOM), PropertyFactory.iconAllowOverlap(true),
+            PropertyFactory.iconPitchAlignment(Property.ICON_PITCH_ALIGNMENT_VIEWPORT),
+            PropertyFactory.iconSize(Expression.interpolate(Expression.linear(), Expression.zoom(),
+                Expression.stop(8, 0.45f), Expression.stop(13, 0.7f), Expression.stop(17, 0.9f))),
+        ))
         applyCarAppearance(s)
+        applyBuildings(s)
+        showAutobahnPois(lastPois)
+    }
+
+    // --- lane view extras (options) -----------------------------------------------------------------------------
+    private var optFade = true
+    private var optChevrons = true
+    private var optFurniture = true
+    private var optClosures = true
+    private var optSoftBuildings = true
+    private var optRoadName = true
+    private var navigating = false
+    private var carLabel: String? = null
+
+    fun setLookOptions(fade: Boolean, chevrons: Boolean, furniture: Boolean, closures: Boolean, softBuildings: Boolean, roadName: Boolean) {
+        optFade = fade; optChevrons = chevrons; optFurniture = furniture; optClosures = closures; optRoadName = roadName
+        if (!chevrons) (style?.getSource(SRC_CHEV) as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(emptyList()))
+        if (!roadName) (style?.getSource(SRC_LABEL) as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(emptyList()))
+        if (softBuildings != optSoftBuildings) { optSoftBuildings = softBuildings; style?.let { applyBuildings(it) } }
+        geomKey = null   // rebuild road + highlight with the new options at the next update
+    }
+
+    /** 3D buildings see-through while navigating (option), so the road stays in front (Baidu / AMAP). */
+    private fun applyBuildings(s: Style) {
+        (s.getLayer("building-3d") as? FillExtrusionLayer)?.setProperties(
+            PropertyFactory.fillExtrusionOpacity(if (navigating && optSoftBuildings) 0.35f else 0.85f))
+    }
+
+    private fun setNavigating(on: Boolean) {
+        if (on == navigating) return
+        navigating = on
+        style?.let { applyBuildings(it) }
+    }
+
+    private var lastPois: List<de.lanewise.core.model.AutobahnPoi> = emptyList()
+
+    /** Autobahn GmbH rest/parking areas, EV chargers and webcams (each kind optional, filtered by the caller). */
+    fun showAutobahnPois(pois: List<de.lanewise.core.model.AutobahnPoi>) {
+        lastPois = pois
+        (style?.getSource(SRC_ABPOI) as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(pois.map {
+            Feature.fromGeometry(Point.fromLngLat(it.position.lon, it.position.lat)).apply {
+                addStringProperty("kind", it.kind.name); addStringProperty("title", it.title); addStringProperty("sub", it.subtitle)
+            }
+        }))
+    }
+
+    /** Autobahn icon under the screen point ([x], [y] px), for a tap: (title, subtitle). */
+    fun autobahnPoiAt(x: Float, y: Float): Pair<String, String>? {
+        val m = map ?: return null
+        val f = m.queryRenderedFeatures(android.graphics.RectF(x - 24, y - 48, x + 24, y + 8), "ab-poi").firstOrNull() ?: return null
+        return (f.getStringProperty("title") ?: "") to (f.getStringProperty("sub") ?: "")
     }
 
     // --- car appearance (setting): arrow puck or 3D car, size ------------------------------------------------------
@@ -394,6 +489,7 @@ class MapController(private val context: Context) {
         Feature.fromGeometry(geom).apply {
             addStringProperty("k", sh.kind.name)
             addNumberProperty("w", sh.widthM)
+            if (sh.opacity != 1.0) addNumberProperty("o", sh.opacity)
         }
     })
 
@@ -424,24 +520,30 @@ class MapController(private val context: Context) {
     // The route's road, pre-built per [ROAD_CHUNK] and kept: rebuilt only when the route (or its OSM data) changes.
     @Volatile private var roadRoute: Route? = null
     private var roadBikes = true
+    private var roadExtras = LaneRibbonBuilder.RoadExtras()
     private val roadChunks = HashMap<Int, List<LaneRibbonBuilder.Shape>>()
+    private var roadClosuresOn = false
     private var shownChunks: Set<Int> = emptySet()
 
     /**
      * Road chunks for [along] (runs on a worker thread; [roadChunks] is only touched by the single geometry job).
      * Returns the chunk set and its features if it differs from what is shown, else null.
      */
-    private fun buildRoad(route: Route, along: Double, showBikeLanes: Boolean, shown: Set<Int>): Pair<Set<Int>, FeatureCollection>? {
-        if (route !== roadRoute || showBikeLanes != roadBikes) {
-            roadRoute = route; roadBikes = showBikeLanes; roadChunks.clear()
-            return buildRoad(route, along, showBikeLanes, emptySet())
+    private fun buildRoad(route: Route, along: Double, showBikeLanes: Boolean, shown: Set<Int>,
+                          furniture: Boolean, closures: Boolean): Pair<Set<Int>, FeatureCollection>? {
+        if (route !== roadRoute || showBikeLanes != roadBikes || furniture != roadExtras.furniture ||
+            closures != roadClosuresOn) {
+            roadRoute = route; roadBikes = showBikeLanes; roadChunks.clear(); roadClosuresOn = closures
+            roadExtras = LaneRibbonBuilder.RoadExtras(furniture,
+                if (closures) de.lanewise.lane.LaneClosure.along(route, route.incidents) else emptyList())
+            return buildRoad(route, along, showBikeLanes, emptySet(), furniture, closures)
         }
         val last = (route.distance / ROAD_CHUNK).toInt()
         val first = ((along - 300) / ROAD_CHUNK).toInt().coerceIn(0, last)
         val want = (first..((along + 2500) / ROAD_CHUNK).toInt().coerceAtMost(last)).toSet()
         if (want == shown) return null
         for (c in want) roadChunks.getOrPut(c) {
-            LaneRibbonBuilder.buildRoad(route, c * ROAD_CHUNK, minOf(route.distance, (c + 1) * ROAD_CHUNK), showBikeLanes)
+            LaneRibbonBuilder.buildRoad(route, c * ROAD_CHUNK, minOf(route.distance, (c + 1) * ROAD_CHUNK), showBikeLanes, roadExtras)
         }
         roadChunks.keys.retainAll { it in (first - 1)..(want.max() + 1) }
         return want to features(want.sorted().flatMap { roadChunks[it].orEmpty() })
@@ -457,7 +559,8 @@ class MapController(private val context: Context) {
      * car has moved [GEOM_STEP] — not at every fix (the hand-over of ~1 km of polygons to MapLibre runs on the UI thread).
      */
     private fun requestGeometry(snap: NavSnapshot, along: Double, showRibbons: Boolean, showBikeLanes: Boolean, streetsMode: Boolean) {
-        val key = listOf(snap.route, snap.lanes, showRibbons, showBikeLanes, streetsMode, geomGeneration)
+        val fade = optFade; val furniture = optFurniture; val closures = optClosures
+        val key = listOf(snap.route, snap.lanes, showRibbons, showBikeLanes, streetsMode, geomGeneration, fade, furniture, closures)
         if (key == geomKey && abs(along - geomAlong) < GEOM_STEP) return
         geomKey = key; geomAlong = along
         val work = {
@@ -466,8 +569,8 @@ class MapController(private val context: Context) {
             geomJob = scope.launch {
                 val result = runCatching {
                     withContext(Dispatchers.Default) {
-                        val r = LaneRibbonBuilder.build(snap.route, snap.lanes, along)
-                        val road = if (showRibbons && !streetsMode) buildRoad(snap.route, along, showBikeLanes, shown) else null
+                        val r = LaneRibbonBuilder.build(snap.route, snap.lanes, along, fade = fade)
+                        val road = if (showRibbons && !streetsMode) buildRoad(snap.route, along, showBikeLanes, shown, furniture, closures) else null
                         Triple(r, if (showRibbons) features(r.shapes) else null, road)
                     }
                 }.getOrNull()
@@ -522,6 +625,11 @@ class MapController(private val context: Context) {
         val now = SystemClock.uptimeMillis()
         val route = snap.route
         val along = snap.distanceAlong
+        setNavigating(true)
+        carLabel = if (optRoadName) route.steps.lastOrNull { it.distanceAlong <= along + 1 }?.let { st ->
+            val name = st.name.ifBlank { st.ref.orEmpty() }
+            listOfNotNull(name.takeIf { it.isNotBlank() }, snap.speedLimit?.let { "$it km/h" }).joinToString("  ·  ").ifBlank { null }
+        } else null
 
         if (snap.offRoute) {
             offRoutePos = snap.fix.position
@@ -589,6 +697,9 @@ class MapController(private val context: Context) {
         tweenRoute = null; offRoutePos = null; ribbon = null
         (style?.getSource(SRC_LANES_DYN) as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(emptyList()))
         roadRoute = null; shownChunks = emptySet(); geomKey = null
+        setNavigating(false); carLabel = null
+        (style?.getSource(SRC_CHEV) as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(emptyList()))
+        (style?.getSource(SRC_LABEL) as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(emptyList()))
         shownAlong = Double.NaN; shownBearing = Double.NaN; shownZoom = Double.NaN; shownPitch = Double.NaN
     }
 
@@ -623,6 +734,20 @@ class MapController(private val context: Context) {
         shownPitch = if (shownPitch.isNaN()) tweenPitch else shownPitch + (tweenPitch - shownPitch) * ease(dt, 0.8)
 
         updateCar(pos, shownBearing)
+        val st = style
+        if (st != null && off == null) {
+            val lane = ribbon
+            if (optChevrons && lane != null) {
+                // Chevrons glide forward at ~7 m/s on top of the car's own motion.
+                val phase = (SystemClock.uptimeMillis() / 1000.0 * 7.0) % CHEV_SPACING
+                val w = LaneRibbonBuilder.laneWidth(tweenRoute?.roadSpanAt(shownAlong)?.kind ?: RoadKind.URBAN)
+                (st.getSource(SRC_CHEV) as? GeoJsonSource)?.setGeoJsonSync(
+                    features(LaneRibbonBuilder.chevrons(lane, shownAlong, phase, spacing = CHEV_SPACING, laneWidth = w)))
+            }
+            val label = carLabel
+            if (label != null) (st.getSource(SRC_LABEL) as? GeoJsonSource)?.setGeoJsonSync(
+                Feature.fromGeometry(Point.fromLngLat(pos.lon, pos.lat)).apply { addStringProperty("t", label) })
+        }
         if (following) {
             val cam = CameraPosition.Builder()
                 .target(LatLng(pos.lat, pos.lon))
@@ -670,6 +795,37 @@ class MapController(private val context: Context) {
         return bmp
     }
 
+    /** Rounded square sign: blue "P" (parking, Zeichen 314), green lightning (charging), dark camera (webcam). */
+    private fun abPoiBitmap(kind: de.lanewise.core.model.AutobahnPoiKind): Bitmap {
+        val n = 72
+        val bmp = Bitmap.createBitmap(n, n, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val p = Paint(Paint.ANTI_ALIAS_FLAG)
+        p.color = 0xFFFFFFFF.toInt()
+        c.drawRoundRect(2f, 2f, n - 2f, n - 2f, 14f, 14f, p)
+        p.color = when (kind) {
+            de.lanewise.core.model.AutobahnPoiKind.PARKING -> 0xFF1A5DAD.toInt()
+            de.lanewise.core.model.AutobahnPoiKind.CHARGING -> 0xFF1E9E5A.toInt()
+            de.lanewise.core.model.AutobahnPoiKind.WEBCAM -> 0xFF2B2F38.toInt()
+        }
+        c.drawRoundRect(6f, 6f, n - 6f, n - 6f, 11f, 11f, p)
+        p.color = 0xFFFFFFFF.toInt()
+        when (kind) {
+            de.lanewise.core.model.AutobahnPoiKind.PARKING -> {
+                p.textSize = 50f; p.isFakeBoldText = true; p.textAlign = Paint.Align.CENTER
+                c.drawText("P", n / 2f, n / 2f + 18f, p)
+            }
+            de.lanewise.core.model.AutobahnPoiKind.CHARGING -> c.drawPath(Path().apply {
+                moveTo(40f, 12f); lineTo(20f, 40f); lineTo(34f, 40f); lineTo(30f, 60f); lineTo(52f, 30f); lineTo(38f, 30f); close()
+            }, p)
+            de.lanewise.core.model.AutobahnPoiKind.WEBCAM -> {
+                c.drawRoundRect(14f, 24f, 46f, 50f, 6f, 6f, p)
+                c.drawPath(Path().apply { moveTo(46f, 33f); lineTo(58f, 26f); lineTo(58f, 48f); lineTo(46f, 41f); close() }, p)
+            }
+        }
+        return bmp
+    }
+
     private fun pinBitmap(): Bitmap {
         val bmp = Bitmap.createBitmap(72, 96, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
@@ -700,6 +856,10 @@ class MapController(private val context: Context) {
         private const val ROAD_CHUNK = 1000.0
         private const val SRC_CAR = "lw-car"
         private const val SRC_CAR3D = "lw-car3d"
+        private const val SRC_CHEV = "lw-chevrons"
+        private const val SRC_LABEL = "lw-car-label"
+        private const val SRC_ABPOI = "lw-ab-poi"
+        private const val CHEV_SPACING = 11.0
         private const val SRC_DEST = "lw-dest"
         private const val SRC_INC = "lw-incidents"
         private const val SRC_FEAT = "lw-features"

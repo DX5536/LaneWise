@@ -293,9 +293,13 @@ fun ManeuverBanner(
     modifier: Modifier = Modifier, countdown: Float? = null, lanesBelow: Boolean = false,
     /** Left of the "Then" row, under the banner / lane bar (the next traffic light). */
     belowLeft: (@Composable () -> Unit)? = null,
+    /** Colour the banner like the German guide sign of the road after the manoeuvre (option). */
+    signColors: Boolean = false,
     below: @Composable () -> Unit = {},
 ) {
-    val c = LocalLaneColors.current
+    val base = LocalLaneColors.current
+    val sign = if (signColors) guideSign(step) else null
+    val c = if (sign == null) base else base.copy(banner = sign.first, bannerAccent = sign.second, onBanner = sign.third)
     val fill by androidx.compose.animation.core.animateFloatAsState(
         countdown?.coerceIn(0f, 1f) ?: 0f, androidx.compose.animation.core.tween(900, easing = androidx.compose.animation.core.LinearEasing),
         label = "countdown",
@@ -311,7 +315,7 @@ fun ManeuverBanner(
             Box(
                 Modifier.size(64.dp).clip(RoundedCornerShape(16.dp)).background(c.bannerAccent),
                 contentAlignment = Alignment.Center,
-            ) { if (step != null) ManeuverIcon(step, Color.White, Modifier.size(46.dp)) }
+            ) { if (step != null) ManeuverIcon(step, if (sign != null) c.onBanner else Color.White, Modifier.size(46.dp)) }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(distanceText, color = c.onBanner, fontSize = 32.sp, fontWeight = FontWeight.Bold)
@@ -464,5 +468,19 @@ fun SolidLineChip(label: String, distanceText: String, modifier: Modifier = Modi
             Text(label, color = c.onChip, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             Text(distanceText, color = c.onChip, fontSize = 13.sp)
         }
+    }
+}
+
+/**
+ * German guide-sign colours for the road after [step] (Baidu shows its banner like a Chinese road sign): blue with white
+ * text for an Autobahn (`ref` A …), yellow with black text for a Bundesstraße (B …). Null = the app's own colours.
+ * Returns (background, icon box, text).
+ */
+fun guideSign(step: RouteStep?): Triple<Color, Color, Color>? {
+    val ref = step?.ref?.split(';', ',')?.firstOrNull()?.trim()?.uppercase() ?: return null
+    return when {
+        Regex("""^A ?\d+""").containsMatchIn(ref) -> Triple(Color(0xFF1A5DAD), Color(0xFF0F427F), Color.White)
+        Regex("""^B ?\d+""").containsMatchIn(ref) -> Triple(Color(0xFFF7C600), Color(0xFFDDAA00), Color(0xFF111111))
+        else -> null
     }
 }

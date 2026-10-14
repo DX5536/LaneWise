@@ -1,6 +1,8 @@
 package de.lanewise.traffic
 
 import de.lanewise.core.geo.LatLon
+import de.lanewise.core.model.AutobahnPoi
+import de.lanewise.core.model.AutobahnPoiKind
 import de.lanewise.core.model.IncidentKind
 import de.lanewise.core.model.TrafficIncident
 import de.lanewise.core.net.Http
@@ -56,8 +58,7 @@ class AutobahnApiSource : TrafficSource {
         val root = Http.getJson("$BASE/$road/services/$service")
         return root[service].arr.orEmpty().mapNotNull { e ->
             val c = e["coordinate"]
-            val lat = c["lat"].str?.toDoubleOrNull() ?: c["lat"].dbl ?: return@mapNotNull null
-            val lon = c["long"].str?.toDoubleOrNull() ?: c["long"].dbl ?: return@mapNotNull null
+            val (lat, lon) = coordinate(c) ?: return@mapNotNull null
             val geom = e["geometry"]["coordinates"].arr.orEmpty().mapNotNull { p ->
                 val x = p[0].dbl; val y = p[1].dbl
                 if (x != null && y != null) LatLon(y, x) else null
@@ -82,14 +83,75 @@ class AutobahnApiSource : TrafficSource {
                 geometry = geom,
                 delaySeconds = e["delayTimeValue"].str?.toIntOrNull()?.times(60),
                 blocked = blocked,
+                laneOpen = laneOpen(e["impact"]["symbols"].arr.orEmpty().mapNotNull { it.str }),
+                active = !(e["future"].str.equals("true", ignoreCase = true) || e["future"].bool == true),
             )
         }
+    }
+
+    /** Rest/parking areas, EV charging stations and webcams on [roads] (Autobahn GmbH, no key). */
+    suspend fun pois(roads: Set<String>, kinds: Set<AutobahnPoiKind>): List<AutobahnPoi> = coroutineScope {
+        roads.flatMap { road ->
+            kinds.map { kind ->
+                async {
+                    runCatching {
+                        val svc = when (kind) {
+                            AutobahnPoiKind.WEBCAM -> "webcam"
+                            AutobahnPoiKind.PARKING -> "parking_lorry"
+                            AutobahnPoiKind.CHARGING -> "electric_charging_station"
+                        }
+                        Http.getJson("$BASE/$road/services/$svc")[svc].arr.orEmpty().mapNotNull { e ->
+                            val (lat, lon) = coordinate(e["coordinate"]) ?: return@mapNotNull null
+                            AutobahnPoi(
+                                id = "$svc:" + (e["identifier"].str ?: "$lat,$lon"), kind = kind,
+                                title = e["title"].str?.replace(" | undefined", "") ?: road,
+                                subtitle = listOfNotNull(e["subtitle"].str).plus(e["description"].arr.orEmpty()
+                                    .mapNotNull { it.str?.trim() }.filter { it.isNotBlank() }.take(3)).joinToString(" · "),
+                                position = LatLon(lat, lon),
+                            )
+                        }
+                    }.getOrDefault(emptyList())
+                }
+            }
+        }.awaitAll().flatten().distinctBy { it.id }
     }
 
     companion object {
         const val BASE = "https://verkehr.autobahn.de/o/autobahn"
         /** Motorways around Hannover: A2, A7, A37 (Messeschnellweg), A352, A39 (Braunschweig). */
         val HANNOVER_AUTOBAHNS = listOf("A2", "A7", "A37", "A352", "A39")
+
+        /** `{"lat": "52.1", "long": "9.7"}` or GeoJSON `{"type": "Point", "coordinates": [9.7, 52.1]}` → (lat, lon). */
+        private fun coordinate(c: kotlinx.serialization.json.JsonElement?): Pair<Double, Double>? {
+            if (c == null) return null
+            val lat = c["lat"].str?.toDoubleOrNull() ?: c["lat"].dbl
+            val lon = c["long"].str?.toDoubleOrNull() ?: c["long"].dbl
+            if (lat != null && lon != null) return lat to lon
+            val xy = c["coordinates"].arr ?: return null
+            val x = xy.getOrNull(0)?.dbl ?: return null
+            val y = xy.getOrNull(1)?.dbl ?: return null
+            return y to x
+        }
+
+        /**
+         * Lane picture of a roadworks entry (`impact.symbols`), e.g. `SEPARATE, ARROW_UP, ARROW_UP, CLOSED, BORDER_RIGHT,
+         * BREAKDOWN_LANE` → [open, open, closed]. The group after the last SEPARATE is the affected carriageway, left →
+         * right; everything from BORDER_RIGHT on is the hard shoulder. Null if no lane is closed, all lanes are closed
+         * (traffic moved to the other carriageway) or the picture cannot be read.
+         */
+        fun laneOpen(symbols: List<String>): List<Boolean>? {
+            if (symbols.isEmpty()) return null
+            val last = symbols.lastIndexOf("SEPARATE")
+            val group = symbols.drop(last + 1).takeWhile { it != "BORDER_RIGHT" }
+            val lanes = group.map {
+                when (it) {
+                    "ARROW_UP" -> true
+                    "CLOSED" -> false
+                    else -> return null
+                }
+            }
+            return lanes.takeIf { l -> l.size >= 2 && l.any { it } && l.any { !it } }
+        }
     }
 }
 

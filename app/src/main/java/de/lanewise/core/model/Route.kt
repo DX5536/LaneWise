@@ -128,7 +128,19 @@ data class TrafficIncident(
     val delaySeconds: Int? = null,
     /** True if the road is fully blocked. */
     val blocked: Boolean = false,
+    /**
+     * Lanes in the incident's driving direction, left → right, true = open (Autobahn GmbH `impact.symbols`); null if
+     * unknown or nothing is closed. Hard shoulders are not included.
+     */
+    val laneOpen: List<Boolean>? = null,
+    /** False for announced roadworks that have not started yet (Autobahn GmbH `future`). */
+    val active: Boolean = true,
 )
+
+/** Kinds of Autobahn GmbH points of interest shown as optional map icons. */
+enum class AutobahnPoiKind { WEBCAM, PARKING, CHARGING }
+
+data class AutobahnPoi(val id: String, val kind: AutobahnPoiKind, val title: String, val subtitle: String, val position: LatLon)
 
 /**
  * Point features from OpenStreetMap shown on the map and in the HUD.
