@@ -1,6 +1,8 @@
 package de.lanewise.osm
 
+import de.lanewise.core.geo.LatLon
 import de.lanewise.core.model.FeatureKind
+import de.lanewise.core.model.RoadFeature
 import de.lanewise.lane.RoadKind
 
 /** Helpers for interpreting OpenStreetMap tags with German conventions. */
@@ -47,6 +49,17 @@ object OsmTags {
             "node$area[\"railway\"=\"level_crossing\"];" +
             "node$area[\"traffic_sign\"~\"DE:20[56]\"];"
 
+    /** Feature with traffic-light details, or null if the node is not shown. */
+    fun feature(tags: Map<String, String>, position: LatLon, distanceAlong: Double): RoadFeature? {
+        val kind = featureKind(tags) ?: return null
+        return RoadFeature(
+            kind, position, distanceAlong,
+            pedestrian = kind == FeatureKind.TRAFFIC_SIGNALS && tags["crossing"] == "traffic_signals",
+            onDemand = tags["traffic_signals"] == "on_demand" || tags["button_operated"] == "only",
+            greenArrow = tags["red_turn:right"] == "yes" || tags["traffic_sign"].orEmpty().contains("DE:720"),
+        )
+    }
+
     /** Classify an OSM node's tags; null if it is not a feature LaneWise shows. */
     fun featureKind(tags: Map<String, String>): FeatureKind? {
         val hw = tags["highway"]
@@ -77,6 +90,19 @@ object OsmTags {
             "shared_lane" -> false
             else -> null
         }
+    }
+
+    /** Car lanes in travel direction ([forward] = along the OSM way), or null if not tagged. */
+    fun lanesInDirection(tags: Map<String, String>, forward: Boolean, oneway: Boolean): Int? {
+        val dir = if (forward) "forward" else "backward"
+        tags["lanes:$dir"]?.toIntOrNull()?.let { return it }
+        tags["turn:lanes:$dir"]?.let { return it.split('|').size }
+        if (oneway) {
+            tags["lanes"]?.toIntOrNull()?.let { return it }
+            tags["turn:lanes"]?.let { return it.split('|').size }
+            return null
+        }
+        return tags["lanes"]?.toIntOrNull()?.let { (it / 2).coerceAtLeast(1) }
     }
 
     const val NO_LIMIT = 0

@@ -92,7 +92,10 @@ data class Route(
     val features: List<RoadFeature> = emptyList(),
     /** On-street bike lanes on the right-hand side in driving direction. */
     val bikeLanes: List<BikeLaneSpan> = emptyList(),
+    /** Number of car lanes in driving direction, from OSM `lanes(:forward|:backward)` / `turn:lanes`. */
+    val laneCounts: List<LaneCountSpan> = emptyList(),
 ) {
+    fun laneCountAt(d: Double): Int? = laneCounts.firstOrNull { d >= it.from && d < it.to }?.count
     fun bikeLaneAt(d: Double): BikeLaneSpan? = bikeLanes.firstOrNull { d >= it.from && d < it.to }
     fun speedLimitAt(d: Double): SpeedLimitSpan? = speedLimits.firstOrNull { d >= it.from && d < it.to }
     fun roadSpanAt(d: Double): RoadSpan? = roadSpans.firstOrNull { d >= it.from && d < it.to }
@@ -121,10 +124,46 @@ data class TrafficIncident(
  */
 enum class FeatureKind { TRAFFIC_SIGNALS, STOP, GIVE_WAY, CROSSING, RAILWAY_CROSSING }
 
-data class RoadFeature(val kind: FeatureKind, val position: LatLon, val distanceAlong: Double)
+data class RoadFeature(
+    val kind: FeatureKind,
+    val position: LatLon,
+    val distanceAlong: Double,
+    /** Traffic light at a pedestrian/bike crossing (`crossing=traffic_signals`) rather than a junction light. */
+    val pedestrian: Boolean = false,
+    /** Push-button light (`traffic_signals=on_demand`). */
+    val onDemand: Boolean = false,
+    /** Green-arrow sign for turning right on red (Grünpfeil, Zeichen 720, OSM `red_turn:right=yes`). */
+    val greenArrow: Boolean = false,
+) {
+    /** Compact flag encoding for the offline graph (kind ordinal in the low nibble). */
+    fun encode(): Int = kind.ordinal or (if (pedestrian) 16 else 0) or (if (onDemand) 32 else 0) or (if (greenArrow) 64 else 0)
+
+    companion object {
+        fun decode(code: Int, position: LatLon, distanceAlong: Double) = RoadFeature(
+            FeatureKind.entries[code and 15], position, distanceAlong,
+            pedestrian = code and 16 != 0, onDemand = code and 32 != 0, greenArrow = code and 64 != 0,
+        )
+    }
+}
+
+/**
+ * Traffic lights of one junction as seen by the driver: how many signal positions OSM has there, of which kind,
+ * and whether a separate turn-arrow signal is likely (inferred from exclusive turn lanes — OSM has no tag for it).
+ */
+data class SignalCluster(
+    val distance: Double,
+    val vehicleLights: Int,
+    val pedestrianLights: Int,
+    val greenArrow: Boolean,
+    val onDemand: Boolean,
+    /** LaneDir bits of exclusive-turn lanes at this junction that probably have their own arrow signal (inferred). */
+    val inferredArrowSignals: Int,
+)
 
 /**
  * Painted bike lane next to the car lanes on the right in driving direction.
  * [exclusive] = Radfahrstreifen (solid line, Zeichen 237), false = Schutzstreifen / advisory or shared lane.
  */
+data class LaneCountSpan(val from: Double, val to: Double, val count: Int)
+
 data class BikeLaneSpan(val from: Double, val to: Double, val exclusive: Boolean)

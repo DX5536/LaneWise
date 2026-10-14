@@ -85,6 +85,8 @@ data class UiState(
     /** Speed limit of the current road while not navigating (km/h, 0 = no limit, null = unknown). */
     val browseLimit: Int? = null,
     val places: List<SavedPlace> = emptyList(),
+    /** Streets around the car with lane data, shown while not navigating. */
+    val nearbyStreets: List<de.lanewise.osm.OsmStreet> = emptyList(),
 ) {
     val selectedRoute get() = routes.getOrNull(selected)
 }
@@ -115,6 +117,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var speedFetchedUntil = 0.0
     private var browseLimitJob: Job? = null
     private var browseLimitAt: Fix? = null
+    private var streetsCenter: LatLon? = null
+    private var streetsJob: Job? = null
     private val laneGuidance = LaneGuidance()
     private var currentRoute: Route? = null
 
@@ -142,7 +146,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun onFix(fix: Fix) {
         _ui.update { it.copy(fix = fix) }
-        if (_ui.value.mode != Mode.NAVIGATING) { updateBrowseLimit(fix); return }
+        if (_ui.value.mode != Mode.NAVIGATING) { updateBrowseLimit(fix); updateNearbyStreets(fix.position); return }
         val e = engine ?: return
         val s = settings.value
         voice.setLanguage(s.language)
@@ -156,6 +160,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (snap.arrived) { stopNavigation(); _ui.update { it.copy(message = phrases.instruction(snap.route.steps.last())) }; return }
         if (snap.offRoute && !fix.simulated) reroute(fix)
         if (snap.route.provider != "offline" && snap.distanceAlong > speedFetchedUntil - 8_000) fetchCorridor(snap.route, snap.distanceAlong)
+    }
+
+    /** Lane-level street data around the car (refetched after moving 250 m), for the map when no route is active. */
+    private fun updateNearbyStreets(p: LatLon) {
+        val c = streetsCenter
+        if (c != null && Geo.distance(c, p) < 250) return
+        if (streetsJob?.isActive == true || !isOnline()) return
+        streetsCenter = p
+        streetsJob = viewModelScope.launch {
+            val streets = runCatching { de.lanewise.osm.StreetLanes.fetch(p) }.getOrNull()
+            if (streets == null) { streetsCenter = c; return@launch }   // retry on next fix
+            _ui.update { it.copy(nearbyStreets = streets) }
+        }
     }
 
     /** Speed limit of the road we are on while just driving (no route): offline graph, else Overpass. */
@@ -303,6 +320,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 else base.speedLimits,
                 features = (base.features.filter { it.distanceAlong < from } + data.features).sortedBy { it.distanceAlong },
                 bikeLanes = (base.bikeLanes.filter { it.to <= from } + data.bikeLanes).sortedBy { it.from },
+                laneCounts = (base.laneCounts.filter { it.to <= from } + data.laneCounts).sortedBy { it.from },
             )
             if (_ui.value.mode == Mode.NAVIGATING) {
                 engine = NavigationEngine(updated, laneGuidance).also { it.rehydrate(engine) }
@@ -318,7 +336,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 ?: return@launch
             val updated = route.copy(
                 speedLimits = if (route.provider == "osrm") data.limits else route.speedLimits,
-                features = data.features, bikeLanes = data.bikeLanes,
+                features = data.features, bikeLanes = data.bikeLanes, laneCounts = data.laneCounts,
             )
             _ui.update { st -> st.copy(routes = st.routes.map { if (it === route) updated else it }) }
         }

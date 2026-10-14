@@ -39,6 +39,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -139,6 +140,62 @@ fun FeatureChip(feature: RoadFeature, distanceText: String, modifier: Modifier =
     }
 }
 
+/**
+ * Next signalised junction: number of vehicle lights, pedestrian lights, Grünpfeil and the turn-arrow signals
+ * that are likely there (inferred from exclusive turn lanes; drawn faded with a dotted border).
+ */
+@Composable
+fun SignalChip(sig: de.lanewise.core.model.SignalCluster, distanceText: String, modifier: Modifier = Modifier) {
+    val c = LocalLaneColors.current
+    val light = remember { RoadSignArt.feature(de.lanewise.core.model.FeatureKind.TRAFFIC_SIGNALS, 96).asImageBitmap() }
+    val walker = remember { RoadSignArt.feature(de.lanewise.core.model.FeatureKind.CROSSING, 96).asImageBitmap() }
+    Column(
+        modifier.clip(RoundedCornerShape(14.dp)).background(c.chip.copy(alpha = 0.95f)).padding(horizontal = 8.dp, vertical = 5.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Image(light, null, Modifier.size(24.dp))
+            if (sig.vehicleLights > 1) Text("×${sig.vehicleLights}", color = c.onChip, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.width(6.dp))
+            Text(distanceText, color = c.onChip, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        }
+        if (sig.pedestrianLights > 0 || sig.greenArrow || sig.inferredArrowSignals != 0) {
+            Spacer(Modifier.height(3.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (sig.pedestrianLights > 0) {
+                    Image(walker, null, Modifier.size(18.dp))
+                    if (sig.pedestrianLights > 1) Text("×${sig.pedestrianLights}", color = c.onChip, fontSize = 11.sp)
+                }
+                if (sig.greenArrow) {
+                    // Grünpfeil sign (Zeichen 720): green arrow on black.
+                    Box(Modifier.size(18.dp).clip(RoundedCornerShape(3.dp)).background(Color.Black), contentAlignment = Alignment.Center) {
+                        Canvas(Modifier.size(14.dp)) {
+                            LaneArrows.draw(this, de.lanewise.lane.LaneDir.RIGHT, de.lanewise.lane.LaneDir.RIGHT,
+                                Color(0xFF27AE60), Color(0xFF27AE60), size.width * LaneArrows.SHAFT) { p -> Offset(p.x * size.width, p.y * size.height) }
+                        }
+                    }
+                }
+                listOf(de.lanewise.lane.LaneDir.LEFT, de.lanewise.lane.LaneDir.SLIGHT_LEFT, de.lanewise.lane.LaneDir.RIGHT,
+                    de.lanewise.lane.LaneDir.SLIGHT_RIGHT, de.lanewise.lane.LaneDir.UTURN)
+                    .filter { sig.inferredArrowSignals and it != 0 }.forEach { bit ->
+                        // Likely separate arrow signal head (inferred): faded, dotted outline.
+                        Box(
+                            Modifier.size(width = 14.dp, height = 22.dp).clip(RoundedCornerShape(4.dp)).background(Color(0xFF111111))
+                                .border(1.dp, c.onChip.copy(alpha = 0.4f), RoundedCornerShape(4.dp)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Canvas(Modifier.size(10.dp)) {
+                                LaneArrows.draw(this, bit, bit, Color(0xAA27AE60), Color(0xAA27AE60), size.width * LaneArrows.SHAFT) { p ->
+                                    Offset(p.x * size.width, p.y * size.height)
+                                }
+                            }
+                        }
+                    }
+            }
+        }
+    }
+}
+
 /** Shown while a painted bike lane runs next to the car lanes. */
 @Composable
 fun BikeLaneChip(exclusive: Boolean, color: Color, modifier: Modifier = Modifier) {
@@ -214,22 +271,45 @@ fun EtaBar(
             .padding(horizontal = 20.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        RoundAction("✕", onClose)
+        RoundAction(RoundIcon.CLOSE, onClose)
         Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(remainingText, color = c.onChip, fontSize = 26.sp, fontWeight = FontWeight.Bold)
             Text("$distanceText · $etaText", color = c.onChip.copy(alpha = 0.7f), fontSize = 15.sp)
         }
-        RoundAction("⤢", onOverview)
+        RoundAction(RoundIcon.OVERVIEW, onOverview)
     }
 }
 
+enum class RoundIcon { CLOSE, OVERVIEW }
+
+/** Round outlined button with a vector icon drawn exactly in the centre (text glyphs sit off-centre). */
 @Composable
-fun RoundAction(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun RoundAction(icon: RoundIcon, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val c = LocalLaneColors.current
     Box(
         modifier.size(48.dp).clip(CircleShape).border(1.5.dp, c.onChip.copy(alpha = 0.6f), CircleShape).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
-    ) { Text(label, color = c.onChip, fontSize = 20.sp) }
+    ) {
+        Canvas(Modifier.size(20.dp)) {
+            val w = size.width
+            val stroke = w * 0.1f
+            val col = c.onChip
+            when (icon) {
+                RoundIcon.CLOSE -> {
+                    drawLine(col, Offset(w * 0.15f, w * 0.15f), Offset(w * 0.85f, w * 0.85f), stroke, StrokeCap.Round)
+                    drawLine(col, Offset(w * 0.85f, w * 0.15f), Offset(w * 0.15f, w * 0.85f), stroke, StrokeCap.Round)
+                }
+                RoundIcon.OVERVIEW -> {
+                    // Four corner brackets: "show whole route".
+                    val a = w * 0.08f; val b = w * 0.36f; val e = w * 0.92f
+                    for ((x, y, dx, dy) in listOf(listOf(a, a, 1f, 1f), listOf(e, a, -1f, 1f), listOf(a, e, 1f, -1f), listOf(e, e, -1f, -1f))) {
+                        drawLine(col, Offset(x, y), Offset(x + dx * (b - a), y), stroke, StrokeCap.Round)
+                        drawLine(col, Offset(x, y), Offset(x, y + dy * (b - a)), stroke, StrokeCap.Round)
+                    }
+                }
+            }
+        }
+    }
 }
 
 /** Satellite status chip — shows that positioning works from GNSS alone. */

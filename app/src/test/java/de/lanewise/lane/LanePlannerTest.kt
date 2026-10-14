@@ -91,9 +91,31 @@ class LanePlannerTest {
         val b = site(500.0, listOf(S, S, R), R)
         val plan = LanePlanner().plan(listOf(a, b), LanePlanner.Options())
         assertEquals(1, plan[0].recommended)
-        assertArrayEquals(booleanArrayOf(false, true, false), plan[0].optimal)
+        // Both left-turn lanes avoid a later lane change (either may turn into the right lane); lane 1 is closer.
+        assertArrayEquals(booleanArrayOf(true, true, false), plan[0].optimal)
         assertEquals(2, plan[1].recommended)
-        assertEquals(-1, plan[1].changeFromPrevious)
+        // Free lane choice through the turn: turn left straight into the lane that becomes the right-turn lane.
+        assertEquals(0, plan[1].changeFromPrevious)
+    }
+
+    /**
+     * Owner's real case (Hannover, Celler Straße → Arndtstraße): turn right from a 3-lane approach
+     * (straight+right | straight | right), then 300 m later a left turn on a 2-lane road (left | straight).
+     * Turning right into the right lane and changing left later costs a lane change; LaneWise must advise
+     * turning straight into the left lane instead.
+     */
+    @Test
+    fun turnStraightIntoTheLaneNeededNext() {
+        val a = site(200.0, listOf(S or R, S, R), R, maneuver = true)
+        val b = site(500.0, listOf(L, S), L, maneuver = true)
+        val plan = LanePlanner().plan(listOf(a, b), LanePlanner.Options())
+        assertEquals(0, plan[1].recommended)
+        assertEquals(0, plan[1].changeFromPrevious)
+        assertEquals(b.lateral(0), plan[1].entryLateral)
+
+        // With the strict corresponding-lane rule a change after the turn is unavoidable.
+        val strict = LanePlanner().plan(listOf(a, b), LanePlanner.Options(freeTurnEntry = false))
+        assertEquals(1, kotlin.math.abs(strict[1].changeFromPrevious))
     }
 
     @Test

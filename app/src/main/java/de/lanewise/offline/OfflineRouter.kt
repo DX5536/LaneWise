@@ -254,18 +254,19 @@ class OfflineRouter(
         val pad = 0.001
         val minLat = line.points.minOf { it.lat } - pad; val maxLat = line.points.maxOf { it.lat } + pad
         val minLon = line.points.minOf { it.lon } - pad; val maxLon = line.points.maxOf { it.lon } + pad
-        val kinds = FeatureKind.entries
         val hits = ArrayList<RoadFeature>()
         for (i in g.featKind.indices) {
             val p = LatLon(g.featLat[i] / 1e7, g.featLon[i] / 1e7)
             if (p.lat !in minLat..maxLat || p.lon !in minLon..maxLon) continue
             val proj = line.project(p) ?: continue
             if (abs(proj.signedOffset) > 15) continue
-            hits += RoadFeature(kinds[g.featKind[i].toInt()], p, proj.distanceAlong)
+            hits += RoadFeature.decode(g.featKind[i].toInt(), p, proj.distanceAlong)
         }
         hits.sortBy { it.distanceAlong }
         val out = ArrayList<RoadFeature>()
-        for (f in hits) if (out.none { it.kind == f.kind && abs(it.distanceAlong - f.distanceAlong) < 30 }) out += f
+        for (f in hits) {
+            if (f.kind == FeatureKind.TRAFFIC_SIGNALS || out.none { it.kind == f.kind && abs(it.distanceAlong - f.distanceAlong) < 30 }) out += f
+        }
         return out
     }
 

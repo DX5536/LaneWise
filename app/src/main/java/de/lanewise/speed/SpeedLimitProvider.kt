@@ -5,6 +5,7 @@ import de.lanewise.core.geo.LatLon
 import de.lanewise.core.geo.Polyline
 import de.lanewise.core.model.BikeLaneSpan
 import de.lanewise.core.model.FeatureKind
+import de.lanewise.core.model.LaneCountSpan
 import de.lanewise.core.model.RoadFeature
 import de.lanewise.core.model.SpeedLimitSpan
 import de.lanewise.core.net.Overpass
@@ -25,6 +26,7 @@ data class CorridorData(
     val limits: List<SpeedLimitSpan>,
     val features: List<RoadFeature>,
     val bikeLanes: List<BikeLaneSpan>,
+    val laneCounts: List<LaneCountSpan> = emptyList(),
 )
 
 /**
@@ -52,6 +54,7 @@ class SpeedLimitProvider {
         val q = "[out:json][timeout:90];(" +
             "way(around:25,$c)[\"highway\"][~\"^maxspeed\"~\".\"];" +
             "way(around:25,$c)[\"highway\"][~\"^cycleway\"~\"lane\"];" +
+            "way(around:25,$c)[\"highway\"][~\"^(lanes|turn:lanes)\"~\".\"];" +
             OsmTags.featureNodeQuery("(around:20,$c)") +
             ");out tags geom;"
         val elements = Overpass.json(q)["elements"].arr.orEmpty()
@@ -65,10 +68,10 @@ class SpeedLimitProvider {
         val nodes = elements.filter { it["type"].str == "node" }.mapNotNull { el ->
             val la = el["lat"].dbl ?: return@mapNotNull null
             val lo = el["lon"].dbl ?: return@mapNotNull null
-            OsmTags.featureKind(tagsOf(el))?.let { it to LatLon(la, lo) }
+            OsmTags.feature(tagsOf(el), LatLon(la, lo), 0.0)
         }
-        val (limits, bikes) = matchWays(line, fromDist, toDist, ways)
-        CorridorData(limits, matchFeatures(line, fromDist, toDist, nodes), bikes)
+        val m = matchWays(line, fromDist, toDist, ways)
+        CorridorData(m.limits, matchFeatures(line, fromDist, toDist, nodes), m.bikes, m.lanes)
     }
 
     /**
@@ -85,26 +88,32 @@ class SpeedLimitProvider {
     private fun tagsOf(el: JsonElement): Map<String, String> =
         (el["tags"] as? JsonObject)?.mapValues { it.value.str.orEmpty() } ?: emptyMap()
 
-    private fun matchFeatures(line: Polyline, fromDist: Double, toDist: Double, nodes: List<Pair<FeatureKind, LatLon>>): List<RoadFeature> {
-        val hits = nodes.mapNotNull { (kind, p) ->
-            val proj = line.project(p) ?: return@mapNotNull null
+    private fun matchFeatures(line: Polyline, fromDist: Double, toDist: Double, nodes: List<RoadFeature>): List<RoadFeature> {
+        // Every signal position is kept (the HUD counts them per junction); other signs are de-duplicated.
+        val hits = nodes.mapNotNull { f ->
+            val proj = line.project(f.position) ?: return@mapNotNull null
             if (abs(proj.signedOffset) > 20 || proj.distanceAlong < fromDist || proj.distanceAlong > toDist) null
-            else RoadFeature(kind, p, proj.distanceAlong)
+            else f.copy(distanceAlong = proj.distanceAlong)
         }.sortedBy { it.distanceAlong }
-        // Dual carriageways and junctions often tag the same light several times: keep one per 30 m and kind.
         val out = ArrayList<RoadFeature>()
-        for (f in hits) if (out.none { it.kind == f.kind && abs(it.distanceAlong - f.distanceAlong) < 30 }) out += f
+        for (f in hits) {
+            if (f.kind == FeatureKind.TRAFFIC_SIGNALS || out.none { it.kind == f.kind && abs(it.distanceAlong - f.distanceAlong) < 30 }) out += f
+        }
         return out
     }
 
     /** Samples the route every 25 m, matches the nearest way in driving direction, and builds spans. */
-    private fun matchWays(line: Polyline, fromDist: Double, toDist: Double, ways: List<OsmWay>): Pair<List<SpeedLimitSpan>, List<BikeLaneSpan>> {
+    private class Matched(val limits: List<SpeedLimitSpan>, val bikes: List<BikeLaneSpan>, val lanes: List<LaneCountSpan>)
+
+    private fun matchWays(line: Polyline, fromDist: Double, toDist: Double, ways: List<OsmWay>): Matched {
         val step = 25.0
         val pad = 0.0004
         val limits = ArrayList<SpeedLimitSpan>()
         val bikes = ArrayList<BikeLaneSpan>()
         var limStart = fromDist; var limVal: Int? = Int.MIN_VALUE   // sentinel: unknown
         var bikeStart = fromDist; var bikeVal: Boolean? = null       // null = no bike lane
+        val laneSpans = ArrayList<LaneCountSpan>()
+        var laneStart = fromDist; var laneVal: Int? = null
 
         var d = fromDist
         while (d < toDist) {
@@ -114,6 +123,8 @@ class SpeedLimitProvider {
             var limitDist = 18.0
             var bike: Boolean? = null
             var bikeDist = 18.0
+            var lanes: Int? = null
+            var lanesDist = 18.0
             for (w in ways) {
                 if (p.lat < w.minLat - pad || p.lat > w.maxLat + pad || p.lon < w.minLon - pad || p.lon > w.maxLon + pad) continue
                 val proj = w.line.project(p) ?: continue
@@ -125,10 +136,16 @@ class SpeedLimitProvider {
                 val v = if (forward) w.maxFwd else w.maxBwd
                 if (v != OsmTags.UNKNOWN && off < limitDist) { limitDist = off; limit = if (v == OsmTags.NO_LIMIT) null else v }
                 if (off < bikeDist) { bikeDist = off; bike = OsmTags.bikeLaneRight(w.tags, forward, w.oneway) }
+                val n = OsmTags.lanesInDirection(w.tags, forward, w.oneway)
+                if (n != null && off < lanesDist) { lanesDist = off; lanes = n }
             }
             if (limit != limVal) {
                 if (limVal != Int.MIN_VALUE) limits += SpeedLimitSpan(limStart, d, limVal)
                 limStart = d; limVal = limit
+            }
+            if (lanes != laneVal) {
+                laneVal?.let { laneSpans += LaneCountSpan(laneStart, d, it) }
+                laneStart = d; laneVal = lanes
             }
             if (bike != bikeVal) {
                 bikeVal?.let { bikes += BikeLaneSpan(bikeStart, d, it) }
@@ -138,6 +155,7 @@ class SpeedLimitProvider {
         }
         if (limVal != Int.MIN_VALUE) limits += SpeedLimitSpan(limStart, toDist, limVal)
         bikeVal?.let { bikes += BikeLaneSpan(bikeStart, toDist, it) }
-        return limits to bikes
+        laneVal?.let { laneSpans += LaneCountSpan(laneStart, toDist, it) }
+        return Matched(limits, bikes, laneSpans)
     }
 }

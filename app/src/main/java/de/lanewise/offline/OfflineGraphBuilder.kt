@@ -100,7 +100,7 @@ class OfflineGraphBuilder {
         }
         r.endObject()
         if (type == "way" && nodeIds.size >= 2 && nodeIds.size == geom.size) acc.addWay(nodeIds, geom, tags)
-        if (type == "node" && !lat.isNaN() && !lon.isNaN()) OsmTags.featureKind(tags)?.let { acc.addFeature(lat, lon, it.ordinal) }
+        if (type == "node" && !lat.isNaN() && !lon.isNaN()) OsmTags.feature(tags, LatLon(lat, lon), 0.0)?.let { acc.addFeature(lat, lon, it.encode()) }
     }
 
     /** Growable primitive buffers so a city-sized network fits comfortably in memory. */

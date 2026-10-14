@@ -2,7 +2,10 @@ package de.lanewise.nav
 
 import de.lanewise.core.model.BikeLaneSpan
 import de.lanewise.core.model.ManeuverType
+import de.lanewise.core.model.FeatureKind
 import de.lanewise.core.model.RoadFeature
+import de.lanewise.core.model.SignalCluster
+import de.lanewise.lane.LaneDir
 import de.lanewise.core.model.Route
 import de.lanewise.core.model.RouteStep
 import de.lanewise.lane.LaneGuidance
@@ -33,8 +36,10 @@ data class NavSnapshot(
     val roadKind: RoadKind,
     val offRoute: Boolean,
     val arrived: Boolean,
-    /** Next traffic lights / signs within 400 m with their distance from the car. */
+    /** Next traffic lights / signs within 400 m with their distance from the car (one entry per junction). */
     val upcoming: List<Pair<RoadFeature, Double>> = emptyList(),
+    /** Traffic lights of the next signalised junction within 400 m. */
+    val signals: SignalCluster? = null,
     /** Painted bike lane next to the car lanes here (or within the next 50 m). */
     val bikeLane: BikeLaneSpan? = null,
 )
@@ -101,13 +106,32 @@ class NavigationEngine(
         val lanes = laneGuidance.update(route.laneSites, along, settings.avoidLaneChanges, settings.keepRight)
         val arrived = remaining < 25
 
-        val upcoming = route.features.asSequence()
-            .filter { it.distanceAlong > along - 5 && it.distanceAlong - along < 400 }
-            .take(2).map { it to (it.distanceAlong - along) }.toList()
+        val ahead = route.features.filter { it.distanceAlong > along - 5 && it.distanceAlong - along < 400 }
+        // One HUD entry per junction: signal positions within 50 m of each other count as one junction.
+        val grouped = ArrayList<RoadFeature>()
+        for (f in ahead) if (grouped.none { it.kind == f.kind && kotlin.math.abs(it.distanceAlong - f.distanceAlong) < 50 }) grouped += f
+        val upcoming = grouped.take(2).map { it to (it.distanceAlong - along) }
+        val signals = ahead.firstOrNull { it.kind == FeatureKind.TRAFFIC_SIGNALS }?.let { first ->
+            val group = ahead.filter { it.kind == FeatureKind.TRAFFIC_SIGNALS && it.distanceAlong - first.distanceAlong in 0.0..50.0 }
+            val site = route.laneSites.firstOrNull { kotlin.math.abs(it.distanceAlong - first.distanceAlong) < 60 }
+            // Exclusive turn lanes at a signalised German junction usually get their own arrow signal.
+            val exclusive = site?.lanes?.fold(0) { acc, m ->
+                val only = m != LaneDir.NONE && (m and LaneDir.STRAIGHT) == 0
+                if (only) acc or m else acc
+            } ?: 0
+            SignalCluster(
+                distance = first.distanceAlong - along,
+                vehicleLights = group.count { !it.pedestrian },
+                pedestrianLights = group.count { it.pedestrian },
+                greenArrow = group.any { it.greenArrow },
+                onDemand = group.isNotEmpty() && group.all { it.onDemand },
+                inferredArrowSignals = exclusive,
+            )
+        }
         val bike = route.bikeLaneAt(along) ?: route.bikeLaneAt(along + 50)
 
         val snap = NavSnapshot(route, fix, along, remaining, remainingSec, next, distNext, after, limit, noLimit,
-            status, lanes, kind, offRoute, arrived, upcoming, bike)
+            status, lanes, kind, offRoute, arrived, upcoming, signals, bike)
         return snap to announcements(snap, phrases)
     }
 

@@ -16,6 +16,21 @@ _Last updated: 2026-10-14 (initial scaffold)._
 - [x] App icon (option P: violet tile, extruded converging road slab, lime lane surface shifting lanes)
 - [x] GitHub Actions build (`.github/workflows/build.yml`)
 
+## Done (v0.2, 2026-10-14)
+- [x] Quicksand font, dark-mode text colours, centred icons, configurable junction close-up distance
+- [x] Traffic lights / stop / give way / zebra / railway crossings (OSM) on map + HUD chips; speed-limit sign top-left (also without route)
+- [x] On-street bike lanes (OSM `cycleway:*=lane`) as coloured strip, colour selectable
+- [x] App language DE / EN / VI (UI + voice)
+- [x] Home / Work / named favourites
+- [x] Lane rendering rewrite: smoothed centre line, tapered lane-count changes, OSM `lanes:forward/backward`,
+      polygons instead of wide lines, stop lines + painted arrows; per-frame tween of car + camera
+- [x] Overpass client with retries + 4 mirrors (public servers are often overloaded)
+- [x] Planner: free lane choice through turns (turn straight into the lane needed at the next junction;
+      owner's Celler Straße → Arndtstraße case is a unit test)
+- [x] Lanes + markings of all nearby streets when no route is active (only route lanes while navigating)
+- [x] Traffic-light details per junction: vehicle/pedestrian light count, push-button, Grünpfeil;
+      separate turn-arrow signals are *inferred* from exclusive turn lanes (OSM has no tag for signal heads)
+
 ## Not yet verified
 - [ ] **First CI build** — code was written without a local Android SDK; expect a round of compile fixes.
 - [ ] On-device test drive in Hannover (demo mode works without driving: preview → "Demo").

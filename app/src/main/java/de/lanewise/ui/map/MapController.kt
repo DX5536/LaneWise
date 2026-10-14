@@ -5,10 +5,11 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
+import android.os.SystemClock
+import android.view.Choreographer
 import de.lanewise.core.geo.Geo
 import de.lanewise.core.geo.LatLon
 import de.lanewise.core.model.FeatureKind
-import de.lanewise.core.model.IncidentKind
 import de.lanewise.core.model.RoadFeature
 import de.lanewise.core.model.Route
 import de.lanewise.core.model.TrafficIncident
@@ -25,6 +26,7 @@ import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.expressions.Expression
 import org.maplibre.android.style.layers.CircleLayer
+import org.maplibre.android.style.layers.FillLayer
 import org.maplibre.android.style.layers.Layer
 import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.Property
@@ -35,10 +37,13 @@ import org.maplibre.geojson.Feature
 import org.maplibre.geojson.FeatureCollection
 import org.maplibre.geojson.LineString
 import org.maplibre.geojson.Point
+import org.maplibre.geojson.Polygon
+import kotlin.math.abs
 
 /**
- * Owns the MapLibre map: style loading (light/dark), the 3D follow camera, route + lane layers,
- * the car puck and traffic incident markers.
+ * Owns the MapLibre map: style loading (light/dark), route + lane layers, traffic lights/signs, the car puck,
+ * and the 3D follow camera. Navigation updates arrive at GNSS rate (≈1–4 Hz); between them the car and the
+ * camera are tweened every display frame (Choreographer) along the route, so motion stays smooth.
  */
 class MapController(private val context: Context) {
     private var map: MapLibreMap? = null
@@ -52,6 +57,31 @@ class MapController(private val context: Context) {
     private var bikeColor: Int = 0xFFE5484D.toInt()
     private var lastFeatures: List<RoadFeature> = emptyList()
     private var featuresVisible = true
+
+    // --- tween state --------------------------------------------------------------------------------
+    private var tweenRoute: Route? = null
+    private var tweenFrom = 0.0
+    private var tweenTo = 0.0
+    private var tweenStart = 0L
+    private var tweenDuration = 1000L
+    private var lastSnapAt = 0L
+    private var shownAlong = Double.NaN
+    private var shownBearing = Double.NaN
+    private var shownZoom = Double.NaN
+    private var targetZoom = 17.6
+    private var tweenPitch = 60.0
+    private var tweenTopPad = 0.0
+    private var offRoutePos: LatLon? = null
+    private var offRouteBearing = 0.0
+    private var frameRunning = false
+    private val choreographer by lazy { Choreographer.getInstance() }
+    private val frame = object : Choreographer.FrameCallback {
+        override fun doFrame(frameTimeNanos: Long) {
+            if (tweenRoute == null && offRoutePos == null) { frameRunning = false; return }
+            stepTween()
+            choreographer.postFrameCallback(this)
+        }
+    }
 
     fun attach(view: MapView, darkMode: Boolean) {
         view.getMapAsync { m ->
@@ -118,25 +148,18 @@ class MapController(private val context: Context) {
                 Expression.stop(10, 4f), Expression.stop(18, 16f))),
             PropertyFactory.lineCap(Property.LINE_CAP_ROUND), PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
         ))
-        // Lane-level layers (metre-accurate widths via the "w" property).
-        val metres = metresToPixels()
-        add(LineLayer("lane-surface", SRC_LANES).withFilter(kind("SURFACE")).withProperties(
-            PropertyFactory.lineColor(if (isDark) "#1C1F27" else "#2B2F38"),
-            PropertyFactory.lineWidth(metres), PropertyFactory.lineOpacity(0.96f),
-            PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
+
+        // Lane-level geometry: polygons in real metres + thin lines.
+        fun fill(id: String, k: String, color: Int, opacity: Float) = add(FillLayer(id, SRC_LANES).withFilter(kind(k)).withProperties(
+            PropertyFactory.fillColor(color), PropertyFactory.fillOpacity(opacity), PropertyFactory.fillAntialias(true),
         ))
-        add(LineLayer("lane-bike", SRC_LANES).withFilter(kind("BIKE")).withProperties(
-            PropertyFactory.lineColor(bikeColor), PropertyFactory.lineOpacity(0.92f),
-            PropertyFactory.lineWidth(metres), PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
-        ))
-        add(LineLayer("lane-allowed", SRC_LANES).withFilter(kind("ALLOWED")).withProperties(
-            PropertyFactory.lineColor("#B8F33A"), PropertyFactory.lineOpacity(0.28f),
-            PropertyFactory.lineWidth(metres), PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
-        ))
-        add(LineLayer("lane-recommended", SRC_LANES).withFilter(kind("RECOMMENDED")).withProperties(
-            PropertyFactory.lineColor("#B8F33A"), PropertyFactory.lineOpacity(0.9f),
-            PropertyFactory.lineWidth(metres), PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
-            PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
+        fill("lane-surface", "SURFACE", if (isDark) 0xFF1C1F27.toInt() else 0xFF2B2F38.toInt(), 0.97f)
+        fill("lane-bike", "BIKE", bikeColor, 0.9f)
+        fill("lane-allowed", "ALLOWED", 0xFFB8F33A.toInt(), 0.28f)
+        fill("lane-recommended", "RECOMMENDED", 0xFFB8F33A.toInt(), 0.85f)
+        fill("lane-arrow", "ARROW", 0xFFFFFFFF.toInt(), 0.92f)
+        add(LineLayer("lane-stop", SRC_LANES).withFilter(kind("STOP")).withProperties(
+            PropertyFactory.lineColor("#FFFFFF"), PropertyFactory.lineWidth(metresToPixels()),
         ))
         add(LineLayer("lane-divider", SRC_LANES).withFilter(kind("DIVIDER")).withProperties(
             PropertyFactory.lineColor("#FFFFFF"),
@@ -144,10 +167,16 @@ class MapController(private val context: Context) {
                 Expression.stop(15, 0.6f), Expression.stop(20, 2.5f))),
             PropertyFactory.lineDasharray(arrayOf(4f, 4f)),
         ))
+        add(LineLayer("lane-divider-solid", SRC_LANES).withFilter(kind("DIVIDER_SOLID")).withProperties(
+            PropertyFactory.lineColor("#FFFFFF"),
+            PropertyFactory.lineWidth(Expression.interpolate(Expression.linear(), Expression.zoom(),
+                Expression.stop(15, 0.6f), Expression.stop(20, 2.5f))),
+        ))
         add(LineLayer("lane-edge", SRC_LANES).withFilter(kind("EDGE")).withProperties(
             PropertyFactory.lineColor(if (isDark) "#C9CDD8" else "#FFFFFF"),
             PropertyFactory.lineWidth(Expression.interpolate(Expression.linear(), Expression.zoom(),
                 Expression.stop(15, 0.8f), Expression.stop(20, 3f))),
+            PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
         ))
         s.addLayer(CircleLayer("incidents", SRC_INC).withProperties(
             PropertyFactory.circleRadius(7f),
@@ -206,7 +235,7 @@ class MapController(private val context: Context) {
             FeatureCollection.fromFeatures(alternatives.map { Feature.fromGeometry(line(it.geometry.points)) }))
         (s.getSource(SRC_DEST) as? GeoJsonSource)?.setGeoJson(
             FeatureCollection.fromFeatures(listOfNotNull(destination?.let { Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat)) })))
-        if (main == null) clearLanes()
+        if (main == null) stopTween()
     }
 
     /** Traffic lights and road signs along the route. */
@@ -221,7 +250,7 @@ class MapController(private val context: Context) {
 
     fun setBikeColor(argb: Int) {
         bikeColor = argb
-        (style?.getLayer("lane-bike") as? LineLayer)?.setProperties(PropertyFactory.lineColor(argb))
+        (style?.getLayer("lane-bike") as? FillLayer)?.setProperties(PropertyFactory.fillColor(argb))
     }
 
     fun showIncidents(list: List<TrafficIncident>) {
@@ -242,6 +271,19 @@ class MapController(private val context: Context) {
         m.animateCamera(CameraUpdateFactory.newLatLngBounds(b.build(), 80, topPx, 80, bottomPx), 800)
     }
 
+    /** Lane-level shapes (route lanes while navigating, all nearby streets otherwise). */
+    fun setLaneShapes(shapes: List<LaneRibbonBuilder.Shape>) {
+        val s = style ?: return
+        (s.getSource(SRC_LANES) as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(shapes.map { sh ->
+            val geom = if (sh.polygon) Polygon.fromLngLats(listOf(sh.points.map { Point.fromLngLat(it.lon, it.lat) }))
+            else line(sh.points)
+            Feature.fromGeometry(geom).apply {
+                addStringProperty("k", sh.kind.name)
+                addNumberProperty("w", sh.widthM)
+            }
+        }))
+    }
+
     fun clearLanes() {
         (style?.getSource(SRC_LANES) as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(emptyList()))
     }
@@ -252,62 +294,105 @@ class MapController(private val context: Context) {
             Feature.fromGeometry(Point.fromLngLat(position.lon, position.lat)).apply { addNumberProperty("bearing", bearing) })
     }
 
+    /**
+     * New navigation state (GNSS rate). Rebuilds the lane geometry and re-targets the tween; the car and
+     * camera then glide from where they are shown now to the new position over the time between fixes.
+     */
     fun updateNavigation(
         snap: NavSnapshot, showRibbons: Boolean, pitch: Float, topPaddingPx: Double,
         closeUpDistance: Double = 50.0, showBikeLanes: Boolean = true,
     ) {
         val s = style ?: return
+        val now = SystemClock.uptimeMillis()
+        val route = snap.route
         val along = snap.distanceAlong
-        val pos = if (snap.offRoute) snap.fix.position else snap.route.geometry.pointAt(along)
-        val bearing = if (snap.offRoute) (snap.fix.bearing?.toDouble() ?: 0.0) else snap.route.geometry.bearingAt(along + 8)
-        updateCar(pos, bearing)
 
-        if (kotlin.math.abs(pos.lat - lastLat) > 0.5) {
+        if (snap.offRoute) {
+            offRoutePos = snap.fix.position
+            offRouteBearing = snap.fix.bearing?.toDouble() ?: offRouteBearing
+            tweenRoute = null
+        } else {
+            offRoutePos = null
+            val jump = shownAlong.isNaN() || tweenRoute !== route || abs(along - shownAlong) > 300
+            if (jump) { shownAlong = along; tweenRoute = route }
+            tweenFrom = shownAlong
+            tweenTo = along
+            tweenStart = now
+            tweenDuration = (now - lastSnapAt).coerceIn(200L, 1500L)
+        }
+        lastSnapAt = now
+        tweenPitch = pitch.toDouble()
+        tweenTopPad = topPaddingPx
+        targetZoom = when {
+            snap.distanceToNextStep < closeUpDistance -> 18.4
+            snap.roadKind == RoadKind.MOTORWAY -> 16.6
+            snap.roadKind == RoadKind.TRUNK -> 17.0
+            snap.fix.speedKmh > 70 -> 17.0
+            else -> 17.6
+        }
+
+        val pos = route.geometry.pointAt(along)
+        if (abs(pos.lat - lastLat) > 0.5) {
             lastLat = pos.lat
-            listOf("lane-surface", "lane-allowed", "lane-recommended", "lane-bike").forEach {
-                (s.getLayer(it) as? LineLayer)?.setProperties(PropertyFactory.lineWidth(metresToPixels()))
-            }
+            (s.getLayer("lane-stop") as? LineLayer)?.setProperties(PropertyFactory.lineWidth(metresToPixels()))
         }
 
         if (showRibbons && !snap.offRoute) {
-            val lines = LaneRibbonBuilder.build(snap.route, snap.lanes, along, showBikeLanes = showBikeLanes)
-            (s.getSource(SRC_LANES) as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(lines.map { l ->
-                Feature.fromGeometry(line(l.points)).apply {
-                    addStringProperty("k", l.kind.name)
-                    addNumberProperty("w", l.widthM)
-                }
-            }))
+            setLaneShapes(LaneRibbonBuilder.build(route, snap.lanes, along, showBikeLanes = showBikeLanes))
         } else clearLanes()
 
+        if (!frameRunning) { frameRunning = true; choreographer.postFrameCallback(frame) }
+    }
+
+    fun stopTween() {
+        tweenRoute = null; offRoutePos = null
+        shownAlong = Double.NaN; shownBearing = Double.NaN; shownZoom = Double.NaN
+    }
+
+    /** One display frame: interpolate along the route, ease bearing and zoom, move car and camera. */
+    private fun stepTween() {
+        val m = map ?: return
+        val off = offRoutePos
+        val pos: LatLon
+        val targetBearing: Double
+        if (off != null) {
+            pos = off; targetBearing = offRouteBearing
+        } else {
+            val route = tweenRoute ?: return
+            val t = ((SystemClock.uptimeMillis() - tweenStart).toDouble() / tweenDuration).coerceIn(0.0, 1.0)
+            shownAlong = tweenFrom + (tweenTo - tweenFrom) * t
+            val line = route.geometry
+            pos = line.pointAt(shownAlong)
+            // Look-ahead bearing (≈25 m) so the camera turns before the car does and never jitters on short segments.
+            val ahead = line.pointAt(shownAlong + 25)
+            targetBearing = if (ahead == pos) shownBearing.takeUnless { it.isNaN() } ?: 0.0 else Geo.bearing(pos, ahead)
+        }
+        shownBearing = if (shownBearing.isNaN()) targetBearing
+        else (shownBearing + Geo.bearingDelta(shownBearing, targetBearing) * 0.12 + 360) % 360
+        shownZoom = if (shownZoom.isNaN()) targetZoom else shownZoom + (targetZoom - shownZoom) * 0.04
+
+        updateCar(pos, shownBearing)
         if (following) {
-            val m = map ?: return
-            val zoom = when {
-                snap.distanceToNextStep < closeUpDistance -> 18.4
-                snap.roadKind == RoadKind.MOTORWAY -> 16.6
-                snap.roadKind == RoadKind.TRUNK -> 17.0
-                snap.fix.speedKmh > 70 -> 17.0
-                else -> 17.6
-            }
             val cam = CameraPosition.Builder()
                 .target(LatLng(pos.lat, pos.lon))
-                .bearing(bearing)
-                .tilt(pitch.toDouble())
-                .zoom(zoom)
-                .padding(0.0, topPaddingPx, 0.0, 0.0)
+                .bearing(shownBearing)
+                .tilt(tweenPitch)
+                .zoom(shownZoom)
+                .padding(0.0, tweenTopPad, 0.0, 0.0)
                 .build()
-            m.easeCamera(CameraUpdateFactory.newCameraPosition(cam), 900)
+            m.moveCamera(CameraUpdateFactory.newCameraPosition(cam))
         }
     }
 
     fun followCar(position: LatLon, bearing: Double?, pitch: Float) {
         val m = map ?: return
+        stopTween()
         updateCar(position, bearing ?: 0.0)
         if (!following) return
         val builder = CameraPosition.Builder().target(LatLng(position.lat, position.lon))
             .zoom(16.0).tilt(if (bearing != null) pitch.toDouble() * 0.6 else 0.0)
         if (bearing != null) builder.bearing(bearing)
-        val cam = builder.build()
-        m.easeCamera(CameraUpdateFactory.newCameraPosition(cam), 900)
+        m.easeCamera(CameraUpdateFactory.newCameraPosition(builder.build()), 900)
     }
 
     private fun line(points: List<LatLon>) = LineString.fromLngLats(points.map { Point.fromLngLat(it.lon, it.lat) })

@@ -158,6 +158,8 @@ data class LaneAdvice(
     val optimal: BooleanArray,
     /** Lane changes needed between the previous site's recommended lane and this one (signed, + = to the left). */
     val changeFromPrevious: Int,
+    /** After a turn: lateral coordinate of the lane to turn into (null if the previous site was not a turn). */
+    val entryLateral: Int? = null,
 ) {
     override fun equals(other: Any?) = other is LaneAdvice && other.site == site &&
         other.recommended == recommended && other.allowed.contentEquals(allowed) &&

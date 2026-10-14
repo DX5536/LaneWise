@@ -117,6 +117,15 @@ fun MainScreen(vm: MainViewModel, ui: UiState, settings: AppSettings, dark: Bool
             if (ui.mode == Mode.PREVIEW && main != null) controller.overview(main, 420, 900)
         }
         LaunchedEffect(ui.incidents) { controller.showIncidents(ui.incidents) }
+        // Without an active route: lanes and markings of all nearby streets (like Petal / AMAP).
+        // While navigating only the route's lanes are drawn (updateNavigation).
+        LaunchedEffect(ui.nearbyStreets, ui.mode, settings.laneRibbonsOnMap, settings.showBikeLanes) {
+            if (ui.mode == Mode.NAVIGATING) return@LaunchedEffect
+            if (!settings.laneRibbonsOnMap) { controller.clearLanes(); return@LaunchedEffect }
+            val shapes = de.lanewise.osm.StreetLanes.build(ui.nearbyStreets)
+                .filter { settings.showBikeLanes || it.kind != de.lanewise.lane.LaneRibbonBuilder.Kind.BIKE }
+            controller.setLaneShapes(shapes)
+        }
         LaunchedEffect(ui.nav) {
             ui.nav?.let {
                 controller.updateNavigation(
@@ -422,11 +431,15 @@ private fun NavigationOverlay(
             val then = nav.stepAfter?.takeIf { next != null && it.distanceAlong - next.distanceAlong < 250 }
             Row(verticalAlignment = Alignment.Top) {
                 // Top left: speed limit sign (if known) above the upcoming traffic lights / signs.
-                if (nav.speedLimit != null || nav.noSpeedLimit || (settings.showSigns && nav.upcoming.isNotEmpty())) {
+                if (nav.speedLimit != null || nav.noSpeedLimit || (settings.showSigns && (nav.upcoming.isNotEmpty() || nav.signals != null))) {
                     Column(Modifier.padding(end = 8.dp), horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         SpeedLimitSign(nav.speedLimit, nav.noSpeedLimit)
-                        if (settings.showSigns) nav.upcoming.forEach { (f, d) -> FeatureChip(f, phrases.distance(d)) }
+                        if (settings.showSigns) {
+                            nav.signals?.let { de.lanewise.ui.hud.SignalChip(it, phrases.distance(it.distance)) }
+                            nav.upcoming.filter { it.first.kind != de.lanewise.core.model.FeatureKind.TRAFFIC_SIGNALS }
+                                .forEach { (f, d) -> FeatureChip(f, phrases.distance(d)) }
+                        }
                     }
                 }
                 ManeuverBanner(

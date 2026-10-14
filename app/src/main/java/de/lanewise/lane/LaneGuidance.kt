@@ -70,7 +70,8 @@ class LaneGuidance(private val planner: LanePlanner = LanePlanner()) {
             val nextSite = sites.firstOrNull { it.distanceAlong > passed.distanceAlong }
             assumedLateral = when {
                 advice == null -> null
-                nextSite != null -> planner.entryLateral(passed, advice.recommended, advice.allowed, nextSite)
+                nextSite != null -> lastPlan.firstOrNull { it.site == nextSite }?.entryLateral
+                    ?: planner.entryLateral(passed, advice.recommended, advice.allowed, nextSite)
                 passed.isManeuver -> null
                 else -> passed.lateral(advice.recommended)
             }
