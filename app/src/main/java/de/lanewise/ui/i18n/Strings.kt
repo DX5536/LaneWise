@@ -138,6 +138,7 @@ data class Strings(
     val voiceDownload: String,
     val voiceDownloading: String,
     val voiceInstalledClips: String,
+    val voiceTest: String,
 ) {
     fun feature(k: FeatureKind) = when (k) {
         FeatureKind.TRAFFIC_SIGNALS -> trafficLight
@@ -215,7 +216,7 @@ val DE = Strings(
     aerialLanes = "Spuren aus Luftbildern", aerialLanesSub = "Spuranzahl aus amtlichen Luftbildern erkannt – nur wo OSM keine Angabe hat oder abweicht.",
     voiceSystem = "Android-Stimme (Systemsprachausgabe)",
     voicePacksText = "OmniVoice-Stimmen sind am PC vorberechnet: natürlicher Klang, offline, ohne Verzögerung. Straßen außerhalb der Region Hannover spricht die Android-Stimme.",
-    voiceDownload = "Herunterladen", voiceDownloading = "Wird heruntergeladen", voiceInstalledClips = "Ansagen",
+    voiceDownload = "Herunterladen", voiceDownloading = "Wird heruntergeladen", voiceInstalledClips = "Ansagen", voiceTest = "Stimme testen",
 )
 
 val EN = Strings(
@@ -275,7 +276,7 @@ val EN = Strings(
     aerialLanes = "Lanes from aerial photos", aerialLanesSub = "Lane counts detected in official aerial photos – only where OSM has none or disagrees.",
     voiceSystem = "Android voice (system text-to-speech)",
     voicePacksText = "OmniVoice voices are pre-rendered on a PC: natural sound, offline, no delay. Streets outside the Hannover region use the Android voice.",
-    voiceDownload = "Download", voiceDownloading = "Downloading", voiceInstalledClips = "phrases",
+    voiceDownload = "Download", voiceDownloading = "Downloading", voiceInstalledClips = "phrases", voiceTest = "Test voice",
 )
 
 val VI = Strings(
@@ -335,5 +336,5 @@ val VI = Strings(
     aerialLanes = "Làn đường từ ảnh hàng không", aerialLanesSub = "Số làn nhận diện từ ảnh hàng không chính thức – chỉ khi OSM không có hoặc khác.",
     voiceSystem = "Giọng Android (đọc văn bản của hệ thống)",
     voicePacksText = "Giọng OmniVoice được tạo sẵn trên máy tính: tự nhiên, ngoại tuyến, không chờ. Đường ngoài vùng Hannover dùng giọng Android.",
-    voiceDownload = "Tải xuống", voiceDownloading = "Đang tải", voiceInstalledClips = "câu",
+    voiceDownload = "Tải xuống", voiceDownloading = "Đang tải", voiceInstalledClips = "câu", voiceTest = "Nghe thử",
 )

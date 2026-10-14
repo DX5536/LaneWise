@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -173,6 +174,7 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, ui: UiState, onBack: () ->
         Section(str.voice) {
             Toggle(str.voiceEnabled, null, s.voice) { v -> set { it.copy(voice = v) } }
             // Voice for the current app language: Android TTS or an OmniVoice pack (installed or downloadable).
+            androidx.compose.runtime.LaunchedEffect(Unit) { vm.reloadVoicePacks() }
             val langCode = de.lanewise.nav.VoiceInventory.code(s.language)
             val selectedIds = s.voicePacks.split(',').toSet()
             val installed = ui.voicePacks.filter { it.language == langCode }
@@ -181,6 +183,7 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, ui: UiState, onBack: () ->
             installed.forEach { p ->
                 Radio("${p.name} (${p.clipCount} ${str.voiceInstalledClips})", p.id in selectedIds) { vm.selectVoicePack(langCode, p.id) }
             }
+            OutlinedButton(onClick = vm::testVoice) { Text(str.voiceTest) }
             de.lanewise.nav.VoicePack.CATALOG.filter { a -> a.language == langCode && installed.none { it.id == a.id } }.forEach { a ->
                 val dl = ui.voiceDownload
                 Button(onClick = { vm.downloadVoicePack(a.id) }, enabled = dl == null) {

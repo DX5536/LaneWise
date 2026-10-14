@@ -442,6 +442,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _ui.update { it.copy(offlineGraphReady = graph != null) }
     }
 
+    /** Rescan installed packs (e.g. after `tools/voice_pack/04_push.py`). */
+    fun reloadVoicePacks() { viewModelScope.launch { refreshVoicePacks() } }
+
     private suspend fun refreshVoicePacks() {
         val packs = withContext(Dispatchers.IO) { de.lanewise.nav.VoicePack.installed(ctx) }
         _ui.update { it.copy(voicePacks = packs) }
@@ -458,6 +461,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val others = st.voicePacks.split(',').filter { it.isNotBlank() }
             .filter { pid -> _ui.value.voicePacks.firstOrNull { it.id == pid }?.language != language }
         st.copy(voicePacks = (others + listOfNotNull(id)).joinToString(","))
+    }
+
+    /** Plays a sample announcement with the selected voice (pack or Android TTS). */
+    fun testVoice() {
+        val s = settings.value
+        val p = Phrases(s.language)
+        val step = de.lanewise.core.model.RouteStep(0.0, 0.0, 0.0,
+            de.lanewise.core.model.Maneuver(de.lanewise.core.model.ManeuverType.TURN, de.lanewise.core.model.Modifier.RIGHT,
+                LatLon(0.0, 0.0), 0.0, 0.0), "Celler Straße", null, null, null)
+        val parts = p.spokenParts(step, 300.0)
+        voice.setLanguage(s.language)
+        voice.speak(de.lanewise.nav.Announcement("test-${System.currentTimeMillis()}", parts.joinToString(" "), 2, parts))
     }
 
     fun downloadVoicePack(id: String) {

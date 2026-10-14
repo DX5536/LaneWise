@@ -12,7 +12,7 @@ import zipfile
 import numpy as np
 import soundfile as sf
 
-from common import PACKS, REFS, SAMPLE_RATE, WORK, clip_name, ends_with_pause, normalize, segments
+from common import INVENTORY, PACKS, REFS, SAMPLE_RATE, WORK, clip_name, ends_with_pause, normalize, segments
 
 
 def trim(audio: np.ndarray, pause_after: bool) -> np.ndarray:
@@ -35,12 +35,27 @@ def trim(audio: np.ndarray, pause_after: bool) -> np.ndarray:
     return np.concatenate([pre, a, post])
 
 
+def test_subset(segs, lang):
+    """Fixed phrases, exit numbers and only the streets around Celler Straße / Hbf north (aerial test area)."""
+    fixed = {normalize(l) for l in (INVENTORY / f"{lang}.txt").read_text(encoding="utf-8").splitlines()}
+    fixed |= {str(n) for n in range(1, 100)}
+    roads = WORK.parent.parent / "aerial_lanes" / "work" / "roads_test.json"
+    near = {normalize(x) for x in ("Celler Straße", "Herschelstraße", "Arndtstraße", "Vahrenwalder Straße",
+                                   "Hamburger Allee", "Lister Meile", "L 190", "B 3", "A 2", "A 7")}
+    if roads.exists():
+        for r in json.loads(roads.read_text(encoding="utf-8")):
+            near |= {normalize(r["tags"][k]) for k in ("name", "ref") if r["tags"].get(k)}
+    return [(t, l) for t, l in segs if normalize(t) in fixed or normalize(t) in near]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pack", required=True, choices=sorted(PACKS))
     ap.add_argument("--limit", type=int, default=0, help="only the first N segments (to try things out)")
     ap.add_argument("--zip-only", action="store_true")
     ap.add_argument("--batch", type=int, default=8)
+    ap.add_argument("--test", action="store_true",
+                    help="fixed phrases + numbers + only the streets of the aerial-lanes test area (~10 min)")
     a = ap.parse_args()
     cfg = PACKS[a.pack]
     ref_wav, ref_txt = REFS / f"{a.pack}.wav", REFS / f"{a.pack}.txt"
@@ -49,6 +64,8 @@ def main():
     out = WORK / "packs" / a.pack
     out.mkdir(parents=True, exist_ok=True)
     segs = segments(a.pack)
+    if a.test:
+        segs = test_subset(segs, cfg["lang"])
     if a.limit:
         segs = segs[: a.limit]
 
