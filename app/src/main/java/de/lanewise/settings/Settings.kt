@@ -48,6 +48,8 @@ data class AppSettings(
     val overSpeedWarning: Boolean = true,
     /** Tolerance above the limit before the red border shows (km/h). */
     val overSpeedOffset: Int = 5,
+    /** Strength of the speed-warning glow around the screen (0.2 = faint … 2 = strong), owner's request. */
+    val speedGlow: Float = 1f,
     val underSpeedWarning: Boolean = false,
     /** How far below the limit counts as "too slow" (km/h); only above [underSpeedMinSpeed]. */
     val underSpeedOffset: Int = 20,
@@ -140,6 +142,7 @@ class SettingsRepository(private val context: Context) {
         val voicePacks = stringPreferencesKey("voice_packs")
         val over = booleanPreferencesKey("over_speed")
         val overOff = intPreferencesKey("over_speed_offset")
+        val speedGlow = floatPreferencesKey("speed_glow")
         val under = booleanPreferencesKey("under_speed")
         val underOff = intPreferencesKey("under_speed_offset")
         val underMin = intPreferencesKey("under_speed_min")
@@ -179,6 +182,7 @@ class SettingsRepository(private val context: Context) {
             voicePacks = p[K.voicePacks] ?: d.voicePacks,
             overSpeedWarning = p[K.over] ?: d.overSpeedWarning,
             overSpeedOffset = p[K.overOff] ?: d.overSpeedOffset,
+            speedGlow = p[K.speedGlow] ?: d.speedGlow,
             underSpeedWarning = p[K.under] ?: d.underSpeedWarning,
             underSpeedOffset = p[K.underOff] ?: d.underSpeedOffset,
             underSpeedMinSpeed = p[K.underMin] ?: d.underSpeedMinSpeed,
@@ -234,6 +238,7 @@ class SettingsRepository(private val context: Context) {
             p[K.voicePacks] = s.voicePacks
             p[K.over] = s.overSpeedWarning
             p[K.overOff] = s.overSpeedOffset
+            p[K.speedGlow] = s.speedGlow
             p[K.under] = s.underSpeedWarning
             p[K.underOff] = s.underSpeedOffset
             p[K.underMin] = s.underSpeedMinSpeed

@@ -62,7 +62,16 @@ object LaneRibbonBuilder {
         var junction = false     // inside a turn junction: only the connector of the turn lanes, no markings
         var left = 0.0           // offset of left carriageway edge (m, + = right of centre line)
         val right get() = left + lanes * w
-        fun at(off: Double) = Geo.destination(p, bearing + 90.0, off)
+        /** Curvature of the centre line (rad/m, + = turning right), smoothed. */
+        var kappa = 0.0
+
+        /**
+         * Point [off] metres right (+) / left (-) of the centre line. On the inside of a curve the offset is limited
+         * smoothly to 90 % of the curve radius: an offset larger than the radius would make the line loop back
+         * (those points used to be dropped, leaving 70–80° corners in edges and lane lines at tight turns — render
+         * audit KINK); now the inner side hugs a slightly tighter curve. Monotonic, so lines never cross.
+         */
+        fun at(off: Double) = Geo.destination(p, bearing + 90.0, limitedOffset(off, kappa))
     }
 
     /**
@@ -507,7 +516,44 @@ object LaneRibbonBuilder {
             val a = out[max(0, i - 4)].p; val b = out[min(out.size - 1, i + 4)].p
             out[i].bearing = if (a == b) 0.0 else Geo.bearing(a, b)
         }
+        // Curvature from headings ±6 samples (~4.5 m) apart, then averaged over ±8 samples.
+        val raw = DoubleArray(out.size) { i ->
+            val a = max(0, i - 6); val b = min(out.size - 1, i + 6)
+            val ds = out[b].d - out[a].d
+            if (ds < 1.0) 0.0 else Math.toRadians(Geo.bearingDelta(out[a].bearing, out[b].bearing)) / ds
+        }
+        for (i in out.indices) {
+            val a = max(0, i - 8); val b = min(out.size - 1, i + 8)
+            var sum = 0.0
+            for (k in a..b) sum += raw[k]
+            out[i].kappa = sum / (b - a + 1)
+        }
         return out
+    }
+
+    /** See [S.at]: inner-side offsets limited smoothly to 90 % of the radius 1/|[kappa]|. */
+    internal fun limitedOffset(off: Double, kappa: Double): Double {
+        if (abs(kappa) < 1e-4 || off == 0.0 || (off > 0) != (kappa > 0)) return off
+        val lim = 0.9 / abs(kappa)
+        val o = abs(off)
+        val knee = 0.6 * lim
+        val eff = if (o <= knee) o else knee + (lim - knee) * kotlin.math.tanh((o - knee) / (lim - knee))
+        return if (off > 0) eff else -eff
+    }
+
+    /**
+     * Lanes that carry on after the last junction with lane data before [d] (within 1.5 km), for road without OSM lane
+     * counts: the lanes going straight on when the route passes it, the lanes used for the turn when it turns there.
+     * Without it such a road dropped to the default (1 lane in town) right behind the stop line — "4 lanes, then all
+     * merge into 1" (owner) and most corner kinks of the render audit.
+     */
+    private fun carriedLanes(sites: List<LaneSite>, d: Double): Int? {
+        val prev = sites.lastOrNull { it.distanceAlong < d - 1 } ?: return null
+        if (d - prev.distanceAlong > 1500) return null
+        val turned = prev.isManeuver && prev.turn != LaneDir.STRAIGHT
+        val n = if (turned) prev.allowed().count { it }
+        else prev.lanes.count { LaneDir.permits(it, LaneDir.STRAIGHT) }
+        return n.takeIf { it > 0 }
     }
 
     private fun assignLanes(route: Route, samples: List<S>) {
@@ -532,7 +578,7 @@ object LaneRibbonBuilder {
                 }
                 next != null && next.distanceAlong - s.d < 500 ->
                     s.nominal = (next.laneCount - next.leftPockets() - next.rightPockets()).coerceAtLeast(1)
-                else -> s.nominal = defaultLanes(kind)
+                else -> s.nominal = carriedLanes(sites, s.d) ?: defaultLanes(kind)
             }
         }
         // Tapers: lanes appear before a change point and disappear after it, 15 m per lane (min 30 m).
@@ -571,19 +617,25 @@ object LaneRibbonBuilder {
             val n = (last - first + 1).toDouble()
             val i0 = samples.indexOfFirst { it.d >= site.distanceAlong - 1 }
             if (i0 < 0) continue
-            val j = junctionLength(route, site.distanceAlong)
+            // The second node of the same junction (dual carriageway, < 35 m on) is still inside the junction: the
+            // connector runs past it, so the lanes ending there do not step the new road's edge sideways right where
+            // the connector joins it (render audit: 76° kinks after turns).
+            val second = route.laneSites.filter { it.distanceAlong > site.distanceAlong && it.distanceAlong - site.distanceAlong < 35 }
+                .maxOfOrNull { it.distanceAlong - site.distanceAlong + 8 } ?: 0.0
+            val j = max(junctionLength(route, site.distanceAlong), second)
             val i1 = samples.indexOfLast { it.d <= site.distanceAlong + j }
             if (i1 <= i0 + 1 || i1 >= samples.size - 1) continue
             val s0 = samples[i0]
             val end = samples[i1 + 1]
             val startLeft = s0.left + first * s0.w
             val left = site.turn and LaneDir.ANY_LEFT != 0
-            val endLeft = if (left) end.left else end.right - n * end.w
+            val endLeft = end.left
             for (i in i0..i1) {
                 val s = samples[i]
                 val t = smooth((s.d - s0.d) / (end.d - s0.d))
                 s.junction = true
-                s.lanes = n
+                // Widens (or narrows) into the new road's lanes, so its edges continue the connector without a step.
+                s.lanes = n + (end.lanes - n) * t
                 s.leftPocketsT = 0.0; s.rightPocketsT = 0.0
                 s.w = s0.w + (end.w - s0.w) * t
                 s.left = startLeft + (endLeft - startLeft) * t
@@ -616,10 +668,14 @@ object LaneRibbonBuilder {
                     val t = 1 - (di - samples[j].d) / l
                     f[j] = max(f[j], a + (b - a) * smooth(t)); j--
                 }
-            } else if (!stepDown[i]) {
+            } else {
+                // Lanes ending at a stop line narrow across the junction box (a short funnel) instead of in one grid
+                // step: the 6 m step left a rectangular notch and 76° kinks in the edges (render audit).
+                val ll = if (stepDown[i]) max(18.0, 9.0 * (a - b)) else l
+                val d0 = if (stepDown[i]) samples[i - 1].d else di
                 var j = i
-                while (j < samples.size && samples[j].d - di < l) {
-                    val t = 1 - (samples[j].d - di) / l
+                while (j < samples.size && samples[j].d - d0 < ll) {
+                    val t = 1 - (samples[j].d - d0) / ll
                     f[j] = max(f[j], b + (a - b) * smooth(t)); j++
                 }
             }

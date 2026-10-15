@@ -72,6 +72,18 @@ class NavigationEngine(
         spoken += previous.spoken
     }
 
+    /**
+     * Demo scrubbed to route distance [d]: progress continues from there (also backwards), and announcements may be
+     * spoken again.
+     */
+    fun seek(d: Double) {
+        hint = route.geometry.segmentIndexAt(d)
+        lastAlong = d
+        offRouteCount = 0
+        spoken.clear()
+        laneGuidance.reset()
+    }
+
     fun update(fix: Fix, settings: AppSettings, phrases: Phrases): Pair<NavSnapshot, List<Announcement>> {
         val line = route.geometry
         val proj = line.project(fix.position, hint, 300) ?: line.project(fix.position)!!

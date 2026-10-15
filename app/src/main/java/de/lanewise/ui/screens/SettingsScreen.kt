@@ -56,6 +56,36 @@ import de.lanewise.settings.ThemeMode
 import de.lanewise.ui.MainViewModel
 import de.lanewise.ui.UiState
 import de.lanewise.ui.i18n.LocalStrings
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.DirectionsBike
+import androidx.compose.material.icons.rounded.AltRoute
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.BrightnessAuto
+import androidx.compose.material.icons.rounded.CloudOff
+import androidx.compose.material.icons.rounded.DarkMode
+import androidx.compose.material.icons.rounded.DirectionsCar
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.LightMode
+import androidx.compose.material.icons.rounded.Map
+import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.PhoneAndroid
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.RecordVoiceOver
+import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.Traffic
+import androidx.compose.material.icons.rounded.Translate
+import androidx.compose.material.icons.rounded.UploadFile
+import androidx.compose.material.icons.rounded.Warning
+import androidx.compose.material.icons.rounded.Route
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.graphics.vector.ImageVector
 
 @Composable
 fun SettingsScreen(vm: MainViewModel, s: AppSettings, ui: UiState, onBack: () -> Unit) {
@@ -75,29 +105,31 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, ui: UiState, onBack: () ->
         Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
             .windowInsetsPadding(WindowInsets.safeDrawing).padding(horizontal = 16.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack) { Text(str.back) }
-            Text(str.settings, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Row(Modifier.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, str.back) }
+            Text(str.settings, fontSize = 26.sp, fontWeight = FontWeight.Bold)
         }
         // Pinned live preview: every look option shows here at once, no demo needed.
         SettingsPreview(s, dark, str.preview)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
 
-        Section(str.language) {
-            AppLanguage.entries.forEach { l ->
-                Radio(when (l) {
-                    AppLanguage.GERMAN -> "Deutsch"
-                    AppLanguage.ENGLISH -> "English"
-                    AppLanguage.VIETNAMESE -> "Tiếng Việt"
-                }, s.language == l) { set { it.copy(language = l) } }
-            }
+        Section(str.language, Icons.Rounded.Translate) {
+            Segmented(AppLanguage.entries, s.language, { l ->
+                when (l) { AppLanguage.GERMAN -> "Deutsch"; AppLanguage.ENGLISH -> "English"; AppLanguage.VIETNAMESE -> "Tiếng Việt" }
+            }) { l -> set { it.copy(language = l) } }
         }
 
-        Section(str.appearance) {
-            ThemeMode.entries.forEach { m ->
-                Radio(when (m) { ThemeMode.AUTO -> str.themeAuto; ThemeMode.SYSTEM -> str.themeSystem; ThemeMode.LIGHT -> str.themeLight; ThemeMode.DARK -> str.themeDark },
-                    s.theme == m) { set { it.copy(theme = m) } }
-            }
+        Section(str.appearance, Icons.Rounded.Palette) {
+            Segmented(ThemeMode.entries, s.theme, { m ->
+                when (m) { ThemeMode.AUTO -> str.themeAuto.substringBefore(" ("); ThemeMode.SYSTEM -> str.themeSystem
+                    ThemeMode.LIGHT -> str.themeLight; ThemeMode.DARK -> str.themeDark }
+            }, icon = { m ->
+                when (m) { ThemeMode.AUTO -> Icons.Rounded.BrightnessAuto; ThemeMode.SYSTEM -> Icons.Rounded.PhoneAndroid
+                    ThemeMode.LIGHT -> Icons.Rounded.LightMode; ThemeMode.DARK -> Icons.Rounded.DarkMode }
+            }) { m -> set { it.copy(theme = m) } }
+            if (s.theme == ThemeMode.AUTO) Text(str.themeAuto, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp))
+            Spacer(Modifier.height(6.dp))
             Toggle(str.satellite, str.satelliteSub, s.satellite) { v -> set { it.copy(satellite = v) } }
             LabeledSlider(str.cameraPitch, s.mapPitch, 0f..70f, "${s.mapPitch.toInt()}°") { v -> set { it.copy(mapPitch = v) } }
             Toggle(str.car3d, str.car3dSub, s.car3d) { v -> set { it.copy(car3d = v) } }
@@ -106,13 +138,13 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, ui: UiState, onBack: () ->
             }
             Toggle(str.autoZoom, str.autoZoomSub, s.autoZoom) { v -> set { it.copy(autoZoom = v) } }
             if (!s.autoZoom) {
-                LabeledSlider(str.fixedZoom, s.fixedZoom, 15.5f..19f, "%.1f".format(s.fixedZoom), step = 0.1f) { v ->
+                LabeledSlider(str.fixedZoom, s.fixedZoom, 15.5f..21f, "%.1f".format(s.fixedZoom), step = 0.1f) { v ->
                     set { it.copy(fixedZoom = Math.round(v * 10) / 10f) }
                 }
             }
         }
 
-        Section(str.laneAssist) {
+        Section(str.laneAssist, Icons.Rounded.AltRoute) {
             Toggle(str.avoidChanges, str.avoidChangesSub, s.avoidLaneChanges) { v -> set { it.copy(avoidLaneChanges = v) } }
             Toggle(str.keepRight, str.keepRightSub, s.keepRight) { v -> set { it.copy(keepRight = v) } }
             Toggle(str.immersiveView, str.immersiveViewSub, s.immersiveView) { v -> set { it.copy(immersiveView = v) } }
@@ -133,15 +165,17 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, ui: UiState, onBack: () ->
             Text(str.laneReports, fontSize = 15.sp, modifier = Modifier.padding(top = 8.dp))
             Text(String.format(str.laneReportsSub, reports), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             OutlinedButton(onClick = { vm.laneReportShareIntent()?.let { context.startActivity(it) } }, enabled = reports > 0,
-                modifier = Modifier.padding(top = 4.dp)) { Text(str.shareReports) }
+                modifier = Modifier.padding(top = 4.dp)) { ButtonIcon(Icons.Rounded.Share); Text(str.shareReports) }
         }
 
-        Section(str.testDrive) {
+        Section(str.testDrive, Icons.Rounded.DirectionsCar) {
             Text(str.testDriveSub, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Button(onClick = { vm.startTestDrive(); onBack() }, modifier = Modifier.padding(top = 6.dp)) { Text(str.testDriveButton) }
+            Button(onClick = { vm.startTestDrive(); onBack() }, modifier = Modifier.padding(top = 6.dp)) {
+                ButtonIcon(Icons.Rounded.PlayArrow); Text(str.testDriveButton)
+            }
         }
 
-        Section(str.lookExtras) {
+        Section(str.lookExtras, Icons.Rounded.AutoAwesome) {
             Toggle(str.stripFade, str.stripFadeSub, s.stripFade) { v -> set { it.copy(stripFade = v) } }
             Toggle(str.laneChevrons, str.laneChevronsSub, s.laneChevrons) { v -> set { it.copy(laneChevrons = v) } }
             Toggle(str.signColors, str.signColorsSub, s.signColors) { v -> set { it.copy(signColors = v) } }
@@ -151,13 +185,13 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, ui: UiState, onBack: () ->
             Toggle(str.softBuildings, str.softBuildingsSub, s.softBuildings) { v -> set { it.copy(softBuildings = v) } }
         }
 
-        Section(str.abIcons) {
+        Section(str.abIcons, Icons.Rounded.Map) {
             Toggle(str.abParking, null, s.abParking) { v -> set { it.copy(abParking = v) } }
             Toggle(str.abCharging, null, s.abCharging) { v -> set { it.copy(abCharging = v) } }
             Toggle(str.abWebcams, str.abWebcamsSub, s.abWebcams) { v -> set { it.copy(abWebcams = v) } }
         }
 
-        Section(str.bikeLanes) {
+        Section(str.bikeLanes, Icons.AutoMirrored.Rounded.DirectionsBike) {
             Toggle(str.showBikeLanes, str.showBikeLanesSub, s.showBikeLanes) { v -> set { it.copy(showBikeLanes = v) } }
             Toggle(str.aerialLanes, str.aerialLanesSub, s.aerialLanes) { v -> set { it.copy(aerialLanes = v) } }
             Text(str.bikeLaneColor, fontSize = 14.sp)
@@ -174,19 +208,27 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, ui: UiState, onBack: () ->
             }
         }
 
-        Section(str.roadSigns) {
+        Section(str.roadSigns, Icons.Rounded.Warning) {
             Toggle(str.showSignsOnMap, str.showSignsSub, s.showSigns) { v -> set { it.copy(showSigns = v) } }
         }
 
-        Section(str.speed) {
+        Section(str.speed, Icons.Rounded.Speed) {
             Toggle(str.overSpeed, null, s.overSpeedWarning) { v -> set { it.copy(overSpeedWarning = v) } }
+            // Glow strength with a live sample of the warning border.
+            LabeledSlider(str.speedGlow, s.speedGlow, 0.2f..2f, "${(s.speedGlow * 100).toInt()} %", step = 0.05f) { v ->
+                set { it.copy(speedGlow = v) }
+            }
+            Box(Modifier.fillMaxWidth().height(64.dp).clip(RoundedCornerShape(14.dp))
+                .background(MaterialTheme.colorScheme.background)) {
+                de.lanewise.ui.hud.SpeedBorderOverlay(de.lanewise.nav.SpeedStatus.OVER, intensity = s.speedGlow)
+            }
             LabeledSlider(str.overTolerance, s.overSpeedOffset.toFloat(), 0f..25f, "+${s.overSpeedOffset} km/h") { v -> set { it.copy(overSpeedOffset = v.toInt()) } }
             Toggle(str.underSpeed, str.underSpeedSub, s.underSpeedWarning) { v -> set { it.copy(underSpeedWarning = v) } }
             LabeledSlider(str.underTolerance, s.underSpeedOffset.toFloat(), 5f..50f, "−${s.underSpeedOffset} km/h") { v -> set { it.copy(underSpeedOffset = v.toInt()) } }
             Toggle(str.overSound, null, s.overSpeedSound) { v -> set { it.copy(overSpeedSound = v) } }
         }
 
-        Section(str.routing) {
+        Section(str.routing, Icons.Rounded.Route) {
             RoutingSource.entries.forEach { r ->
                 Radio(when (r) {
                     RoutingSource.AUTO -> str.routingAuto
@@ -200,29 +242,31 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, ui: UiState, onBack: () ->
             Field(str.osrmServer, s.osrmUrl) { v -> set { it.copy(osrmUrl = v) } }
         }
 
-        Section(str.trafficData) {
+        Section(str.trafficData, Icons.Rounded.Traffic) {
             Toggle(str.autobahnApi, str.autobahnApiSub, s.useAutobahnApi) { v -> set { it.copy(useAutobahnApi = v) } }
             Field(str.tomtomKey, s.tomtomKey, secret = true) { v -> set { it.copy(tomtomKey = v) } }
             Field(str.hereKey, s.hereKey, secret = true) { v -> set { it.copy(hereKey = v) } }
             Field(str.mobilithekUrl, s.mobilithekUrl) { v -> set { it.copy(mobilithekUrl = v) } }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Button(onClick = { certPicker.launch(arrayOf("application/x-pkcs12", "application/octet-stream")) }) { Text(str.importCert) }
+                OutlinedButton(onClick = { certPicker.launch(arrayOf("application/x-pkcs12", "application/octet-stream")) }) {
+                    ButtonIcon(Icons.Rounded.UploadFile); Text(str.importCert)
+                }
                 Spacer(Modifier.padding(6.dp))
                 Text(if (vm.mobilithekCert().exists()) str.certPresent else str.certMissing, fontSize = 13.sp)
             }
             Field(str.certPassword, s.mobilithekCertPassword, secret = true) { v -> set { it.copy(mobilithekCertPassword = v) } }
         }
 
-        Section(str.offlineTitle) {
+        Section(str.offlineTitle, Icons.Rounded.CloudOff) {
             Text(str.offlineText, fontSize = 13.sp)
             OfflineGraphBuilder.REGIONS.forEach { r ->
                 Radio(r.name, s.offlineRegion == r.id) { set { it.copy(offlineRegion = r.id) } }
             }
-            Button(onClick = vm::downloadOfflineRegion, enabled = ui.offlineProgress == null) { Text(str.downloadRegion) }
+            Button(onClick = vm::downloadOfflineRegion, enabled = ui.offlineProgress == null) { ButtonIcon(Icons.Rounded.Download); Text(str.downloadRegion) }
             Text(ui.offlineProgress ?: if (ui.offlineGraphReady) str.offlineReady else str.offlineNone, fontSize = 13.sp)
         }
 
-        Section(str.voice) {
+        Section(str.voice, Icons.Rounded.RecordVoiceOver) {
             Toggle(str.voiceEnabled, null, s.voice) { v -> set { it.copy(voice = v) } }
             // Voice for the current app language: Android TTS or an OmniVoice pack (installed or downloadable).
             androidx.compose.runtime.LaunchedEffect(Unit) { vm.reloadVoicePacks() }
@@ -234,10 +278,11 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, ui: UiState, onBack: () ->
             installed.forEach { p ->
                 Radio("${p.name} (${p.clipCount} ${str.voiceInstalledClips})", p.id in selectedIds) { vm.selectVoicePack(langCode, p.id) }
             }
-            OutlinedButton(onClick = vm::testVoice) { Text(str.voiceTest) }
+            OutlinedButton(onClick = vm::testVoice) { ButtonIcon(Icons.Rounded.PlayArrow); Text(str.voiceTest) }
             de.lanewise.nav.VoicePack.CATALOG.filter { a -> a.language == langCode && installed.none { it.id == a.id } }.forEach { a ->
                 val dl = ui.voiceDownload
                 Button(onClick = { vm.downloadVoicePack(a.id) }, enabled = dl == null) {
+                    ButtonIcon(Icons.Rounded.Download)
                     Text(if (dl?.first == a.id) "${str.voiceDownloading} ${a.name}: ${dl.second} %" else "${str.voiceDownload}: ${a.name}")
                 }
             }
@@ -251,14 +296,44 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, ui: UiState, onBack: () ->
     }
 }
 
+/** A settings group: icon tile + title, then a rounded card (Material 3 / Android 16 settings style). */
 @Composable
-private fun Section(title: String, content: @Composable () -> Unit) {
-    Spacer(Modifier.height(16.dp))
-    Text(title, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-    Spacer(Modifier.height(6.dp))
+private fun Section(title: String, icon: ImageVector, content: @Composable () -> Unit) {
+    Spacer(Modifier.height(18.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier.size(30.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)),
+            contentAlignment = Alignment.Center,
+        ) { Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp)) }
+        Spacer(Modifier.width(10.dp))
+        Text(title, color = MaterialTheme.colorScheme.onBackground, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+    }
+    Spacer(Modifier.height(8.dp))
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(MaterialTheme.colorScheme.surface).padding(12.dp),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
     ) { content() }
+}
+
+/** Icon at the start of a button label. */
+@Composable
+private fun ButtonIcon(icon: ImageVector) {
+    Icon(icon, null, Modifier.size(18.dp))
+    Spacer(Modifier.width(8.dp))
+}
+
+/** Segmented single choice (language, theme) instead of a column of radio buttons. */
+@Composable
+private fun <T> Segmented(options: List<T>, selected: T, label: (T) -> String, icon: ((T) -> ImageVector)? = null, onSelect: (T) -> Unit) {
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+        options.forEachIndexed { i, o ->
+            SegmentedButton(
+                selected = o == selected, onClick = { onSelect(o) },
+                shape = SegmentedButtonDefaults.itemShape(i, options.size),
+                icon = { if (icon != null) Icon(icon(o), null, Modifier.size(18.dp)) else SegmentedButtonDefaults.Icon(o == selected) },
+            ) { Text(label(o), fontSize = 12.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
+        }
+    }
 }
 
 @Composable

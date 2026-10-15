@@ -110,7 +110,12 @@ object OsmTags {
         return v?.let { de.lanewise.lane.ChangeSpan.parse(it) }
     }
 
-    /** Car lanes in travel direction ([forward] = along the OSM way), or null if not tagged. */
+    /**
+     * Car lanes in travel direction ([forward] = along the OSM way), or null if not tagged.
+     * On a two-way street `lanes` counts both directions (OSM): `lanes=4` is 2 + 2, not 4 lanes for us. Lanes of the
+     * other direction and a shared centre lane (`lanes:both_ways`, e.g. a turn lane for both) are taken off when tagged:
+     * `lanes=3` + `lanes:backward=1` is 2 for us, `lanes=3` + `lanes:both_ways=1` is 1 per direction.
+     */
     fun lanesInDirection(tags: Map<String, String>, forward: Boolean, oneway: Boolean): Int? {
         val dir = if (forward) "forward" else "backward"
         tags["lanes:$dir"]?.toIntOrNull()?.let { return it }
@@ -120,7 +125,25 @@ object OsmTags {
             tags["turn:lanes"]?.let { return it.split('|').size }
             return null
         }
-        return tags["lanes"]?.toIntOrNull()?.let { (it / 2).coerceAtLeast(1) }
+        val total = tags["lanes"]?.substringBefore(';')?.trim()?.toIntOrNull() ?: return null
+        val both = tags["lanes:both_ways"]?.toIntOrNull() ?: 0
+        val otherDir = if (forward) "backward" else "forward"
+        val other = tags["lanes:$otherDir"]?.toIntOrNull() ?: tags["turn:lanes:$otherDir"]?.split('|')?.size
+        return if (other != null) (total - other - both).coerceAtLeast(1) else ((total - both) / 2).coerceAtLeast(1)
+    }
+
+    /**
+     * One-way direction of a way: 1 = one-way along the way, -1 = one-way against it (`oneway=-1`), 0 = two-way.
+     * `oneway=yes|true|1`, and implied for motorways, motorway links and roundabouts (unless `oneway=no`).
+     */
+    fun onewayDir(tags: Map<String, String>): Int {
+        when (tags["oneway"]) {
+            "yes", "true", "1" -> return 1
+            "-1", "reverse" -> return -1
+            "no", "false", "0" -> return 0
+        }
+        val hw = tags["highway"].orEmpty()
+        return if (hw == "motorway" || hw == "motorway_link" || tags["junction"] == "roundabout" || tags["junction"] == "circular") 1 else 0
     }
 
     const val NO_LIMIT = 0

@@ -1,6 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="432" height="432" viewBox="0 0 108 108">
   <title>LaneWise</title>
   <rect width="108" height="108" rx="24" fill="#6C4CF5"/>
+  <!-- Same placement as the app icon: scaled 0.74 about (54, 57), then moved up 5.5 and left 1.5 to sit centred. -->
+  <g transform="translate(-1.5 -5.5) translate(54 57) scale(0.74) translate(-54 -57)">
   <path fill="#4A33B8" opacity="0.6" d="M18,86 L98,86 L98,96 L18,96 Z"/>
   <path fill="#0B0C10" d="M14,80 L94,80 L94,91 L14,91 Z"/>
   <path fill="#15171D" d="M94,80 L66,24 L66,30 L94,91 Z"/>
@@ -10,4 +12,5 @@
   <path stroke="#FFFFFF" stroke-width="1.8" d="M42,24 L14,80 M66,24 L94,80"/>
   <circle cx="80.7" cy="74" r="5.5" fill="#FFFFFF"/>
   <circle cx="80.7" cy="74" r="3" fill="#6C4CF5"/>
+  </g>
 </svg>

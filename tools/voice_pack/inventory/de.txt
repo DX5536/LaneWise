@@ -233,6 +233,7 @@ Im Kreisverkehr die 8. Ausfahrt nehmen
 Im Kreisverkehr die 8. Ausfahrt nehmen auf
 Kreisverkehr verlassen
 Kreisverkehr verlassen auf
+Sie haben Ihren Zwischenstopp erreicht
 Richtung
 Wechseln Sie 4 Spuren nach rechts auf die linke Spur
 Wechseln Sie 3 Spuren nach rechts auf die linke Spur

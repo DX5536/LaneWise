@@ -7,7 +7,9 @@ import de.lanewise.lane.RoadKind
 
 enum class ManeuverType {
     DEPART, ARRIVE, TURN, CONTINUE, NEW_NAME, MERGE, ON_RAMP, OFF_RAMP, FORK, END_OF_ROAD,
-    ROUNDABOUT, EXIT_ROUNDABOUT, NOTIFICATION;
+    ROUNDABOUT, EXIT_ROUNDABOUT, NOTIFICATION,
+    /** A stop on the way reached (end of a route leg that is not the last one). */
+    WAYPOINT;
 
     companion object {
         fun fromOsrm(type: String): ManeuverType = when (type) {

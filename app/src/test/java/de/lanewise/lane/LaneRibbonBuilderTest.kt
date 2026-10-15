@@ -58,11 +58,12 @@ class LaneRibbonBuilderTest {
         val r = route(listOf(a), 1)
         val state = LaneGuidance().update(r.laneSites, 100.0, avoidLaneChanges = true, keepRight = false)
         val surface = LaneRibbonBuilder.buildRoad(r, 0.0, 1000.0).first { it.kind == LaneRibbonBuilder.Kind.SURFACE }
-        // Width of the surface 10 m after the junction: one lane (+0.6 m margin), not still tapering from two.
-        val p = Geo.destination(r.geometry.points.first(), 0.0, 410.0)
+        // The ending lane narrows across the junction box (a short funnel, no notch) and is gone 20 m after the stop
+        // line: one lane (+0.6 m margin), not still tapering from two along the next road.
+        val p = Geo.destination(r.geometry.points.first(), 0.0, 420.0)
         val widths = surface.points.mapNotNull { q ->
             val pr = r.geometry.project(q) ?: return@mapNotNull null
-            if (abs(pr.distanceAlong - 410.0) < 3) abs(pr.signedOffset) else null
+            if (abs(pr.distanceAlong - 420.0) < 3) abs(pr.signedOffset) else null
         }
         assertTrue("no surface points near 410 m (${p})", widths.isNotEmpty())
         assertTrue("road still ${widths.max() * 2} m wide after the junction", widths.max() < 2.2)

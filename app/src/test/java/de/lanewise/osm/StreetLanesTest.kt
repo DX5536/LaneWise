@@ -9,6 +9,23 @@ import org.junit.Test
 
 class StreetLanesTest {
 
+    /** Owner: "OSM says 4 lanes but it is 2 in my direction": `lanes` on a two-way street counts both directions. */
+    @Test
+    fun lanesInTravelDirection() {
+        fun n(vararg kv: Pair<String, String>, forward: Boolean = true) =
+            OsmTags.lanesInDirection(mapOf(*kv), forward, OsmTags.onewayDir(mapOf(*kv)) != 0)
+        org.junit.Assert.assertEquals(2, n("lanes" to "4"))
+        org.junit.Assert.assertEquals(4, n("lanes" to "4", "oneway" to "yes"))
+        org.junit.Assert.assertEquals(2, n("lanes" to "3", "lanes:backward" to "1"))
+        org.junit.Assert.assertEquals(1, n("lanes" to "3", "lanes:backward" to "1", forward = false))
+        org.junit.Assert.assertEquals(1, n("lanes" to "3", "lanes:both_ways" to "1"))
+        org.junit.Assert.assertEquals(3, n("lanes" to "5", "turn:lanes:backward" to "left|through"))
+        org.junit.Assert.assertEquals(2, n("lanes" to "2", "oneway" to "-1"))
+        org.junit.Assert.assertEquals(2, n("lanes" to "2", "highway" to "motorway"))
+        org.junit.Assert.assertEquals(1, n("lanes" to "2", "highway" to "motorway", "oneway" to "no"))
+        org.junit.Assert.assertEquals(-1, OsmTags.onewayDir(mapOf("oneway" to "-1")))
+    }
+
     private val c = LatLon(52.38, 9.74)
     private fun p(northM: Double, eastM: Double) = Geo.destination(Geo.destination(c, 0.0, northM), 90.0, eastM)
 

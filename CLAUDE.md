@@ -47,7 +47,7 @@ See `docs/ARCHITECTURE.md`. Core lane logic: `app/src/main/java/de/lanewise/lane
 - Never push for the owner — they review and push themselves.
 
 ## Status
-See `docs/ROADMAP.md` (v0.4.3, 2026-10-15). Builds locally, runs on the owner's phone (Samsung S24 Ultra,
+See `docs/ROADMAP.md` (v0.4.4, 2026-10-15). Builds locally, runs on the owner's phone (Samsung S24 Ultra,
 Android 16, package `de.lanewise.app.debug`); the CI build/release APK is the owner's job.
 
 ## Things learned (read before changing these areas)

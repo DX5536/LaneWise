@@ -73,7 +73,7 @@ object StreetLanes {
     /** Lateral layout of one street (m, + = right of the way direction). */
     private class Layout(t: Map<String, String>) {
         val hw = t["highway"].orEmpty()
-        val oneway = t["oneway"] == "yes" || hw == "motorway" || hw == "motorway_link" || t["junction"] == "roundabout"
+        val oneway = OsmTags.onewayDir(t) != 0
         val minor = hw == "residential" || hw == "living_street" || hw == "unclassified"
         val fwd = OsmTags.lanesInDirection(t, true, oneway) ?: 1
         val bwd = if (oneway) 0 else OsmTags.lanesInDirection(t, false, false) ?: 1

@@ -81,6 +81,7 @@ data class UiState(
     val simulating: Boolean = false,
     /** Demo playback speed (×1 = real driving time). */
     val demoSpeed: Double = 1.0,
+    val demoPaused: Boolean = false,
     val message: String? = null,
     val incidents: List<TrafficIncident> = emptyList(),
     val offlineGraphReady: Boolean = false,
@@ -98,6 +99,14 @@ data class UiState(
     val nearbyStreets: List<de.lanewise.osm.OsmStreet> = emptyList(),
     /** Start of the route when not the current position (route preview "From"); null = GPS position. */
     val origin: Place? = null,
+    /** Stops on the way, in driving order (route preview "Add stop"). */
+    val stops: List<Place> = emptyList(),
+    /** Add-stop search: places (plain search) or candidates along the route (smart), and whether it is running. */
+    val stopPlaces: List<Place> = emptyList(),
+    val stopCandidates: List<de.lanewise.search.StopCandidate> = emptyList(),
+    val stopSearching: Boolean? = null,
+    /** Load of the search / routing servers (dot in "Add stop"); null = not checked yet. */
+    val serverHealth: de.lanewise.core.net.Health? = null,
     /** Metres driven on earlier routes of this journey (re-routes), so the journey progress bar keeps counting. */
     val journeyDriven: Double = 0.0,
     val originResults: List<Place> = emptyList(),
@@ -274,6 +283,84 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Swap start and destination (route preview ⇅). Starting from the GPS position, the position becomes the
+     * destination. The stops are driven in reverse order.
+     */
+    fun swapEnds() {
+        val st = _ui.value
+        val dest = st.destination ?: return
+        val from = st.origin ?: st.fix?.position?.let { Place(strings.myPosition, "", it) }
+            ?: run { _ui.update { it.copy(message = strings.waitingForGps) }; return }
+        _ui.update { it.copy(origin = dest, destination = from, query = from.title, stops = it.stops.reversed()) }
+        computeRoutes()
+    }
+
+    private var stopJob: Job? = null
+
+    /**
+     * Add-stop search. [smart]: places matching a name / brand / category along the selected route, ranked by the time
+     * they add ([de.lanewise.search.StopFinder]); else a normal address / place search.
+     */
+    fun onStopQuery(q: String, smart: Boolean) {
+        stopJob?.cancel()
+        if (q.trim().length < 2) { _ui.update { it.copy(stopPlaces = emptyList(), stopCandidates = emptyList(), stopSearching = null) }; return }
+        stopJob = viewModelScope.launch {
+            delay(if (smart) 700 else 350)
+            _ui.update { it.copy(stopSearching = true) }
+            val st = _ui.value
+            val route = st.selectedRoute
+            if (smart && route != null) {
+                val from = st.origin?.position ?: route.geometry.points.first()
+                val to = st.destination?.position ?: route.geometry.points.last()
+                val osrm = OsrmRoutingProvider(settings.value.osrmUrl)
+                val res = runCatching {
+                    de.lanewise.search.StopFinder { pts -> osrm.durations(pts) }
+                        .find(q, route.geometry, listOf(from) + st.stops.map { it.position } + to)
+                }
+                _ui.update { it.copy(stopCandidates = res.getOrDefault(emptyList()), stopPlaces = emptyList(), stopSearching = false,
+                    message = res.exceptionOrNull()?.let { e -> "${strings.searchFailed}: ${e.message}" }) }
+            } else {
+                val res = runCatching { geocoder.search(q, st.fix?.position ?: st.destination?.position) }
+                _ui.update { it.copy(stopPlaces = res.getOrDefault(emptyList()), stopCandidates = emptyList(), stopSearching = false,
+                    message = res.exceptionOrNull()?.let { e -> "${strings.searchFailed}: ${e.message}" }) }
+            }
+        }
+    }
+
+    /** Add [place] as a stop: at [insertAt] (smart: the leg where it adds least), else as the last stop. */
+    fun addStop(place: Place, insertAt: Int? = null) {
+        stopJob?.cancel()
+        _ui.update { st ->
+            val i = (insertAt ?: st.stops.size).coerceIn(0, st.stops.size)
+            st.copy(stops = st.stops.toMutableList().apply { add(i, place) }, stopPlaces = emptyList(),
+                stopCandidates = emptyList(), stopSearching = null)
+        }
+        computeRoutes()
+    }
+
+    fun removeStop(index: Int) {
+        _ui.update { st -> st.copy(stops = st.stops.filterIndexed { i, _ -> i != index }) }
+        computeRoutes()
+    }
+
+    private var healthJob: Job? = null
+
+    /** Checks how busy the search and routing servers are (offline = unreachable). Skipped while a check runs. */
+    fun probeServers() {
+        if (healthJob?.isActive == true) return
+        healthJob = viewModelScope.launch {
+            if (!isOnline()) { _ui.update { it.copy(serverHealth = de.lanewise.core.net.Health.DOWN) }; return@launch }
+            val r = runCatching { de.lanewise.core.net.ServerHealth.probe(settings.value.osrmUrl) }.getOrNull()
+            _ui.update { it.copy(serverHealth = r?.overall ?: de.lanewise.core.net.Health.DOWN) }
+        }
+    }
+
+    fun clearStopSearch() {
+        stopJob?.cancel()
+        _ui.update { it.copy(stopPlaces = emptyList(), stopCandidates = emptyList(), stopSearching = null) }
+    }
+
     /** Route from [place] instead of the current position; null = back to the GPS position. Recomputes the routes. */
     fun chooseOrigin(place: Place?) {
         _ui.update { it.copy(origin = place, originResults = emptyList(), originSearching = null) }
@@ -311,20 +398,31 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun chooseDestination(p: LatLon) = chooseDestination(Place(strings.markedPlace, String.format(java.util.Locale.US, "%.5f, %.5f", p.lat, p.lon), p))
 
     // --- saved places ---------------------------------------------------------------------------
-    fun goTo(place: SavedPlace) = chooseDestination(Place(place.name, place.address, LatLon(place.lat, place.lon)))
+    fun goTo(place: SavedPlace) = chooseDestination(place.asPlace())
 
-    fun savePlace(kind: PlaceKind, name: String, place: Place) {
+    fun savePlace(kind: PlaceKind, name: String, place: Place, icon: String? = null, color: Long? = null) {
         viewModelScope.launch {
-            placesRepo.save(SavedPlace(kind = kind, name = name.ifBlank { place.title },
-                address = place.subtitle.ifBlank { place.title }, lat = place.position.lat, lon = place.position.lon))
+            // Address: street and city; for a named place (restaurant) its name and street, so "Pizzeria (Mum's
+            // favourite)" keeps both.
+            val address = listOf(place.title, place.subtitle).filter { it.isNotBlank() }.distinct().joinToString(", ")
+            placesRepo.save(SavedPlace(kind = kind, name = name.ifBlank { place.title }, address = address,
+                lat = place.position.lat, lon = place.position.lon, icon = icon, color = color, category = place.category))
         }
     }
+
+    /** Saved place at [p] (within 40 m), for the star / home / work badge on search results. */
+    fun savedAt(p: LatLon): SavedPlace? =
+        _ui.value.places.firstOrNull { Geo.distance(LatLon(it.lat, it.lon), p) < 40 }
+
+    /** A saved place as a search result (start, stop or destination preset). */
+    fun SavedPlace.asPlace() = Place(name, address, LatLon(lat, lon), category)
 
     fun deletePlace(id: String) { viewModelScope.launch { placesRepo.delete(id) } }
 
     fun selectRoute(i: Int) = _ui.update { it.copy(selected = i) }
 
-    fun cancelPreview() = _ui.update { it.copy(mode = Mode.BROWSE, routes = emptyList(), destination = null, query = "", origin = null, originResults = emptyList()) }
+    fun cancelPreview() = _ui.update { it.copy(mode = Mode.BROWSE, routes = emptyList(), destination = null, query = "", origin = null,
+        originResults = emptyList(), stops = emptyList()) }
 
     fun clearMessage() = _ui.update { it.copy(message = null) }
 
@@ -401,12 +499,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             _ui.update { it.copy(routing = true) }
             val online = isOnline()
+            val via = _ui.value.stops.map { it.position }
             val req = RouteRequest(from, dest.position, heading.takeIf { origin != null || custom == null }, alternatives = true,
-                avoidTolls = s.avoidTolls, avoidMotorways = s.avoidMotorways)
+                avoidTolls = s.avoidTolls, avoidMotorways = s.avoidMotorways, via = via)
             var routes: List<Route> = emptyList()
             var lastError: String? = null
             for (p in providers(s, online)) {
                 if (p.requiresNetwork && !online) continue
+                if (via.isNotEmpty() && !p.supportsVia) { lastError = lastError ?: strings.stopsNeedOnline; continue }
                 val r = runCatching { p.route(req) }
                 if (r.isSuccess && r.getOrThrow().isNotEmpty()) { routes = r.getOrThrow(); break }
                 lastError = r.exceptionOrNull()?.message
@@ -494,7 +594,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         navJob?.cancel()
         if (simulate) {
             navJob = viewModelScope.launch {
-                SimulatedLocationSource(route.geometry, { d -> (currentRoute?.speedLimitAt(d)?.kmh ?: 50).toDouble() }, { _ui.value.demoSpeed }).fixes()
+                demoControl = de.lanewise.location.DemoControl()
+                _ui.update { it.copy(demoPaused = false) }
+                SimulatedLocationSource(route.geometry, { d -> (currentRoute?.speedLimitAt(d)?.kmh ?: 50).toDouble() }, { _ui.value.demoSpeed },
+                    demoControl).fixes()
                     .collect { onFix(it) }
                 // The demo drove to the end of the route line: arrived, even if the last fix snapped a few metres short
                 // (it stayed at "50 m" with an empty banner).
@@ -532,6 +635,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         de.lanewise.nav.NavigationService.update(ctx, title, text, Strings.of(settings.value.language).navChannel)
     }
 
+    private var demoControl: de.lanewise.location.DemoControl? = null
+
+    /** Demo only: pause / play, like a video player. */
+    fun toggleDemoPause() {
+        val c = demoControl ?: return
+        c.paused = !c.paused
+        _ui.update { it.copy(demoPaused = c.paused) }
+    }
+
+    /** Demo only: jump to [fraction] (0..1) of the route, from the scrub bar. */
+    fun seekDemo(fraction: Float) {
+        val c = demoControl ?: return
+        val r = currentRoute ?: return
+        val d = (fraction.coerceIn(0f, 1f) * r.distance).coerceAtMost(r.distance - 30)
+        engine?.seek(d)
+        c.seek(d)
+    }
+
     /** Demo only: one step slower / faster through [DEMO_SPEEDS]. */
     fun changeDemoSpeed(faster: Boolean) {
         _ui.update { st ->
@@ -545,7 +666,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         de.lanewise.nav.NavigationService.stop(ctx)
         engine = null; currentRoute = null
         _ui.update { it.copy(mode = Mode.BROWSE, nav = null, simulating = false, routes = emptyList(), destination = null, laneHint = null, laneHintCountdown = null,
-            origin = null, originResults = emptyList()) }
+            origin = null, originResults = emptyList(), stops = emptyList()) }
     }
 
     /** Long-press on the lane bar: remember this spot as "lanes wrong here" (GeoJSON for fixing OSM later). */
@@ -595,12 +716,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val s = settings.value
         if (s.voice) voice.speak(de.lanewise.nav.Announcement("reroute-$now", Phrases(s.language).rerouting(), 2))
         val dest = _ui.value.destination ?: return
+        // Stops still ahead: the ones whose "stop reached" point on the current route is not passed yet.
+        val along = _ui.value.nav?.distanceAlong ?: 0.0
+        val reached = currentRoute?.steps.orEmpty().filter { it.maneuver.type == de.lanewise.core.model.ManeuverType.WAYPOINT }
+            .count { it.distanceAlong <= along + 30 }
+        val ahead = _ui.value.stops.drop(reached)
+        _ui.update { it.copy(stops = ahead) }
         viewModelScope.launch {
             val online = isOnline()
             val req = RouteRequest(fix.position, dest.position, fix.bearing?.toDouble(), alternatives = false,
-                avoidTolls = s.avoidTolls, avoidMotorways = s.avoidMotorways)
+                avoidTolls = s.avoidTolls, avoidMotorways = s.avoidMotorways, via = ahead.map { it.position })
             for (p in providers(s, online)) {
                 if (p.requiresNetwork && !online) continue
+                if (ahead.isNotEmpty() && !p.supportsVia) continue
                 val r = runCatching { p.route(req) }.getOrNull()?.firstOrNull()
                     ?.let { withTrafficFromTomTom(listOf(it), s, online).first() } ?: continue
                 laneGuidance.reset()

@@ -400,6 +400,71 @@ Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which
       metre-to-icon scale accounts for it. The Settings preview road got a bike lane (Radfahrstreifen, then
       Schutzstreifen) to show it.
 
+## Done (v0.4.4, part 1, 2026-10-15) — curve stress test, demo player, OSM lane counts
+- [x] **Render stress audit** (`RenderAuditLiveTest`, opt-in: `LANEWISE_LIVE=1 LANEWISE_RENDER=1`, `LANEWISE_RENDER_N`,
+      `_SEED`, `_ROUTES="lat,lon>lat,lon;…"`, `LANEWISE_RENDER_DUMP=1` writes the road around the worst spots as JSON,
+      `tools/render_dump.py` draws them as PNG): the 20 curviest of many random town routes (up to 582°/km, 22 turns
+      each, ~98 km), every road piece and the live highlight / car path every 50 m, flagging KINK (corner > 25° between
+      short segments), WOBBLE (an S within 6 m), STEP (edge jumps sideways > 0.8 m), FOLD and CARPATH.
+- [x] **Fixes from it** (same 20 routes, before → after: KINK 150 → 36, STEP 102 → 16, WOBBLE 118 → 51,
+      CARPATH 19 → 17):
+  - Lanes ending at a stop line (turn pockets on a straight pass) narrow across the junction box — a short funnel,
+    ≥ 18 m, 9 m per lane — instead of a 6 m grid step that left a rectangular notch and 76° kinks in the edges. This was
+    most of the "jagged corners" and the "4 lanes, then suddenly 1".
+  - Turn connector: runs past the second node of the same junction (dual carriageway, < 35 m), and widens into the
+    new road's lanes, so the new road's edges continue it without a sideways jump.
+  - A road after a junction without an OSM lane count keeps the lanes that carry on (through lanes going straight,
+    the turn lanes after a turn, within 1.5 km) instead of falling back to 1 lane in town (`carriedLanes`).
+  - Edge offsets on tight curves are limited by the curvature (`limitedOffset`, no measurable effect alone).
+- [x] **OSM lane count per direction** (owner: "OSM says 4 lanes, it is 2 in my direction"): `lanes` on a two-way
+      street was already halved; now also `lanes:both_ways` (shared centre lane) and the other direction's
+      `lanes:backward/forward` / `turn:lanes:*` are taken off (`lanes=3` + `lanes:backward=1` → 2, was 1), and
+      `oneway=-1|true|1`, `junction=circular`, `oneway=no` on motorways are understood (`OsmTags.onewayDir`;
+      `oneway=-1` streets were treated as two-way and halved). A `oneway=yes` carriageway tagged with the lanes of
+      both carriageways is an OSM error the app cannot see — report / fix it in OSM; the aerial lane counts
+      (`aerial_lanes.json`) override such counts where confident. Test `lanesInTravelDirection`.
+- [x] **Demo player**: ▶ / ❚❚ in the DEMO badge pauses the demo car where it is (the lanes there can be studied); the
+      progress bar at the bottom becomes a scrub bar during a demo — tap or drag (also backwards), the car jumps there on
+      release, "x km / y km" shows while dragging (`DemoControl`, `NavigationEngine.seek`, DE/EN/VI).
+- [x] **App icon**: road slab moved up and centred in the adaptive-icon safe zone (foreground + monochrome, `docs/icon.svg`).
+- [ ] Phone check: run the worst audit routes with the debug demo intent, screenshots; the remaining WOBBLEs are at
+      wide-junction connectors and the ALLOWED band leaving the road at some splits (dumps).
+
+## Done (v0.4.4, part 2, 2026-10-15) — stops, smart stops, places with icons, settings redesign
+- [x] **Swap start ↔ destination** (⇅ in the route preview): from the GPS position, the position becomes the destination;
+      stops are driven in reverse order.
+- [x] **Stops** ("Add stop" in the route preview, ✕ removes one): OSRM / TomTom route through them (`RouteRequest.via`);
+      the end of every leg but the last is a "stop reached" step (`ManeuverType.WAYPOINT`, own voice phrase in DE/EN/VI,
+      voice inventory updated — re-render the OmniVoice packs). Re-routing keeps the stops not reached yet. Offline
+      routing has no stops ("Stops need online routing").
+- [x] **Smart stops** (checkbox "Best option along the route", on by default): a name / brand ("Sparkasse", "Aldi") or a
+      category word in DE/EN/VI ("Tankstelle", "Geldautomat", "Apotheke", "Supermarkt", "Ladestation" …) is searched in
+      a corridor along the route (Overpass, ±600 m … 2 km by trip length) and the best 15 by distance off the route are
+      ranked by the **real driving time they add** (OSRM `table`: time to the place + on to the next stop − the leg
+      without it), each in the leg where it adds least. The list shows "+N min" and where along the route; ★ marks the
+      best (`search/StopFinder.kt`, tests `StopFinderTest`, live `StopFinderLiveTest`: Hbf → Langenhagen, Sparkasse
+      +0.3 min, Tankstelle +0.4 min).
+- [x] **Fixed zoom up to 21** (was 19).
+- [x] **Places with icons** (Material icons by Google, `material-icons-extended`; R8 keeps only the used ones in
+      release — the debug APK is ~70 MB now): search results show their kind (restaurant, café, gym, shop, supermarket,
+      bank, fuel, pharmacy, hotel, station … from Photon's `osm_key`/`osm_value`, `ui/PlaceIcons.kt`); a saved place shows
+      its badge next to it (yellow ★ favourite, Home, Work or its own icon) and your name for it: "Am Muster 1 (Cousin)".
+      Saving a place: Home / Work / Favourite, **own name, icon (24) and colour (9)**, live preview. Home / Work /
+      Favourites chips with icons.
+- [x] **Saved places as presets** in the start picker and the add-stop dialog until something is typed.
+- [x] **Speed warning glow strength** slider (20–200 %, width and opacity) with a live sample in Settings.
+- [x] **Settings redesign** (Material 3 / Android 16 style): icon tile per section, larger rounded cards, segmented
+      buttons for language and theme (with icons), buttons with icons (test drive, share, import, download, voice test),
+      back arrow. Icons in the route preview (swap, add / remove stop) and the demo badge (play / pause).
+- [x] **Server load dot** (owner's request) next to "Add stop" and in the add-stop dialog: green free, yellow moderately
+      busy, red busy, grey unreachable / offline (outlined while checking). Every 30 s in the route preview a tiny real
+      request goes to each Overpass mirror and the routing server (`/status` pages proved unreliable) — answer < 1.5 s
+      free, < 5 s moderate, slower / 429 / 503 / 504 busy; Overpass counts with its best mirror (the app fails over),
+      overall is the worse of Overpass and routing. The probe also puts the healthiest mirror first for the next
+      searches (`Overpass.preferred`), so a hanging main server no longer costs a timeout per search
+      (`core/net/ServerHealth.kt`, test `ServerHealthTest`).
+- [ ] Phone check of all of the above (built and unit-tested on the PC only).
+
 ## Video review — still open
 - [ ] Owner: check the 3D car (size, colours, behaviour in tunnels / under bridges) and the automatic theme on the phone.
 - [ ] Owner: check the car overlay (size vs. road at different zooms, tilt changes, pan away and recenter) and the
@@ -417,6 +482,11 @@ Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which
 - [ ] Philipsbornstraße left turn (4 lanes, video 1:25–1:45) and Hauptstraße left turn (video 9:10): verify the strip
       enters the left pocket where it opens; Overpass timed out in the PC check of the 8.4 km route option, so those
       were only checked without OSM lane counts.
+
+- [ ] **Browse / standby map: lines broken at OSM way splits** (owner's screenshot, 2026-10-15, Herschelstraße /
+      Celler Straße): without a route, edge lines and red bike lanes of `StreetLanes` stop and restart offset where one
+      OSM way ends and the next begins (different lane counts / widths per way). Join consecutive ways of the same
+      street into one chain before offsetting, and taper width changes like the route ribbon does.
 
 ## Aerial lanes — next sessions
 1. Owner spot-checks `work/spot/index.html` → `spot_checks.csv`; hand-correct 20–50 label tiles → retrain.
@@ -444,7 +514,7 @@ Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which
    wrong lane counts found so far are OSM tagging errors, not imagery (DOP20 flown 2025-03-06).
 3. ~~Lane reports: a share button in Settings~~ — done (v0.4.3 part 6).
 4. Lane-count continuity between sites from OSM `lanes`/`lanes:forward` instead of the next-site approximation
-   (partly done: pocket length by road kind).
+   (partly done: pocket length by road kind; lanes carried on after a junction, v0.4.4).
 5. Owner's lane drawing ("coMap" sketch) was referenced but not attached in the first chat —
    compare it with `docs/LANE_ALGORITHM.md` once shared and add it as a unit test scenario.
 6. Android Auto / car display.

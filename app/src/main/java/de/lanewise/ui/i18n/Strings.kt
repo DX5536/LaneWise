@@ -30,6 +30,35 @@ data class Strings(
     val then: String,
     val demoBadge: String,
     val demoSlower: String,
+    val demoPause: String,
+    val demoPlay: String,
+    // Route preview: swap, stops, smart stops
+    val swapEnds: String,
+    val addStop: String,
+    val stop: String,
+    val removeStop: String,
+    val searchStop: String,
+    /** Checkbox: rank the results by the time they add to the route. */
+    val smartStop: String,
+    val smartStopHint: String,
+    /** "+%d min" added by a stop. */
+    val stopDetour: String,
+    /** "in %s" along the route. */
+    val stopAfter: String,
+    val noStopsAlong: String,
+    val stopsNeedOnline: String,
+    val customName: String,
+    val customNameHint: String,
+    val pickIcon: String,
+    val pickColor: String,
+    /** Strength of the speed-warning glow. */
+    val speedGlow: String,
+    // Server load dot (search / stops)
+    val serverFree: String,
+    val serverModerate: String,
+    val serverBusy: String,
+    val serverDown: String,
+    val serverChecking: String,
     /** Notification channel of the ongoing navigation notification. */
     val navChannel: String,
     /** Route preview: start point ("From: My position"). */
@@ -221,7 +250,7 @@ val DE = Strings(
     noRoute = "Keine Route gefunden",
     computingRoute = "Berechne Route mit Spurdaten …", cancel = "Abbrechen", demo = "Demo", go = "Los geht's",
     laneNodes = "Spur-Knoten", roadworks = "Baustellen", closures = "Sperrungen",
-    recenter = "Zentrieren", then = "Dann", demoBadge = "DEMO", demoSlower = "Demo langsamer", navChannel = "Navigation", from = "Von", chooseStart = "Startpunkt wählen", searchStart = "Start suchen …", searching = "Suche …", noResults = "Nichts gefunden – z. B. „Musterstraße 1“ versuchen", laneReported = "Spuren gemeldet (%d gespeichert, lane_reports.geojson)", laneReportFailed = "Meldung konnte nicht gespeichert werden", demoFaster = "Demo schneller", kmh = "km/h", offline = "offline", satellites = "Sat",
+    recenter = "Zentrieren", then = "Dann", demoBadge = "DEMO", demoSlower = "Demo langsamer", demoPause = "Demo anhalten", demoPlay = "Demo fortsetzen", swapEnds = "Start und Ziel tauschen", addStop = "Stopp hinzufügen", stop = "Stopp", removeStop = "Stopp entfernen", searchStop = "Ort, Name oder Kategorie …", smartStop = "Beste Option entlang der Route", smartStopHint = "z. B. „Sparkasse“, „Tankstelle“, „Apotheke“ – sortiert nach Umweg", stopDetour = "+%d min", stopAfter = "nach %s", noStopsAlong = "Nichts Passendes entlang der Route", stopsNeedOnline = "Stopps brauchen Online-Routing", customName = "Eigener Name", customNameHint = "z. B. Zuhause bei Oma", pickIcon = "Symbol", pickColor = "Farbe", speedGlow = "Stärke des Leuchtens", serverFree = "Server frei", serverModerate = "Server mäßig ausgelastet", serverBusy = "Server ausgelastet", serverDown = "Server nicht erreichbar", serverChecking = "Prüfe Server …", navChannel = "Navigation", from = "Von", chooseStart = "Startpunkt wählen", searchStart = "Start suchen …", searching = "Suche …", noResults = "Nichts gefunden – z. B. „Musterstraße 1“ versuchen", laneReported = "Spuren gemeldet (%d gespeichert, lane_reports.geojson)", laneReportFailed = "Meldung konnte nicht gespeichert werden", demoFaster = "Demo schneller", kmh = "km/h", offline = "offline", satellites = "Sat",
     bikeLane = "Schutzstreifen", bikeLaneExclusive = "Radfahrstreifen", noLimit = "kein Limit",
     trafficLight = "Ampel", stopSign = "Stopp", giveWay = "Vorfahrt achten", crossing = "Zebrastreifen", railCrossing = "Bahnübergang",
     back = "‹ Zurück", appearance = "Darstellung", themeSystem = "System", themeLight = "Hell",
@@ -319,7 +348,7 @@ val EN = Strings(
     noRoute = "No route found",
     computingRoute = "Calculating route with lane data …", cancel = "Cancel", demo = "Demo", go = "Let's go",
     laneNodes = "lane junctions", roadworks = "roadworks", closures = "closures",
-    recenter = "Recenter", then = "Then", demoBadge = "DEMO", demoSlower = "Slower demo", navChannel = "Navigation", from = "From", chooseStart = "Choose start", searchStart = "Search start …", searching = "Searching …", noResults = "Nothing found – try e.g. “Musterstraße 1”", laneReported = "Lanes reported (%d saved, lane_reports.geojson)", laneReportFailed = "Could not save the report", demoFaster = "Faster demo", kmh = "km/h", offline = "offline", satellites = "sat",
+    recenter = "Recenter", then = "Then", demoBadge = "DEMO", demoSlower = "Slower demo", demoPause = "Pause demo", demoPlay = "Resume demo", swapEnds = "Swap start and destination", addStop = "Add stop", stop = "Stop", removeStop = "Remove stop", searchStop = "Place, name or category …", smartStop = "Best option along the route", smartStopHint = "e.g. “Sparkasse”, “petrol station”, “pharmacy” – sorted by detour", stopDetour = "+%d min", stopAfter = "after %s", noStopsAlong = "Nothing matching along the route", stopsNeedOnline = "Stops need online routing", customName = "Your name for it", customNameHint = "e.g. My cousin's home", pickIcon = "Icon", pickColor = "Colour", speedGlow = "Glow strength", serverFree = "Servers free", serverModerate = "Servers moderately busy", serverBusy = "Servers busy", serverDown = "Servers unreachable", serverChecking = "Checking servers …", navChannel = "Navigation", from = "From", chooseStart = "Choose start", searchStart = "Search start …", searching = "Searching …", noResults = "Nothing found – try e.g. “Musterstraße 1”", laneReported = "Lanes reported (%d saved, lane_reports.geojson)", laneReportFailed = "Could not save the report", demoFaster = "Faster demo", kmh = "km/h", offline = "offline", satellites = "sat",
     bikeLane = "Advisory bike lane", bikeLaneExclusive = "Bike lane", noLimit = "no limit",
     trafficLight = "Traffic light", stopSign = "Stop", giveWay = "Give way", crossing = "Zebra crossing", railCrossing = "Level crossing",
     back = "‹ Back", appearance = "Appearance", themeSystem = "System", themeLight = "Light",
@@ -417,7 +446,7 @@ val VI = Strings(
     noRoute = "Không tìm thấy lộ trình",
     computingRoute = "Đang tính lộ trình với dữ liệu làn đường …", cancel = "Hủy", demo = "Thử", go = "Bắt đầu",
     laneNodes = "nút làn đường", roadworks = "công trường", closures = "đoạn bị chặn",
-    recenter = "Về vị trí", then = "Sau đó", demoBadge = "THỬ", demoSlower = "Chạy thử chậm hơn", navChannel = "Dẫn đường", from = "Từ", chooseStart = "Chọn điểm xuất phát", searchStart = "Tìm điểm xuất phát …", searching = "Đang tìm …", noResults = "Không tìm thấy – thử ví dụ “Musterstraße 1”", laneReported = "Đã báo làn sai (%d đã lưu, lane_reports.geojson)", laneReportFailed = "Không lưu được báo cáo", demoFaster = "Chạy thử nhanh hơn", kmh = "km/h", offline = "ngoại tuyến", satellites = "vệ tinh",
+    recenter = "Về vị trí", then = "Sau đó", demoBadge = "THỬ", demoSlower = "Chạy thử chậm hơn", demoPause = "Tạm dừng chạy thử", demoPlay = "Tiếp tục chạy thử", swapEnds = "Đổi điểm đi và điểm đến", addStop = "Thêm điểm dừng", stop = "Điểm dừng", removeStop = "Xóa điểm dừng", searchStop = "Địa điểm, tên hoặc loại …", smartStop = "Lựa chọn tốt nhất dọc tuyến đường", smartStopHint = "ví dụ „Sparkasse“, „cây xăng“, „nhà thuốc“ – xếp theo quãng đi vòng", stopDetour = "+%d phút", stopAfter = "sau %s", noStopsAlong = "Không tìm thấy gì phù hợp dọc tuyến đường", stopsNeedOnline = "Điểm dừng cần định tuyến trực tuyến", customName = "Tên riêng", customNameHint = "ví dụ Nhà anh họ", pickIcon = "Biểu tượng", pickColor = "Màu", speedGlow = "Độ sáng cảnh báo", serverFree = "Máy chủ rảnh", serverModerate = "Máy chủ hơi bận", serverBusy = "Máy chủ bận", serverDown = "Không kết nối được máy chủ", serverChecking = "Đang kiểm tra máy chủ …", navChannel = "Dẫn đường", from = "Từ", chooseStart = "Chọn điểm xuất phát", searchStart = "Tìm điểm xuất phát …", searching = "Đang tìm …", noResults = "Không tìm thấy – thử ví dụ “Musterstraße 1”", laneReported = "Đã báo làn sai (%d đã lưu, lane_reports.geojson)", laneReportFailed = "Không lưu được báo cáo", demoFaster = "Chạy thử nhanh hơn", kmh = "km/h", offline = "ngoại tuyến", satellites = "vệ tinh",
     bikeLane = "Làn xe đạp (khuyến nghị)", bikeLaneExclusive = "Làn xe đạp", noLimit = "không giới hạn",
     trafficLight = "Đèn giao thông", stopSign = "Dừng lại", giveWay = "Nhường đường", crossing = "Vạch qua đường", railCrossing = "Giao cắt đường sắt",
     back = "‹ Quay lại", appearance = "Giao diện", themeSystem = "Hệ thống", themeLight = "Sáng",

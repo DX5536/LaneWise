@@ -24,6 +24,11 @@ data class SavedPlace(
     val address: String,
     val lat: Double,
     val lon: Double,
+    /** Own icon ([de.lanewise.ui.PlaceIcons.PICKABLE] id) and colour (ARGB); null = by kind (home, work, star). */
+    val icon: String? = null,
+    val color: Long? = null,
+    /** OSM category of the place ("amenity:restaurant"), so search results can show both its kind and the star. */
+    val category: String? = null,
 )
 
 private val Context.placesStore: DataStore<Preferences> by preferencesDataStore(name = "places", scope = storeScope)

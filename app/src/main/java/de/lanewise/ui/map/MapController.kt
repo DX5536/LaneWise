@@ -759,7 +759,7 @@ class MapController(private val context: Context) {
             tweenRoute = null
         } else {
             offRoutePos = null
-            val jump = shownAlong.isNaN() || tweenRoute !== route || abs(along - shownAlong) > 300
+            val jump = shownAlong.isNaN() || tweenRoute !== route || abs(along - shownAlong) > 300 || snap.fix.seek
             val dt = (now - fixAt) / 1000.0
             if (jump) {
                 shownAlong = along; tweenRoute = route; speedMps = snap.fix.speedKmh / 3.6

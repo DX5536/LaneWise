@@ -25,6 +25,9 @@ object Overpass {
     )
     private val BACKOFF_MS = longArrayOf(0, 3_000, 8_000)
 
+    /** Mirrors in the order they are tried: healthiest first after a [ServerHealth.probe], else [ENDPOINTS]. */
+    @Volatile var preferred: List<String> = ENDPOINTS
+
     private val longClient: OkHttpClient by lazy {
         Http.client.newBuilder().readTimeout(15, TimeUnit.MINUTES).build()
     }
@@ -34,7 +37,7 @@ object Overpass {
         var last: Exception? = null
         for (wait in BACKOFF_MS) {
             if (wait > 0) delay(wait)
-            for (url in ENDPOINTS) {
+            for (url in preferred) {
                 try {
                     val req = Request.Builder().url(url).header("Accept", "application/json")
                         .post(FormBody.Builder().add("data", query).build()).build()
@@ -61,7 +64,7 @@ object Overpass {
         var last: Exception? = null
         for (wait in BACKOFF_MS) {
             if (wait > 0) delay(wait)
-            for (url in ENDPOINTS) {
+            for (url in preferred) {
                 try {
                     return withContext(Dispatchers.IO) { execute(url, query, client, read) }
                 } catch (e: Exception) {

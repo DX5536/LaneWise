@@ -9,7 +9,8 @@ import de.lanewise.core.net.str
 import java.net.URLEncoder
 import java.util.Locale
 
-data class Place(val title: String, val subtitle: String, val position: LatLon)
+/** A search result. [category] is the OSM "key:value" (e.g. "amenity:restaurant") for its icon, null for addresses. */
+data class Place(val title: String, val subtitle: String, val position: LatLon, val category: String? = null)
 
 /**
  * Address/POI search via Photon (komoot, OpenStreetMap data, no key), restricted to Germany and biased
@@ -45,7 +46,8 @@ class Geocoder(private val baseUrl: String = "https://photon.komoot.io") {
             val name = p["name"].str ?: street.ifBlank { null } ?: return@mapNotNull null
             val place = listOfNotNull(p["postcode"].str, p["city"].str ?: p["district"].str).joinToString(" ")
             val sub = listOf(if (name != street) street else "", place).filter { it.isNotBlank() }.joinToString(", ")
-            Place(name, sub, LatLon(lat, lon))
+            val category = p["osm_key"].str?.let { k -> p["osm_value"].str?.let { v -> "$k:$v" } }
+            Place(name, sub, LatLon(lat, lon), category)
         }.distinctBy { it.title + it.subtitle }
     }
 

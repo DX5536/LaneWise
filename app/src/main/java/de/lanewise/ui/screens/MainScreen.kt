@@ -1,6 +1,7 @@
 package de.lanewise.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -72,8 +73,22 @@ import de.lanewise.nav.Phrases
 import de.lanewise.nav.SpeedStatus
 import de.lanewise.osm.OsmTags
 import de.lanewise.search.Place
+import de.lanewise.core.geo.LatLon
+import androidx.compose.foundation.border
 import de.lanewise.settings.AppSettings
 import de.lanewise.settings.PlaceKind
+import de.lanewise.ui.PlaceBadge
+import de.lanewise.ui.PlaceIcons
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AddLocationAlt
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.MyLocation
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material.icons.rounded.SwapVert
+import androidx.compose.material.icons.rounded.Work
 import de.lanewise.settings.SavedPlace
 import de.lanewise.ui.MainViewModel
 import de.lanewise.ui.Mode
@@ -195,7 +210,7 @@ fun MainScreen(
             }
         }
 
-        SpeedBorderOverlay(ui.nav?.speedStatus ?: SpeedStatus.UNKNOWN)
+        SpeedBorderOverlay(ui.nav?.speedStatus ?: SpeedStatus.UNKNOWN, intensity = settings.speedGlow)
 
         ui.message?.let { msg ->
             Box(
@@ -281,13 +296,14 @@ private fun BrowseOverlay(vm: MainViewModel, ui: UiState, settings: AppSettings,
             // Shortcuts: Home, Work, Favourites.
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ShortcutChip("⌂  " + str.home, set = home != null) {
+                ShortcutChip(Icons.Rounded.Home, str.home, set = home != null) {
                     if (home != null) vm.goTo(home) else hint = str.setHomeHint
                 }
-                ShortcutChip("▣  " + str.work, set = work != null) {
+                ShortcutChip(Icons.Rounded.Work, str.work, set = work != null) {
                     if (work != null) vm.goTo(work) else hint = str.setWorkHint
                 }
-                ShortcutChip("★  " + str.favorites, set = ui.places.any { it.kind == PlaceKind.FAVORITE }) { showFavorites = true }
+                ShortcutChip(Icons.Rounded.Star, str.favorites, set = ui.places.any { it.kind == PlaceKind.FAVORITE },
+                    tint = Color(PlaceIcons.STAR_YELLOW)) { showFavorites = true }
             }
 
             if (ui.results.isNotEmpty()) {
@@ -296,11 +312,8 @@ private fun BrowseOverlay(vm: MainViewModel, ui: UiState, settings: AppSettings,
                     Modifier.fillMaxWidth().heightIn(max = 380.dp).clip(RoundedCornerShape(20.dp)).background(c.chip),
                 ) {
                     itemsIndexed(ui.results) { i, p ->
-                        Column(Modifier.fillMaxWidth().clickable { vm.chooseDestination(p) }.padding(horizontal = 18.dp, vertical = 12.dp)) {
-                            Text(p.title, color = c.onChip, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                            if (p.subtitle.isNotBlank()) Text(p.subtitle, color = c.onChip.copy(alpha = 0.65f), fontSize = 13.sp)
-                        }
-                        if (i < ui.results.size - 1) HorizontalDivider(color = c.onChip.copy(alpha = 0.08f))
+                        PlaceRow(p, ui.places, onClick = { vm.chooseDestination(p) })
+                        if (i < ui.results.size - 1) HorizontalDivider(color = c.onChip.copy(alpha = 0.08f), modifier = Modifier.padding(start = 68.dp))
                     }
                 }
             } else {
@@ -334,14 +347,68 @@ private fun BrowseOverlay(vm: MainViewModel, ui: UiState, settings: AppSettings,
 }
 
 @Composable
-private fun ShortcutChip(label: String, set: Boolean, onClick: () -> Unit) {
+private fun ShortcutChip(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, set: Boolean,
+                         tint: Color? = null, onClick: () -> Unit) {
     val c = LocalLaneColors.current
-    Text(
-        label,
+    val fg = if (set) c.onChip else c.onChip.copy(alpha = 0.55f)
+    Row(
         Modifier.clip(RoundedCornerShape(18.dp)).background(c.chip).clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 8.dp),
-        color = if (set) c.onChip else c.onChip.copy(alpha = 0.55f), fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
-    )
+            .padding(start = 12.dp, end = 14.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, tint = tint?.let { if (set) it else it.copy(alpha = 0.55f) } ?: fg, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(label, color = fg, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+/**
+ * A search result: its kind as an icon (restaurant, gym, shop …), title and address. A place you saved shows its
+ * badge next to it (yellow star, home, work or your own icon) and your name for it: "Am Muster 1 (Cousin)".
+ */
+@Composable
+private fun PlaceRow(p: Place, saved: List<SavedPlace>, onClick: () -> Unit) {
+    val c = LocalLaneColors.current
+    val mine = saved.firstOrNull { de.lanewise.core.geo.Geo.distance(LatLon(it.lat, it.lon), p.position) < 40 }
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val (icon, color) = if (mine != null && p.category == null) PlaceIcons.forSaved(mine) else PlaceIcons.forCategory(p.category)
+        PlaceBadge(icon, color)
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(p.title + (mine?.name?.takeIf { it != p.title }?.let { " ($it)" } ?: ""), color = c.onChip,
+                    fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false))
+                if (mine != null) {
+                    val (si, sc) = PlaceIcons.forSaved(mine)
+                    Spacer(Modifier.width(6.dp))
+                    Icon(si, null, tint = Color(sc), modifier = Modifier.size(18.dp))
+                }
+            }
+            if (p.subtitle.isNotBlank()) Text(p.subtitle, color = c.onChip.copy(alpha = 0.65f), fontSize = 13.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+/** Saved places (Home, Work, then favourites) as ready-made picks while nothing is typed yet. */
+@Composable
+private fun SavedPresets(places: List<SavedPlace>, onPick: (SavedPlace) -> Unit) {
+    places.sortedBy { it.kind.ordinal }.forEach { sp ->
+        val (icon, color) = PlaceIcons.forSaved(sp)
+        Row(Modifier.fillMaxWidth().clickable { onPick(sp) }.padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+            PlaceBadge(icon, color, size = 32.dp)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(sp.name, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(sp.address, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
 }
 
 @Composable
@@ -356,8 +423,9 @@ private fun FavoritesDialog(places: List<SavedPlace>, onGo: (SavedPlace) -> Unit
             else LazyColumn(Modifier.heightIn(max = 420.dp)) {
                 items(places.sortedBy { it.kind.ordinal }) { p ->
                     Row(Modifier.fillMaxWidth().clickable { onGo(p) }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(when (p.kind) { PlaceKind.HOME -> "⌂"; PlaceKind.WORK -> "▣"; PlaceKind.FAVORITE -> "★" },
-                            fontSize = 18.sp, modifier = Modifier.width(28.dp))
+                        val (icon, color) = PlaceIcons.forSaved(p)
+                        PlaceBadge(icon, color, size = 34.dp)
+                        Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(p.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(p.address, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -371,27 +439,78 @@ private fun FavoritesDialog(places: List<SavedPlace>, onGo: (SavedPlace) -> Unit
     )
 }
 
-/** Save the current destination as Home, Work or a named favourite. */
+/**
+ * Save the current destination as Home, Work or a favourite — with your own name for it ("My cousin's home"), and an
+ * icon and colour of your choice; the address stays with it.
+ */
 @Composable
-private fun SavePlaceDialog(place: Place, onSave: (PlaceKind, String) -> Unit, onDismiss: () -> Unit) {
+private fun SavePlaceDialog(place: Place, onSave: (PlaceKind, String, String?, Long?) -> Unit, onDismiss: () -> Unit) {
     val str = LocalStrings.current
     var kind by remember { mutableStateOf(PlaceKind.FAVORITE) }
-    var name by remember { mutableStateOf(place.title) }
+    var name by remember { mutableStateOf("") }
+    // Icon: by category first (a restaurant keeps its fork and knife), changeable.
+    var icon by remember { mutableStateOf<String?>(null) }
+    var color by remember { mutableStateOf<Long?>(null) }
+    val preview = de.lanewise.settings.SavedPlace(kind = kind, name = name, address = "", lat = 0.0, lon = 0.0, icon = icon, color = color)
+    val (pi, pc) = PlaceIcons.forSaved(preview)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(str.savePlace) },
         text = {
-            Column {
+            Column(Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState())) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    PlaceBadge(pi, pc, size = 44.dp)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(place.title + (name.takeIf { it.isNotBlank() }?.let { " ($it)" } ?: ""), fontWeight = FontWeight.Bold,
+                            maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        if (place.subtitle.isNotBlank()) Text(place.subtitle, fontSize = 12.sp, maxLines = 1,
+                            overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    FilterChip(kind == PlaceKind.HOME, { kind = PlaceKind.HOME }, { Text(str.home) })
-                    FilterChip(kind == PlaceKind.WORK, { kind = PlaceKind.WORK }, { Text(str.work) })
-                    FilterChip(kind == PlaceKind.FAVORITE, { kind = PlaceKind.FAVORITE }, { Text(str.favorite) })
+                    FilterChip(kind == PlaceKind.HOME, { kind = PlaceKind.HOME }, { Text(str.home) },
+                        leadingIcon = { Icon(Icons.Rounded.Home, null, Modifier.size(18.dp)) })
+                    FilterChip(kind == PlaceKind.WORK, { kind = PlaceKind.WORK }, { Text(str.work) },
+                        leadingIcon = { Icon(Icons.Rounded.Work, null, Modifier.size(18.dp)) })
+                    FilterChip(kind == PlaceKind.FAVORITE, { kind = PlaceKind.FAVORITE }, { Text(str.favorite) },
+                        leadingIcon = { Icon(Icons.Rounded.Star, null, Modifier.size(18.dp), tint = Color(PlaceIcons.STAR_YELLOW)) })
                 }
                 Spacer(Modifier.height(8.dp))
-                OutlinedTextField(name, { name = it }, label = { Text(str.name) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(name, { name = it }, label = { Text(str.customName) }, placeholder = { Text(str.customNameHint) },
+                    singleLine = true, modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.height(10.dp))
+                Text(str.pickIcon, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(4.dp))
+                PlaceIcons.PICKABLE.chunked(6).forEach { row ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        row.forEach { (id, img) ->
+                            val selected = icon == id || (icon == null && img == pi)
+                            Box(
+                                Modifier.size(40.dp).clip(CircleShape)
+                                    .background(if (selected) Color(pc).copy(alpha = 0.25f) else Color.Transparent)
+                                    .clickable { icon = id },
+                                contentAlignment = Alignment.Center,
+                            ) { Icon(img, id, tint = if (selected) Color(pc) else MaterialTheme.colorScheme.onSurfaceVariant) }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                Text(str.pickColor, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(6.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    PlaceIcons.COLORS.forEach { argb ->
+                        Box(
+                            Modifier.size(26.dp).clip(CircleShape).background(Color(argb))
+                                .border(if (pc == argb) 3.dp else 0.dp, MaterialTheme.colorScheme.onSurface, CircleShape)
+                                .clickable { color = argb },
+                        )
+                    }
+                }
             }
         },
-        confirmButton = { Button({ onSave(kind, name) }) { Text(str.save) } },
+        confirmButton = { Button({ onSave(kind, name, icon, color) }) { Text(str.save) } },
         dismissButton = { TextButton(onDismiss) { Text(str.cancel) } },
     )
 }
@@ -404,6 +523,7 @@ private fun PreviewOverlay(vm: MainViewModel, ui: UiState, phrases: Phrases) {
     val str = LocalStrings.current
     var saving by remember { mutableStateOf(false) }
     var pickingStart by remember { mutableStateOf(false) }
+    var addingStop by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
         Column(
             Modifier.align(Alignment.BottomCenter).fillMaxWidth().clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
@@ -428,7 +548,32 @@ private fun PreviewOverlay(vm: MainViewModel, ui: UiState, phrases: Phrases) {
                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 Text("✎", color = MaterialTheme.colorScheme.primary, fontSize = 16.sp)
             }
-            Spacer(Modifier.height(12.dp))
+            // Stops on the way, in driving order (✕ removes one).
+            ui.stops.forEachIndexed { i, stop ->
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 6.dp).clip(RoundedCornerShape(12.dp))
+                        .background(c.onChip.copy(alpha = 0.06f)).padding(start = 12.dp, top = 2.dp, bottom = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("${str.stop} ${i + 1}: ", color = c.onChip.copy(alpha = 0.65f), fontSize = 14.sp)
+                    Text(stop.title, color = c.onChip, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    androidx.compose.material3.IconButton({ vm.removeStop(i) }) {
+                        Icon(Icons.Rounded.Close, str.removeStop, tint = c.onChip.copy(alpha = 0.7f))
+                    }
+                }
+            }
+            // Swap start and destination, add a stop.
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(vm::swapEnds, enabled = !ui.routing) {
+                    Icon(Icons.Rounded.SwapVert, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text(str.swapEnds, fontSize = 13.sp)
+                }
+                TextButton({ addingStop = true }, enabled = !ui.routing) {
+                    Icon(Icons.Rounded.AddLocationAlt, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text(str.addStop, fontSize = 13.sp)
+                    Spacer(Modifier.width(6.dp)); HealthDot(ui.serverHealth)
+                }
+            }
+            Spacer(Modifier.height(4.dp))
             if (ui.routing) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
@@ -449,9 +594,123 @@ private fun PreviewOverlay(vm: MainViewModel, ui: UiState, phrases: Phrases) {
         }
     }
     if (pickingStart) StartPickerDialog(vm, ui) { pickingStart = false }
+    if (addingStop) AddStopDialog(vm, ui, phrases) { addingStop = false }
+    // Server load for the dot: on opening the preview, then every 30 s.
+    LaunchedEffect(Unit) { while (true) { vm.probeServers(); kotlinx.coroutines.delay(30_000) } }
     val dest = ui.destination
     if (saving && dest != null) {
-        SavePlaceDialog(dest, onSave = { kind, name -> vm.savePlace(kind, name, dest); saving = false }) { saving = false }
+        SavePlaceDialog(dest, onSave = { kind, name, icon, color -> vm.savePlace(kind, name, dest, icon, color); saving = false }) { saving = false }
+    }
+}
+
+/**
+ * Add a stop: a normal place search, or — with "Best option along the route" — places matching a name, brand or
+ * category along the route, sorted by the minutes they add (smart stops, [de.lanewise.search.StopFinder]).
+ */
+@Composable
+private fun AddStopDialog(vm: MainViewModel, ui: UiState, phrases: Phrases, onDismiss: () -> Unit) {
+    val str = LocalStrings.current
+    var q by remember { mutableStateOf("") }
+    var smart by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(true) }
+    fun close() { vm.clearStopSearch(); onDismiss() }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = ::close,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(str.addStop, modifier = Modifier.weight(1f))
+                HealthDot(ui.serverHealth, size = 12.dp)
+                Spacer(Modifier.width(6.dp))
+                Text(when (ui.serverHealth) {
+                    de.lanewise.core.net.Health.FREE -> str.serverFree
+                    de.lanewise.core.net.Health.MODERATE -> str.serverModerate
+                    de.lanewise.core.net.Health.BUSY -> str.serverBusy
+                    de.lanewise.core.net.Health.DOWN -> str.serverDown
+                    null -> str.serverChecking
+                }, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        text = {
+            Column(Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState())) {
+                androidx.compose.material3.OutlinedTextField(
+                    value = q, onValueChange = { q = it; vm.onStopQuery(it, smart) }, singleLine = true,
+                    placeholder = { Text(str.searchStop) }, modifier = Modifier.fillMaxWidth(),
+                )
+                Row(
+                    Modifier.fillMaxWidth().clickable { smart = !smart; vm.onStopQuery(q, smart) },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    androidx.compose.material3.Checkbox(smart, { smart = it; vm.onStopQuery(q, it) })
+                    Column {
+                        Text(str.smartStop, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Text(str.smartStopHint, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                    }
+                }
+                when {
+                    ui.stopSearching == true -> Text(str.searching, fontSize = 13.sp, modifier = Modifier.padding(vertical = 6.dp))
+                    ui.stopSearching == false && ui.stopPlaces.isEmpty() && ui.stopCandidates.isEmpty() ->
+                        Text(if (smart) str.noStopsAlong else str.noResults, fontSize = 13.sp, modifier = Modifier.padding(vertical = 6.dp))
+                }
+                ui.stopCandidates.forEachIndexed { i, cand ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable { vm.addStop(cand.place, cand.insertAt); onDismiss() }.padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        val (ci, cc) = PlaceIcons.forCategory(cand.place.category)
+                        PlaceBadge(ci, cc, size = 32.dp)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text((if (i == 0) "★ " else "") + cand.place.title, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            val sub = listOf(cand.place.subtitle, str.stopAfter.format(phrases.distance(cand.alongMeters)))
+                                .filter { it.isNotBlank() }.joinToString(" · ")
+                            Text(sub, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        Text(str.stopDetour.format(kotlin.math.ceil(cand.detourSeconds / 60).toInt()),
+                            fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+                ui.stopPlaces.take(6).forEach { p -> DialogPlaceRow(p, ui.places) { vm.addStop(p); onDismiss() } }
+                if (q.isBlank()) SavedPresets(ui.places) { sp -> vm.addStop(with(vm) { sp.asPlace() }); onDismiss() }
+            }
+        },
+        confirmButton = { TextButton(::close) { Text(str.cancel) } },
+    )
+}
+
+/**
+ * Small dot for the load of the search / routing servers: green free, yellow moderately busy, red busy (searches may
+ * fail or take long), grey unreachable or offline; outlined while the first check runs.
+ */
+@Composable
+private fun HealthDot(h: de.lanewise.core.net.Health?, size: androidx.compose.ui.unit.Dp = 9.dp) {
+    val color = when (h) {
+        de.lanewise.core.net.Health.FREE -> Color(0xFF3DD68C)
+        de.lanewise.core.net.Health.MODERATE -> Color(0xFFFFC83D)
+        de.lanewise.core.net.Health.BUSY -> Color(0xFFE5484D)
+        de.lanewise.core.net.Health.DOWN -> Color(0xFF8A93A6)
+        null -> Color.Transparent
+    }
+    Box(Modifier.size(size).clip(CircleShape).background(color).border(1.dp, if (h == null) Color(0xFF8A93A6) else color, CircleShape))
+}
+
+/** A place in a picker dialog: kind icon, title, address, and the saved badge if it is one of yours. */
+@Composable
+private fun DialogPlaceRow(p: Place, saved: List<SavedPlace>, onClick: () -> Unit) {
+    val mine = saved.firstOrNull { de.lanewise.core.geo.Geo.distance(LatLon(it.lat, it.lon), p.position) < 40 }
+    val (icon, color) = if (mine != null && p.category == null) PlaceIcons.forSaved(mine) else PlaceIcons.forCategory(p.category)
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+        PlaceBadge(icon, color, size = 32.dp)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(p.title + (mine?.name?.takeIf { it != p.title }?.let { " ($it)" } ?: ""), fontWeight = FontWeight.Bold,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                if (mine != null) {
+                    val (si, sc) = PlaceIcons.forSaved(mine)
+                    Spacer(Modifier.width(4.dp)); Icon(si, null, tint = Color(sc), modifier = Modifier.size(16.dp))
+                }
+            }
+            if (p.subtitle.isNotBlank()) Text(p.subtitle, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
     }
 }
 
@@ -470,18 +729,21 @@ private fun StartPickerDialog(vm: MainViewModel, ui: UiState, onDismiss: () -> U
                     placeholder = { Text(str.searchStart) }, modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(8.dp))
-                Text("◎  " + str.myPosition, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.fillMaxWidth().clickable { vm.chooseOrigin(null); onDismiss() }.padding(vertical = 10.dp))
+                Row(Modifier.fillMaxWidth().clickable { vm.chooseOrigin(null); onDismiss() }.padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    PlaceBadge(Icons.Rounded.MyLocation, 0xFF8C72FF, size = 32.dp)
+                    Spacer(Modifier.width(12.dp))
+                    Text(str.myPosition, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                }
+                // Saved places as presets until something is typed.
+                if (q.isBlank()) SavedPresets(ui.places) { sp -> vm.chooseOrigin(with(vm) { sp.asPlace() }); onDismiss() }
                 when {
                     ui.originSearching == true -> Text(str.searching, fontSize = 13.sp, modifier = Modifier.padding(vertical = 6.dp))
                     ui.originSearching == false && ui.originResults.isEmpty() ->
                         Text(str.noResults, fontSize = 13.sp, modifier = Modifier.padding(vertical = 6.dp))
                 }
-                ui.originResults.take(6).forEach { p ->
-                    Column(Modifier.fillMaxWidth().clickable { vm.chooseOrigin(p); onDismiss() }.padding(vertical = 8.dp)) {
-                        Text(p.title, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        if (p.subtitle.isNotBlank()) Text(p.subtitle, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
+                if (q.isNotBlank()) ui.originResults.take(6).forEach { p ->
+                    DialogPlaceRow(p, ui.places) { vm.chooseOrigin(p); onDismiss() }
                 }
             }
         },
@@ -644,6 +906,12 @@ private fun NavigationOverlay(
                 val speed = ui.demoSpeed
                 Text(if (speed < 1) "×${speed.toString().trimEnd('0')}" else "×${speed.toInt()}",
                     color = Color(0xFFB8F33A), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                // Play / pause, like a video player: the car stands still and the lanes there can be studied.
+                Box(
+                    Modifier.size(32.dp).clip(RoundedCornerShape(8.dp)).clickable { vm.toggleDemoPause() }
+                        .semantics { contentDescription = if (ui.demoPaused) str.demoPlay else str.demoPause },
+                    contentAlignment = Alignment.Center,
+                ) { Icon(if (ui.demoPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause, null, tint = Color.White) }
                 Row {
                     for ((faster, label, desc) in listOf(Triple(false, "−", str.demoSlower), Triple(true, "+", str.demoFaster))) {
                         Box(
@@ -661,7 +929,11 @@ private fun NavigationOverlay(
             etaText = SimpleDateFormat("HH:mm", Locale.GERMANY).format(Date(System.currentTimeMillis() + (nav.remainingSeconds * 1000).toLong())),
             onClose = vm::stopNavigation, onOverview = onOverview,
             // Whole journey, across re-routes: driven on earlier routes + driven on this one, out of that + remaining.
-            progress = (ui.journeyDriven + nav.distanceAlong).let { done -> (done / (done + nav.remainingDistance).coerceAtLeast(1.0)).toFloat() },
+            progress = if (ui.simulating) (nav.distanceAlong / nav.route.distance.coerceAtLeast(1.0)).toFloat()
+            else (ui.journeyDriven + nav.distanceAlong).let { done -> (done / (done + nav.remainingDistance).coerceAtLeast(1.0)).toFloat() },
+            // Demo: scrub bar (tap / drag to jump, also backwards) showing the distance from the start while dragging.
+            onSeek = if (ui.simulating) vm::seekDemo else null,
+            scrubLabel = { f -> phrases.distance(f * nav.route.distance) + " / " + phrases.distance(nav.route.distance) },
             modifier = Modifier.align(Alignment.BottomCenter),
         )
     }

@@ -43,7 +43,10 @@ class SpeedLimitProvider {
         val line = Polyline(geom)
         val minLat = geom.minOf { it.lat }; val maxLat = geom.maxOf { it.lat }
         val minLon = geom.minOf { it.lon }; val maxLon = geom.maxOf { it.lon }
-        val oneway = tags["oneway"] == "yes" || tags["highway"].orEmpty().startsWith("motorway") || tags["junction"] == "roundabout"
+        private val dir = OsmTags.onewayDir(tags)
+        val oneway = dir != 0
+        /** One-way against the way's drawing direction (`oneway=-1`): travel runs backwards along [line]. */
+        val reverse = dir < 0
         private val all = OsmTags.parseMaxspeed(tags["maxspeed"])
         val maxFwd = OsmTags.parseMaxspeed(tags["maxspeed:forward"]).takeIf { it != OsmTags.UNKNOWN } ?: all
         val maxBwd = OsmTags.parseMaxspeed(tags["maxspeed:backward"]).takeIf { it != OsmTags.UNKNOWN } ?: all
@@ -178,7 +181,9 @@ class SpeedLimitProvider {
                 if (off >= 18.0) continue
                 val diff = abs(Geo.bearingDelta(heading, w.line.bearingAt(proj.distanceAlong)))
                 val forward = diff < 45
-                if (!forward && !(diff > 135 && !w.oneway)) continue
+                // One-way ways only in their direction of travel (the other carriageway is left out).
+                if (forward && w.reverse) continue
+                if (!forward && !(diff > 135 && (!w.oneway || w.reverse))) continue
                 val v = if (forward) w.maxFwd else w.maxBwd
                 if (v != OsmTags.UNKNOWN && off < limitDist) { limitDist = off; limit = if (v == OsmTags.NO_LIMIT) null else v }
                 if (off < bikeDist) { bikeDist = off; bike = OsmTags.bikeLaneRight(w.tags, forward, w.oneway) }

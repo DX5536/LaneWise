@@ -72,7 +72,7 @@ class Phrases(private val lang: AppLanguage) {
         val road = listOfNotNull(step.ref?.takeIf { it.isNotBlank() }, step.name.takeIf { it.isNotBlank() })
         val toward = step.destinations?.takeIf { it.isNotBlank() }?.let { listOf(t("Richtung", "towards", "hướng"), it) } ?: emptyList()
         return when (m.type) {
-            ManeuverType.ARRIVE -> listOf(core(step, false))
+            ManeuverType.ARRIVE, ManeuverType.WAYPOINT -> listOf(core(step, false))
             ManeuverType.OFF_RAMP -> listOf(core(step, false)) + listOfNotNull(step.exitNumber?.takeIf { it.isNotBlank() }) + toward
             ManeuverType.ON_RAMP, ManeuverType.FORK -> listOf(core(step, road.isNotEmpty())) + road + toward
             else -> listOf(core(step, road.isNotEmpty())) + road
@@ -86,6 +86,7 @@ class Phrases(private val lang: AppLanguage) {
         return when (m.type) {
             ManeuverType.DEPART -> t("Starten", "Head out", "Xuất phát") + on
             ManeuverType.ARRIVE -> t("Sie haben Ihr Ziel erreicht", "You have arrived", "Bạn đã đến nơi")
+            ManeuverType.WAYPOINT -> t("Sie haben Ihren Zwischenstopp erreicht", "You have reached your stop", "Bạn đã đến điểm dừng")
             ManeuverType.ON_RAMP -> t("Auffahren", "Take the ramp", "Đi vào đường dẫn") + on
             ManeuverType.OFF_RAMP -> t(
                 "${cap(side(m.modifier))} halten zur Ausfahrt",
