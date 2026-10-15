@@ -60,6 +60,9 @@ Android 16, package `de.lanewise.app.debug`); the CI build/release APK is the ow
 - The phone can be driven over adb (screen 1440×3120; `adb shell input tap`, `uiautomator dump`, `screenrecord`); the
   owner allowed this for checking bugs. In Git Bash set `MSYS_NO_PATHCONV=1` for `/sdcard/...` paths.
 - Never block coroutine IO threads with OkHttp `execute()`: use `Http.fetch` (async, cancellable).
+- Lane logic changes: run the audit (`LANEWISE_LIVE=1 LANEWISE_AUDIT=1 gradlew testDebugUnitTest --tests '*LaneAuditLiveTest*'`,
+  ~40 min for 20 routes, run in the background) and check a route in the app with the debug demo intent
+  (`am start ... --es demo_from LAT,LON --es demo_to LAT,LON --ef demo_speed 4`, see ROADMAP v0.4.3 part 5).
 - Privacy: never write the owner's real addresses or places (start/destination) in docs, code, tests or UI text —
   use placeholders like "Musterstraße 1" / "Musterweg 3"; street names of lane bugs (not house numbers) are fine.
   `LANEWISE_LIVE=1 gradlew testDebugUnitTest --tests '*RouteRenderLiveTest*'` checks it (Overpass may time out;

@@ -301,3 +301,55 @@ fun markFullLengthLanes(sites: List<LaneSite>, laneCountAt: (Double) -> Int?): L
         s.copy(fullLength = true)
     }
 }
+
+/**
+ * Motorway junctions whose lane picture (OSRM) has more lanes than the carriageway the route is on (OSM `lanes`, known
+ * all along the last 400 m): the picture belongs to the wider road next to it. Kept are the [n] lanes around the usable
+ * ones — e.g. A 37 → A 7 at Kreuz Hannover-Buchholz: the route is already on a barrier-separated one-lane branch, OSRM
+ * shows `through | through | exit`; drawn as three lanes the app said "move right" and, as the ramp widened into
+ * Hamburg / Kassel, "move left" again. [fast] tells whether the road before a distance is a motorway / expressway.
+ */
+fun trimToRoadLanes(sites: List<LaneSite>, laneCountAt: (Double) -> Int?, fast: (Double) -> Boolean): List<LaneSite> = sites.map { s ->
+    if (s.laneCount < 2 || !fast(s.distanceAlong - 60)) return@map s
+    // 400 m: an exit lane that opens before the junction (pocket) shows up in OSM within that stretch and keeps the picture.
+    val counts = generateSequence(s.distanceAlong - 400) { it + 20 }.takeWhile { it < s.distanceAlong - 10 }.map(laneCountAt).toList()
+    if (counts.isEmpty() || counts.any { it == null }) return@map s
+    val n = counts.filterNotNull().max()
+    if (n >= s.laneCount) return@map s
+    val allowed = s.allowed()
+    val first = allowed.indexOfFirst { it }; val last = allowed.indexOfLast { it }
+    if (first < 0 || last - first + 1 > n) return@map s
+    // Window of n lanes that contains every usable lane, as far right as possible (exits leave to the right).
+    val start = (last - n + 1).coerceIn(0, first)
+    s.copy(lanes = s.lanes.subList(start, start + n), providerValid = s.providerValid?.subList(start, start + n))
+}
+
+/**
+ * Junctions with two nodes (dual carriageways), as OSRM reports them: lanes at the first node, where the route goes
+ * straight, and the turn 20–50 m later at the second. The lanes at the first node that already point the way of the
+ * turn are the turn lanes (OSRM marks them "not for this route" because the route goes straight there) — they are
+ * usable at the first node too. And a site within 30 m after a turn that repeats the turn's lanes is the same junction
+ * seen again: dropped. Audit route 16 (Blumenauer Straße → left into Fössestraße) asked for "move left" 30 m before the
+ * turn and then wobbled right and left.
+ */
+fun mergeDoubleNodeJunctions(sites: List<LaneSite>): List<LaneSite> {
+    val sorted = sites.sortedBy { it.distanceAlong }
+    val out = ArrayList<LaneSite>()
+    for ((i, s) in sorted.withIndex()) {
+        val prev = out.lastOrNull()
+        if (prev != null && prev.isManeuver && prev.turn != LaneDir.STRAIGHT && !s.isManeuver &&
+            s.distanceAlong - prev.distanceAlong <= 30 && s.lanes == prev.lanes) continue
+        val next = sorted.getOrNull(i + 1)
+        if (!s.isManeuver && next != null && next.isManeuver && next.turn != LaneDir.STRAIGHT &&
+            next.distanceAlong - s.distanceAlong <= 50) {
+            val allowed = s.allowed()
+            val extra = s.lanes.map { it != LaneDir.NONE && LaneDir.permits(it, next.turn) && it and LaneDir.STRAIGHT == 0 }
+            if (extra.any { it } && extra.indices.any { extra[it] && !allowed[it] }) {
+                out += s.copy(providerValid = allowed.indices.map { allowed[it] || extra[it] })
+                continue
+            }
+        }
+        out += s
+    }
+    return out
+}

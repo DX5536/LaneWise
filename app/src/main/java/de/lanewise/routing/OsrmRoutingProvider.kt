@@ -94,14 +94,16 @@ class OsrmRoutingProvider(
                 val inters = s["intersections"].arr.orEmpty()
                 val isMotorway = inters.any { i -> i["classes"].arr.orEmpty().any { it.str == "motorway" } }
                 val v = if (stepDur > 0) stepDist / stepDur else 0.0
+                // Autobahn by OSRM class or by its ref ("A 7"): the classes are often missing on motorway steps.
+                val autobahnRef = s["ref"].str.orEmpty().split(';').any { Regex("^A ?\\d+").containsMatchIn(it.trim()) }
                 val kind = when {
-                    isMotorway -> RoadKind.MOTORWAY
+                    isMotorway || autobahnRef -> RoadKind.MOTORWAY
                     v > 21.0 -> RoadKind.TRUNK
                     v > 14.0 -> RoadKind.RURAL
                     else -> RoadKind.URBAN
                 }
                 // A road is two-way if, at a later intersection of this step, we could have entered from where we came.
-                val twoWay = !isMotorway && inters.drop(1).any { i ->
+                val twoWay = !isMotorway && !autobahnRef && inters.drop(1).any { i ->
                     val inIdx = i["in"].int ?: return@any false
                     i["entry"][inIdx].bool == true
                 }
@@ -137,13 +139,13 @@ class OsrmRoutingProvider(
             distance = r["distance"].dbl ?: line.length,
             duration = r["duration"].dbl ?: 0.0,
             steps = steps,
-            laneSites = de.lanewise.lane.attachTurnsToLaneSites(
+            laneSites = de.lanewise.lane.mergeDoubleNodeJunctions(de.lanewise.lane.attachTurnsToLaneSites(
                 sites.sortedBy { it.distanceAlong }.distinctBy { it.distanceAlong.toInt() },
                 steps.filter {
                     it.maneuver.type != de.lanewise.core.model.ManeuverType.DEPART &&
                         it.maneuver.type != de.lanewise.core.model.ManeuverType.ARRIVE
                 }.map { it.distanceAlong to it.maneuver.modifier.toLaneDir() },
-            ),
+            )),
             roadSpans = spans,
         )
     }

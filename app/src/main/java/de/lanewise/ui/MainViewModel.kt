@@ -287,14 +287,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * A 37 → A 7 → exit Großburgwedel → L 381 / L 383 → roundabout → rural L 383, 25 km. The demo starts by itself on the
      * route option that really uses the A 7 and the roundabout.
      */
-    fun startTestDrive() {
+    fun startTestDrive() = startDemo(TEST_FROM, TEST_TO, strings.testStart, strings.testEnd, preferTestRoute = true)
+
+    /** Demo from [from] to [to] (test drive; debug builds also accept it from adb, see MainActivity). */
+    fun startDemo(from: LatLon, to: LatLon, fromName: String = "A", toName: String = "B", preferTestRoute: Boolean = false, speed: Double? = null) {
         testDrivePending = true
+        testPreferA7 = preferTestRoute
+        speed?.let { s -> _ui.update { it.copy(demoSpeed = s) } }
         _ui.update {
-            it.copy(origin = Place(strings.testStart, "", TEST_FROM), destination = Place(strings.testEnd, "", TEST_TO),
-                results = emptyList(), query = strings.testEnd, mode = Mode.PREVIEW)
+            it.copy(origin = Place(fromName, "", from), destination = Place(toName, "", to),
+                results = emptyList(), query = toName, mode = Mode.PREVIEW)
         }
         computeRoutes()
     }
+
+    private var testPreferA7 = false
 
     fun chooseDestination(place: Place) {
         _ui.update { it.copy(destination = place, results = emptyList(), query = place.title, mode = Mode.PREVIEW) }
@@ -421,7 +428,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _ui.update { it.copy(routes = ranked, selected = 0, routing = false, incidents = incidents) }
             if (testDrivePending && ranked.isNotEmpty()) {
                 testDrivePending = false
-                val i = ranked.indexOfFirst { r ->
+                val i = if (!testPreferA7) 0 else ranked.indexOfFirst { r ->
                     r.steps.any { it.ref.orEmpty().replace(" ", "").contains("A7") } &&
                         r.steps.any { it.maneuver.type == de.lanewise.core.model.ManeuverType.ROUNDABOUT }
                 }.coerceAtLeast(0)
@@ -447,6 +454,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 bikeLanes = (base.bikeLanes.filter { it.to <= from } + data.bikeLanes).sortedBy { it.from },
                 laneChanges = de.lanewise.lane.ChangeSpan.merge(
                     (base.laneChanges.filter { it.to <= from && it !in base.tomtomLaneLines } + data.laneChanges).sortedBy { it.from }, base.tomtomLaneLines),
+                sideRoads = base.sideRoads + data.sideRoads,
             ).withLaneCounts((base.laneCounts.filter { it.to <= from } + data.laneCounts).sortedBy { it.from })
             if (_ui.value.mode == Mode.NAVIGATING) {
                 engine = NavigationEngine(updated, laneGuidance).also { it.rehydrate(engine) }
@@ -464,6 +472,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 speedLimits = if (route.provider == "osrm") data.limits else route.speedLimits,
                 features = data.features, bikeLanes = data.bikeLanes,
                 laneChanges = de.lanewise.lane.ChangeSpan.merge(data.laneChanges, route.tomtomLaneLines),
+                sideRoads = data.sideRoads,
             ).withLaneCounts(data.laneCounts)
             _ui.update { st -> st.copy(routes = st.routes.map { if (it === route) updated else it }) }
         }
@@ -487,6 +496,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             navJob = viewModelScope.launch {
                 SimulatedLocationSource(route.geometry, { d -> (currentRoute?.speedLimitAt(d)?.kmh ?: 50).toDouble() }, { _ui.value.demoSpeed }).fixes()
                     .collect { onFix(it) }
+                // The demo drove to the end of the route line: arrived, even if the last fix snapped a few metres short
+                // (it stayed at "50 m" with an empty banner).
+                if (_ui.value.mode == Mode.NAVIGATING && _ui.value.simulating) {
+                    val last = currentRoute?.steps?.lastOrNull()
+                    stopNavigation()
+                    last?.let { _ui.update { st -> st.copy(message = Phrases(settings.value.language).instruction(it)) } }
+                }
             }
         } else {
             onLocationPermissionGranted()

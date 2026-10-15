@@ -28,6 +28,12 @@ data class LaneState(
     val assumedLateral: Int?,
     /** Route distance where [assumedLateral] was established (last junction passed / lane tapped); null = route start. */
     val assumedSince: Double? = null,
+    /**
+     * Keep right (§ 2 StVO) on motorways / expressways: from this route distance the car moves from
+     * [keepRightFromLateral] back to the rightmost through lane ([assumedLateral] is already that lane).
+     */
+    val keepRightFrom: Double? = null,
+    val keepRightFromLateral: Int? = null,
 ) {
     companion object { val EMPTY = LaneState(null, emptyList(), null, true, null) }
 }
@@ -47,8 +53,12 @@ class LaneGuidance(private val planner: LanePlanner = LanePlanner()) {
     private var overridePending = false
     private var lastPassedSite: LaneSite? = null
     private var lastPlan: List<LaneAdvice> = emptyList()
+    private var keepRightFrom: Double? = null
+    private var keepRightFromLateral: Int? = null
 
     fun reset() {
+        keepRightFrom = null
+        keepRightFromLateral = null
         assumedLateral = null
         assumedSince = null
         overridePending = false
@@ -69,6 +79,8 @@ class LaneGuidance(private val planner: LanePlanner = LanePlanner()) {
         keepRight: Boolean,
         changeSpans: List<ChangeSpan> = emptyList(),
         laneCountAt: ((Double) -> Int?)? = null,
+        /** Road kind of the route at a distance (keep right applies to the stretch, not to the junction's ramp step). */
+        roadKindAt: ((Double) -> RoadKind?)? = null,
     ): LaneState {
         // Advance the "assumed lane" over sites we have passed.
         val passed = sites.lastOrNull { it.distanceAlong < carDistance }
@@ -88,8 +100,32 @@ class LaneGuidance(private val planner: LanePlanner = LanePlanner()) {
             }
             lastPassedSite = passed
             assumedSince = passed.distanceAlong
+            keepRightFrom = null; keepRightFromLateral = null
+            // Rechtsfahrgebot: on a motorway / expressway the driver returns to the rightmost through lane after the
+            // junction, unless the next manoeuvre is too close for that to make sense (it is then planned from the
+            // lane the junction left the car in). In town (free lane choice, § 7 (3) StVO) the car stays where it is.
+            val lat = assumedLateral
+            // The stretch is judged by the route's road kind (every 100 m), not by the junction's own step (often a
+            // ramp): keep right once the route is on the motorway / expressway — after a merge, not on the ramp.
+            val end = nextSite?.distanceAlong ?: (passed.distanceAlong + 3000.0)
+            val kinds = generateSequence(passed.distanceAlong + 50.0) { it + 100.0 }.takeWhile { it < end - 100.0 }
+                .map { it to (roadKindAt?.invoke(it) ?: passed.roadKind) }.toList()
+            val fastFrom = kinds.firstOrNull { keepRightRoad(it.second) }?.first
+            val fastShare = if (kinds.isEmpty()) 0.0 else kinds.count { keepRightRoad(it.second) }.toDouble() / kinds.size
+            if (keepRight && lat != null && lat > 0 && fastFrom != null && fastShare >= 0.6) {
+                val motorway = kinds.any { it.second == RoadKind.MOTORWAY }
+                val start = fastFrom + if (motorway) 300.0 else 200.0
+                val back = KEEP_RIGHT_PER_LANE * lat
+                val nextKind = nextSite?.let { roadKindAt?.invoke(it.distanceAlong - 100.0) ?: it.roadKind } ?: passed.roadKind
+                if (end - start > back + leadDistance(nextKind, max(1, lat)) + 200.0) {
+                    keepRightFrom = start
+                    keepRightFromLateral = lat
+                    assumedLateral = 0
+                    assumedSince = start + back
+                }
+            }
         }
-        if (overridePending) { assumedSince = carDistance; overridePending = false }
+        if (overridePending) { assumedSince = carDistance; overridePending = false; keepRightFrom = null; keepRightFromLateral = null }
 
         val plan = planner.plan(
             sites,
@@ -97,7 +133,7 @@ class LaneGuidance(private val planner: LanePlanner = LanePlanner()) {
                 assumedSince = assumedSince),
         )
         lastPlan = plan
-        if (plan.isEmpty()) return LaneState(null, emptyList(), null, true, assumedLateral, assumedSince)
+        if (plan.isEmpty()) return LaneState(null, emptyList(), null, true, assumedLateral, assumedSince, keepRightFrom, keepRightFromLateral)
 
         // The first change is timed from where the assumed lane was established, not from the car: otherwise its start
         // slides along with the car inside the lead distance.
@@ -109,7 +145,17 @@ class LaneGuidance(private val planner: LanePlanner = LanePlanner()) {
             stayInLane = change == null,
             assumedLateral = assumedLateral,
             assumedSince = assumedSince,
+            keepRightFrom = keepRightFrom,
+            keepRightFromLateral = keepRightFromLateral,
         )
+    }
+
+    /** Roads with the keep-right rule in the lane advice: Autobahn and expressways (Kraftfahrstraße, fast roads). */
+    private fun keepRightRoad(kind: RoadKind) = kind == RoadKind.MOTORWAY || kind == RoadKind.TRUNK
+
+    companion object {
+        /** Metres the strip takes per lane when it moves back to the right lane (gentle, like a real lane change). */
+        const val KEEP_RIGHT_PER_LANE = 150.0
     }
 
     private fun firstChange(plan: List<LaneAdvice>, since: Double, spans: List<ChangeSpan>): LaneChangeInstruction? {

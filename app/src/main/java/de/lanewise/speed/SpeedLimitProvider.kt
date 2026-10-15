@@ -29,6 +29,7 @@ data class CorridorData(
     val bikeLanes: List<BikeLaneSpan>,
     val laneCounts: List<LaneCountSpan> = emptyList(),
     val laneChanges: List<ChangeSpan> = emptyList(),
+    val sideRoads: List<de.lanewise.core.model.SideRoad> = emptyList(),
 )
 
 /**
@@ -73,7 +74,8 @@ class SpeedLimitProvider {
             OsmTags.feature(tagsOf(el), LatLon(la, lo), 0.0)
         }
         val m = matchWays(line, fromDist, toDist, ways)
-        CorridorData(m.limits, matchFeatures(line, fromDist, toDist, nodes), m.bikes, m.lanes, m.changes)
+        CorridorData(m.limits, matchFeatures(line, fromDist, toDist, nodes), m.bikes, m.lanes, m.changes,
+            sideRoads(line, fromDist, toDist, ways.map { it.geom to it.tags }))
     }
 
     /**
@@ -102,6 +104,43 @@ class SpeedLimitProvider {
             if (f.kind == FeatureKind.TRAFFIC_SIGNALS || out.none { it.kind == f.kind && abs(it.distanceAlong - f.distanceAlong) < 30 }) out += f
         }
         return out
+    }
+
+    companion object {
+        private val SIDE_CLASSES = setOf("motorway", "motorway_link", "trunk", "trunk_link", "primary", "secondary")
+
+        /**
+         * One-way carriageways (motorway … secondary) that run beside the route in its direction, 4–35 m away, for at
+         * least 60 m: the parts that do are returned as [de.lanewise.core.model.SideRoad]s. The route's own way (≈ 0 m)
+         * and the opposite carriageway are left out. Pure (unit-tested).
+         */
+        fun sideRoads(line: Polyline, fromDist: Double, toDist: Double, ways: List<Pair<List<LatLon>, Map<String, String>>>):
+            List<de.lanewise.core.model.SideRoad> {
+            val out = ArrayList<de.lanewise.core.model.SideRoad>()
+            for ((geom, tags) in ways) {
+                val hw = tags["highway"] ?: continue
+                if (hw !in SIDE_CLASSES || geom.size < 2) continue
+                val oneway = tags["oneway"] == "yes" || hw.startsWith("motorway")
+                if (!oneway) continue
+                val wl = Polyline(geom)
+                var run = ArrayList<LatLon>()
+                fun flush() {
+                    if (run.size >= 2 && Polyline(run).length >= 60.0) out += de.lanewise.core.model.SideRoad(run, tags)
+                    run = ArrayList()
+                }
+                var d = 0.0
+                while (d <= wl.length) {
+                    val p = wl.pointAt(d)
+                    val pr = line.project(p)
+                    val ok = pr != null && abs(pr.signedOffset) in 4.0..35.0 && pr.distanceAlong in fromDist..toDist &&
+                        abs(Geo.bearingDelta(wl.bearingAt(d), line.bearingAt(pr.distanceAlong))) < 30.0
+                    if (ok) run += p else flush()
+                    d += 10.0
+                }
+                flush()
+            }
+            return out
+        }
     }
 
     /** Samples the route every 25 m, matches the nearest way in driving direction, and builds spans. */

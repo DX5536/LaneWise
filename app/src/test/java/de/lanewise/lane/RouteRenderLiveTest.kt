@@ -32,8 +32,8 @@ class RouteRenderLiveTest {
         var route: Route = routes.getOrElse(System.getenv("LANEWISE_ALT")?.toIntOrNull() ?: 1) { routes.first() }
         val c = runCatching { SpeedLimitProvider().corridor(route.geometry, 0.0, route.distance) }
             .onFailure { println("corridor unavailable (${it.message}) - checking without OSM lane counts") }.getOrNull()
-        if (c != null) route = route.copy(laneChanges = c.laneChanges, bikeLanes = c.bikeLanes).withLaneCounts(c.laneCounts)
-        println("route ${route.distance.toInt()} m, ${route.laneSites.size} lane sites, ${route.laneCounts.size} lane-count spans")
+        if (c != null) route = route.copy(laneChanges = c.laneChanges, bikeLanes = c.bikeLanes, sideRoads = c.sideRoads).withLaneCounts(c.laneCounts)
+        println("route ${route.distance.toInt()} m, ${route.laneSites.size} lane sites, ${route.laneCounts.size} lane-count spans, ${route.sideRoads.size} side roads")
         route.steps.forEach { st -> println("  step @${st.distanceAlong.toInt()} ${st.maneuver.type} ${st.maneuver.modifier} ${st.name}") }
         route.laneSites.forEach { println("  site @${it.distanceAlong.toInt()} lanes=${it.lanes} turn=${it.turn} maneuver=${it.isManeuver} valid=${it.providerValid}") }
 
@@ -48,7 +48,7 @@ class RouteRenderLiveTest {
         var car = 20.0
         while (car < route.distance - 50) {
             val state = guidance.update(route.laneSites, car, avoidLaneChanges = true, keepRight = true, route.laneChanges,
-                route::laneCountAt.takeIf { route.laneCounts.isNotEmpty() })
+                route::laneCountAt.takeIf { route.laneCounts.isNotEmpty() }, { d -> route.roadSpanAt(d)?.kind })
             val live = LaneRibbonBuilder.build(route, state, car)
             for (sh in live.shapes.filter { it.kind != LaneRibbonBuilder.Kind.TURN_ARROW }) {
                 val out = sh.points.filter { p -> surfaces.none { inside(it, p) } && nearestOffset(route, p) > 1.0 }
@@ -78,7 +78,7 @@ class RouteRenderLiveTest {
         val g2 = LaneGuidance()
         for (st in route.steps.filter { it.maneuver.type != de.lanewise.core.model.ManeuverType.DEPART }) {
             val state = g2.update(route.laneSites, st.distanceAlong - 60, true, true, route.laneChanges,
-                route::laneCountAt.takeIf { route.laneCounts.isNotEmpty() })
+                route::laneCountAt.takeIf { route.laneCounts.isNotEmpty() }, { d -> route.roadSpanAt(d)?.kind })
             val a = state.nextAdvice ?: continue
             println("  before step @${st.distanceAlong.toInt()} ${st.maneuver.modifier}: next site @${a.site.distanceAlong.toInt()} " +
                 "lanes=${a.site.lanes} turn=${a.site.turn} rec=${a.recommended}")
@@ -89,12 +89,22 @@ class RouteRenderLiveTest {
             var d = 0.0
             while (d < route.distance) {
                 val s = g3.update(route.laneSites, d, true, true, route.laneChanges,
-                    route::laneCountAt.takeIf { route.laneCounts.isNotEmpty() })
+                    route::laneCountAt.takeIf { route.laneCounts.isNotEmpty() }, { d -> route.roadSpanAt(d)?.kind })
                 val a = s.nextAdvice
                 if (a != null && a.site.distanceAlong - d < 400) println("  car ${d.toInt()} lanesHere=${route.laneCountAt(d)} assumed=${s.assumedLateral} " +
                     "site@${a.site.distanceAlong.toInt()} ${a.site.lanes} turn=${a.site.turn} man=${a.site.isManeuver} rec=${a.recommended} " +
                     "chg=${a.changeFromPrevious} pending=${s.pendingChange?.let { "${it.lanes}@${it.startAt.toInt()}" }}")
                 d += 20.0
+            }
+        }
+        // 5) Lane-count profile (LANEWISE_PROFILE=1): OSM lanes, road kind and the drawn lane count every 200 m.
+        if (System.getenv("LANEWISE_PROFILE") == "1") {
+            var d = 0.0
+            while (d < route.distance) {
+                val span = route.roadSpanAt(d)
+                println("  profile ${d.toInt()} osmLanes=${route.laneCountAt(d)} kind=${span?.kind} twoWay=${span?.twoWay} " +
+                    "drawn=${LaneRibbonBuilder.drawnLanes(route, d)}")
+                d += 200.0
             }
         }
         println("problems: $problems")

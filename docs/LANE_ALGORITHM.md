@@ -69,6 +69,13 @@ Phones cannot see which lane they are in (that needs HD maps + RTK GNSS — AMAP
 assumes you followed the advice; after a site the assumed lane is the recommended one (mapped
 through turns). Tap a lane in the lane bar to correct it; the plan updates immediately.
 
+## Keep right (Rechtsfahrgebot)
+
+On motorways and expressways the assumed lane returns to the rightmost through lane after each junction (300 m /
+200 m after the route is on that road, 150 m per lane to glide over), if most of the stretch to the next junction is
+motorway / trunk and there is room for the next change; the next manoeuvre is then planned from the right lane. In town
+there is free lane choice (§ 7 (3) StVO): the car keeps the lane the junction left it in.
+
 ## Lanes that open are not lane changes
 
 `LanePlanner.effectiveChanges`: only crossings between lanes that existed all the way since the previous

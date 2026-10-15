@@ -107,7 +107,7 @@ class NavigationEngine(
 
         val kind = route.roadSpanAt(along)?.kind ?: RoadKind.URBAN
         val lanes = laneGuidance.update(route.laneSites, along, settings.avoidLaneChanges, settings.keepRight, route.laneChanges,
-            route::laneCountAt.takeIf { route.laneCounts.isNotEmpty() })
+            route::laneCountAt.takeIf { route.laneCounts.isNotEmpty() }, { d -> route.roadSpanAt(d)?.kind })
         val arrived = remaining < 25
 
         val ahead = route.features.filter { it.distanceAlong > along - 5 && it.distanceAlong - along < 400 }

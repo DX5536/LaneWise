@@ -312,4 +312,66 @@ class LanePlannerTest {
         // Unknown lane counts: unchanged.
         assertTrue(!markFullLengthLanes(listOf(a, b)) { null }[1].fullLength)
     }
+
+    /**
+     * Owner's demo (A 7 towards Großburgwedel): after the motorway merge the strip stayed in the left lane for 6 km.
+     * Rechtsfahrgebot: back to the right lane after the junction, change for the exit only in the lead distance.
+     * In town (free lane choice) the car may stay left.
+     */
+    @Test
+    fun keepRightOnTheMotorwayBetweenJunctions() {
+        fun run(kind: RoadKind): List<LaneState> {
+            val merge = LaneSite(100.0, listOf(S, S), listOf(true, false), S, false, kind)   // merge: left lane only
+            val exit = LaneSite(4000.0, listOf(S, S, R), null, R, true, kind)
+            val g = LaneGuidance()
+            return listOf(50.0, 150.0, 1000.0, 2000.0, 3500.0).map { car -> g.update(listOf(merge, exit), car, true, true) }
+        }
+        val motorway = run(RoadKind.MOTORWAY)
+        assertEquals(1, motorway[0].plan.first().site.lateral(motorway[0].plan.first().recommended))
+        // After the merge: right lane expected (lateral 0), the strip glides there from 450 m (first motorway sample + 300 m).
+        assertEquals(0, motorway[2].assumedLateral)
+        assertEquals(450.0, motorway[2].keepRightFrom!!, 1e-6)
+        assertEquals(1, motorway[2].keepRightFromLateral)
+        // The exit (right pocket) is one change from the right lane, advised in the lead distance only.
+        val change = motorway[3].pendingChange!!
+        assertEquals(-1, change.lanes)
+        assertTrue(change.startAt >= 4000.0 - 600.0 - 20)
+        // In town nothing moves: the car stays in the lane the junction left it in.
+        val town = run(RoadKind.URBAN)
+        assertEquals(1, town[2].assumedLateral)
+        assertNull(town[2].keepRightFrom)
+    }
+
+    /**
+     * Owner's test drive (A 37 → A 7, Kreuz Hannover-Buchholz): the route is already on a barrier-separated one-lane
+     * branch (OSM lanes=1) but OSRM shows `through | through | exit` — "move right", then "move left" again. Trimmed to
+     * the one real lane. An exit lane that opens before the junction (OSM 3 then 4 lanes) keeps the full picture.
+     */
+    @Test
+    fun motorwayLanePictureTrimmedToTheCarriageway() {
+        val exit = LaneSite(1000.0, listOf(0, 0, LaneDir.SLIGHT_RIGHT), listOf(false, false, true), LaneDir.SLIGHT_RIGHT, true, RoadKind.MOTORWAY)
+        val trimmed = trimToRoadLanes(listOf(exit), { 1 }, { true }).single()
+        assertEquals(listOf(LaneDir.SLIGHT_RIGHT), trimmed.lanes)
+        assertEquals(listOf(true), trimmed.providerValid)
+        // A real exit pocket: OSM 3 lanes, 4 for the last 150 m — unchanged.
+        val a7 = LaneSite(5000.0, listOf(0, 0, 0, LaneDir.SLIGHT_RIGHT), listOf(false, false, false, true), LaneDir.SLIGHT_RIGHT, true, RoadKind.MOTORWAY)
+        assertEquals(a7, trimToRoadLanes(listOf(a7), { d -> if (d < 4850) 3 else 4 }, { true }).single())
+        // Not on a motorway / expressway, or lane counts unknown: unchanged.
+        assertEquals(exit, trimToRoadLanes(listOf(exit), { 1 }, { false }).single())
+        assertEquals(exit, trimToRoadLanes(listOf(exit), { null }, { true }).single())
+    }
+
+    /** Audit route 16: Blumenauer Straße → left into Fössestraße, a junction with two nodes 40 m apart. */
+    @Test
+    fun doubleNodeJunctionUsesTheTurnLanesAtTheFirstNode() {
+        val first = LaneSite(12259.0, listOf(L, S, R), listOf(false, true, true), S, false, RoadKind.URBAN)
+        val turn = LaneSite(12299.0, listOf(L, L, S), listOf(true, true, false), L, true, RoadKind.URBAN)
+        val again = LaneSite(12320.0, listOf(L, L, S), listOf(true, true, false), S, false, RoadKind.URBAN)
+        val merged = mergeDoubleNodeJunctions(listOf(first, turn, again))
+        assertEquals(2, merged.size)                                  // the repeat after the turn is dropped
+        assertTrue(merged[0].allowed()[0])                            // left lane usable at the first node
+        val plan = LanePlanner().plan(merged, LanePlanner.Options(currentLateral = 1, carDistance = 12000.0))
+        assertEquals(0, plan[0].recommended)                          // already in the left lane at the first node
+        assertEquals(0, plan[1].changeFromPrevious)                   // no change between the two nodes
+    }
 }

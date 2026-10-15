@@ -90,6 +90,26 @@ object LaneRibbonBuilder {
     const val CHEVRON_SPACING = 9.0
     const val CHEVRON_AHEAD = 180.0
 
+    /**
+     * A junction the traffic flows through without stopping: on a motorway / expressway (by the road leading to it), or
+     * a slight fork / exit on a ramp without traffic lights. Drawn without stop line, painted arrows, solid lines and
+     * without the turn connector that squeezes the lanes into the turn — that is how town junctions look, not an
+     * Autobahn diverge.
+     */
+    fun flowing(route: Route, site: LaneSite): Boolean {
+        val approach = route.roadSpanAt(site.distanceAlong - 60)?.kind ?: site.roadKind
+        if (approach == RoadKind.MOTORWAY || approach == RoadKind.TRUNK) return true
+        val slight = site.turn and (LaneDir.SLIGHT_LEFT or LaneDir.SLIGHT_RIGHT) != 0 || !site.isManeuver
+        val lights = route.features.any {
+            it.kind == de.lanewise.core.model.FeatureKind.TRAFFIC_SIGNALS && abs(it.distanceAlong - site.distanceAlong) < 60
+        }
+        return slight && !lights && approach != RoadKind.URBAN && site.lanes.all { it and (LaneDir.LEFT or LaneDir.RIGHT or LaneDir.SHARP_LEFT or LaneDir.SHARP_RIGHT) == 0 }
+    }
+
+    /** Number of lanes drawn at route distance [d] (diagnostics, live tests). */
+    fun drawnLanes(route: Route, d: Double): Int? =
+        gridSamples(route, max(0.0, d - 130), min(route.geometry.length, d + 130)).minByOrNull { abs(it.d - d) }?.nominal
+
     /** Samples on the fixed route grid covering [from]..[to] (plus smoothing context), with lane data. */
     private fun gridSamples(route: Route, from: Double, to: Double): List<S> {
         val a = max(0.0, kotlin.math.floor(from / GRID) * GRID)
@@ -126,7 +146,7 @@ object LaneRibbonBuilder {
 
         // Dividers: one per lane boundary, only where both neighbouring lanes (almost) fully exist.
         val maxLanes = samples.maxOf { it.nominal }
-        val near = route.laneSites.filter { it.distanceAlong in (from - 40)..(to + 40) }
+        val near = route.laneSites.filter { it.distanceAlong in (from - 40)..(to + 40) && !flowing(route, it) }
         fun nearSite(d: Double) = near.any { d in (it.distanceAlong - 30)..it.distanceAlong }
         for (k in 1 until maxLanes) {
             // Solid: last 30 m before a junction, or where OSM `change:lanes` forbids crossing this line.
@@ -146,6 +166,8 @@ object LaneRibbonBuilder {
         for (site in route.laneSites.filter { it.distanceAlong >= from && it.distanceAlong < to }) {
             // Second node of the same junction (dual carriageway): one stop line and one row of arrows is enough.
             if (allSites.any { it.distanceAlong < site.distanceAlong && site.distanceAlong - it.distanceAlong < 35 }) continue
+            // Motorway exits, forks and merges flow through: no stop line, no arrows (owner: the A 37 exit looked messy).
+            if (flowing(route, site)) continue
             val s = all.minByOrNull { abs(it.d - (site.distanceAlong - 2)) } ?: continue
             if (abs(s.d - (site.distanceAlong - 2)) > 6) continue
             out += Shape(listOf(s.at(s.left), s.at(s.left + site.laneCount * s.w)), Kind.STOP, false, 0.5)
@@ -273,7 +295,9 @@ object LaneRibbonBuilder {
         // rightmost through lane), which stays put while turn pockets open on either side, then smoothed over ±20 m
         // so lane-count changes and pocket openings become gentle curves instead of steps.
         val plan = state.plan
-        val keys = if (plan.isNotEmpty()) keyframes(state, carDistance, behind)
+        // Without a plan (past the last junction with lane data) the car stays in its lane — after a turn, which leaves
+        // the lane unknown, in the rightmost lane of the new road (owner: no strip on the Berkhopstraße).
+        val keys = if (plan.isNotEmpty()) keyframes(state, carDistance, behind, route)
         else listOf(carDistance to (state.assumedLateral ?: 0).toDouble())
         val rawCentres = samples.map { s ->
             val lat = interpolate(keys, s.d)
@@ -313,7 +337,7 @@ object LaneRibbonBuilder {
             }
             // Soft band under the lime strip: every lane the route can use up to each site (AMAP's two-level carpet).
             band(plan, samples, carDistance - behind)?.let { out += it }
-        } else if (state.assumedLateral != null && route.laneSites.isNotEmpty() && route.laneSites.all { it.distanceAlong < carDistance }) {
+        } else if (route.laneSites.isNotEmpty() && route.laneSites.all { it.distanceAlong < carDistance }) {
             // Past the last junction with lane data: keep the strip in the lane the car is in, up to the destination.
             val at = samples.indices.associateBy { samples[it] }
             out += polygon(line(samples) { centres[at[it]!!] - it.w * 0.36 },
@@ -522,7 +546,7 @@ object LaneRibbonBuilder {
      */
     private fun connectTurnLanes(route: Route, samples: List<S>) {
         for (site in route.laneSites) {
-            if (!site.isManeuver || site.turn == LaneDir.STRAIGHT) continue
+            if (!site.isManeuver || site.turn == LaneDir.STRAIGHT || flowing(route, site)) continue
             val allowed = site.allowed()
             val first = allowed.indexOfFirst { it }
             val last = allowed.indexOfLast { it }
@@ -626,7 +650,7 @@ object LaneRibbonBuilder {
     }
 
     /** Lateral key frames (distance → lateral coordinate) with smooth transitions at advised changes. */
-    private fun keyframes(state: LaneState, carDistance: Double, behind: Double): List<Pair<Double, Double>> {
+    fun keyframes(state: LaneState, carDistance: Double, behind: Double, route: Route? = null): List<Pair<Double, Double>> {
         val plan = state.plan
         val keys = ArrayList<Pair<Double, Double>>()
         val startLat = (state.assumedLateral ?: plan.first().site.lateral(plan.first().recommended)).toDouble()
@@ -636,12 +660,32 @@ object LaneRibbonBuilder {
         var prevD = min(carDistance, state.assumedSince ?: carDistance)
         keys += min(carDistance - behind, prevD) to startLat
         var cur = startLat
+        // Keep right after a motorway junction: glide from the lane the junction left the car in to the right lane.
+        val krFrom = state.keepRightFrom
+        val krLat = state.keepRightFromLateral
+        if (krFrom != null && krLat != null) {
+            keys.clear()
+            val end = krFrom + LaneGuidance.KEEP_RIGHT_PER_LANE * krLat
+            keys += min(carDistance - behind, krFrom) to krLat.toDouble()
+            keys += krFrom to krLat.toDouble()
+            keys += end to startLat
+            prevD = max(prevD, end)
+        }
         val guidance = LaneGuidance()
         for (a in plan) {
             // Through a turn the car goes straight into the chosen lane of the new road.
             a.entryLateral?.let { e -> keys += prevD + 3 to e.toDouble(); cur = e.toDouble() }
             val target = a.site.lateral(a.recommended).toDouble()
-            if (target != cur) {
+            // A lane entered for free because the road widens (no lane change in the plan): the strip moves into it
+            // where the road widens, not in the lead distance — otherwise it showed the car in a lane it never was in and
+            // then "moved" it over (A 37 → A 7: one lane widening to three, exit on the right; looked like right-left).
+            val widening = if (target != cur && a.changeFromPrevious == 0 && route != null && route.laneCounts.isNotEmpty())
+                widensAt(route, prevD, a.site.distanceAlong) else null
+            if (widening != null) {
+                keys += widening to cur
+                keys += min(a.site.distanceAlong - 5, widening + 40) to target
+                cur = target
+            } else if (target != cur) {
                 val changes = abs(target - cur)
                 val trans = 60.0 * changes * when (a.site.roadKind) {
                     RoadKind.MOTORWAY -> 2.5; RoadKind.TRUNK -> 2.0; RoadKind.RURAL -> 1.5; RoadKind.URBAN -> 1.0
@@ -657,6 +701,25 @@ object LaneRibbonBuilder {
             prevD = a.site.distanceAlong
         }
         return keys.sortedBy { it.first }
+    }
+
+    /** Lateral coordinate of the recommended strip at route distance [d] (audits / live tests). */
+    fun stripLateralAt(route: Route, state: LaneState, carDistance: Double, d: Double): Double? {
+        if (state.plan.isEmpty()) return state.assumedLateral?.toDouble()
+        return interpolate(keyframes(state, carDistance, 60.0, route), d)
+    }
+
+    /** Where the road gets more lanes between [d0] and [d1] (OSM lane counts, 10 m steps), or null. */
+    private fun widensAt(route: Route, d0: Double, d1: Double): Double? {
+        var prev: Int? = null
+        var d = d0 + 5
+        while (d < d1 - 5) {
+            val n = route.laneCountAt(d)
+            if (n != null && prev != null && n > prev) return d - 10
+            if (n != null) prev = n
+            d += 10
+        }
+        return null
     }
 
     private fun smooth(t: Double) = t.coerceIn(0.0, 1.0).let { it * it * (3 - 2 * it) }

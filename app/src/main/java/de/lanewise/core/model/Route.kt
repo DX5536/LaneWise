@@ -100,13 +100,19 @@ data class Route(
     val tomtomLaneLines: List<de.lanewise.lane.ChangeSpan> = emptyList(),
     /** [duration] includes live traffic (TomTom), so jams must not be added again by the scorer. */
     val trafficEta: Boolean = false,
+    /** Carriageways running beside the route in the same direction (OSM), drawn as context lanes. */
+    val sideRoads: List<SideRoad> = emptyList(),
 ) {
     fun laneChangeAt(d: Double): de.lanewise.lane.ChangeSpan? = laneChanges.firstOrNull { d >= it.from && d < it.to }
     fun laneCountAt(d: Double): Int? = laneCounts.firstOrNull { d >= it.from && d < it.to }?.count
 
     /** With OSM lane counts; lane sites are re-checked for turn lanes that run the whole way ([markFullLengthLanes]). */
     fun withLaneCounts(counts: List<LaneCountSpan>): Route = copy(laneCounts = counts).let { r ->
-        r.copy(laneSites = de.lanewise.lane.markFullLengthLanes(r.laneSites, r::laneCountAt))
+        r.copy(laneSites = de.lanewise.lane.markFullLengthLanes(
+            de.lanewise.lane.trimToRoadLanes(r.laneSites, r::laneCountAt) { d ->
+                r.roadSpanAt(d)?.kind.let { it == de.lanewise.lane.RoadKind.MOTORWAY || it == de.lanewise.lane.RoadKind.TRUNK }
+            },
+            r::laneCountAt))
     }
     fun bikeLaneAt(d: Double): BikeLaneSpan? = bikeLanes.firstOrNull { d >= it.from && d < it.to }
     fun speedLimitAt(d: Double): SpeedLimitSpan? = speedLimits.firstOrNull { d >= it.from && d < it.to }
@@ -136,6 +142,12 @@ data class TrafficIncident(
     /** False for announced roadworks that have not started yet (Autobahn GmbH `future`). */
     val active: Boolean = true,
 )
+
+/**
+ * A carriageway beside the route in the same direction (separate OSM way): e.g. the two-lane A 37 main carriageway
+ * 11 m beside the one-lane branch the route takes towards the A 7 — without it the map showed a lone lane.
+ */
+data class SideRoad(val geometry: List<LatLon>, val tags: Map<String, String>)
 
 /** Kinds of Autobahn GmbH points of interest shown as optional map icons. */
 enum class AutobahnPoiKind { WEBCAM, PARKING, CHARGING }

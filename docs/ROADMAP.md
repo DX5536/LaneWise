@@ -326,7 +326,60 @@ Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which
       0 problems; advice: B 3 exit lane, keep-right lane past exits, fork lanes A 37 → A 7, A 7 exit lane, right-turn
       lane on the L 381.
 
+## Done (v0.4.3, part 4, 2026-10-15) — owner's demo on the test drive
+- [x] **Keep right on the Autobahn** (Rechtsfahrgebot, § 2 StVO; owner's screenshot: strip in the left lane of the A 7
+      for 6 km before the exit): after a junction on a motorway / expressway the expected lane returns to the rightmost
+      through lane — 300 m (motorway) / 200 m (expressway) after the route is on that road (after a merge, not on the
+      ramp), gliding 150 m per lane — when ≥ 60 % of the stretch to the next junction is motorway / trunk and there is
+      room for the next change. The next manoeuvre is then planned from the right lane (a left exit is advised in the
+      lead distance only). In town (free lane choice, § 7 (3) StVO) the car keeps the lane the junction left it in,
+      e.g. stays left for a coming left turn. `LaneState.keepRightFrom`, `LaneGuidance.update(roadKindAt = …)`,
+      test `keepRightOnTheMotorwayBetweenJunctions`. Live trace of the test drive: right lane on the B 3 and the A 7.
+- [x] **Autobahn recognised by its ref** ("A 7"): OSRM often omits the `motorway` class, so the A 7 counted as an
+      expressway (`OsrmRoutingProvider`).
+- [x] **"Only one lane on the Autobahn"**: correct for the carriageway the route is on (A 37 → A 7 branch, OSM way
+      270470746, `lanes=1`), but the two-lane main carriageway 11 m beside it (way 238572934) was not drawn.
+      Carriageways beside the route in the same direction (motorway … secondary, one-way, 4–35 m away, ≥ 60 m) are now
+      found in the corridor data (`SpeedLimitProvider.sideRoads`, `Route.sideRoads`) and drawn as context lanes with
+      the street-lane builder. Test drive: 15 side carriageways. `SideRoadsTest`.
+- [x] `RouteRenderLiveTest`: `LANEWISE_PROFILE=1` prints OSM lanes, road kind and drawn lanes every 200 m.
+
+## Done (v0.4.3, part 5, 2026-10-15) — test drive on the phone + 20-route lane audit
+- [x] **Messy Autobahn exit** (A 37 → A 7): a motorway diverge was drawn like a town junction — stop line across the
+      motorway, painted arrows, solid lines and the turn connector squeezing the lanes into the exit. Junctions on a
+      motorway / expressway (by the road leading to them) and slight forks / exits on ramps without traffic lights
+      are now "flowing" (`LaneRibbonBuilder.flowing`): no stop line, arrows, solid lines or connector.
+- [x] **No strip after the last junction when it was a turn** (Berkhopstraße): the lane is unknown after a turn, so
+      nothing was drawn; now the rightmost lane of the new road, up to the destination.
+- [x] **Demo did not end at the destination** (stayed at "50 m" with an empty banner): the end of the simulation now
+      ends the navigation like an arrival.
+- [x] **A 37 "move right, then back left"** (owner's picture): the route is on a barrier-separated one-lane branch
+      (OSM `lanes=1`, checked on the DOP20 photo) that widens to three lanes 150 m before the exit; OSRM shows
+      `through | through | exit`. Moving into the exit lane is free (the road widens) but the strip sat in the "middle"
+      lane and moved over in the lead distance. A lane entered for free now gets the strip where the road widens
+      (`LaneRibbonBuilder.widensAt`). Also: on motorways a lane picture with more lanes than OSM counts on the
+      carriageway along the last 400 m is trimmed to the usable ones (`trimToRoadLanes`, test).
+- [x] **Double-node junctions** (audit route 16, Blumenauer Straße → left into Fössestraße): lanes at the first node
+      that already point the way of the turn 20–50 m later are usable there (OSRM marks them "not for this route"),
+      and a site ≤ 30 m after a turn that repeats its lanes is dropped (`mergeDoubleNodeJunctions`, test) — no more
+      "move left" 30 m before the turn and right-left wobble after it.
+- [x] **Lane audit over random routes** (`LaneAuditLiveTest`, `LANEWISE_LIVE=1 LANEWISE_AUDIT=1`, `LANEWISE_AUDIT_N`,
+      `LANEWISE_AUDIT_SEED`, `LANEWISE_AUDIT_ROUTES="lat,lon>lat,lon;…"`): drives every route like the demo and flags
+      opposite change instructions within 800 m (ZIGZAG), the strip moving one way and back between junctions
+      (STRIP_ZIGZAG), late changes (LATE), keep-right violations on motorways (KEEP_RIGHT) and unusable recommended
+      lanes (NOT_ALLOWED). First run, 20 routes in Region Hannover (seed 1, 8 with Autobahn, 312 km): 8 findings
+      (5 STRIP_ZIGZAG, 2 LATE, 1 ZIGZAG). After the fixes above the 4 affected routes have 3 left (STRIP_ZIGZAG, see
+      open items); no KEEP_RIGHT or NOT_ALLOWED findings.
+- [x] **Debug demo from adb** (debug builds): `adb shell am start -S -n de.lanewise.app.debug/de.lanewise.MainActivity
+      --es demo_from LAT,LON --es demo_to LAT,LON --ef demo_speed 4` — any route in the real app. Audit route 16 on the
+      phone (the app's own top route, 20 km B 443 / B 3 / B 6 / Westschnellweg): right lane on the expressways, one
+      change for the Westschnellweg exit, no zig-zag, 120 fps without frame gaps (longest repeat 2 frames).
+
 ## Video review — still open
+- [ ] Audit leftovers (STRIP_ZIGZAG): Aegidientorplatz → Friedrichswall (`left | left | slight_right | slight_right`,
+      route "straight" on the left lanes: the slight-right lanes count as right pockets, the strip shifts one lane after
+      the junction), Hildesheimer Straße 52.32476,9.78265 (no assumed lane yet after a turn), Bornumer
+      Straße 52.35799,9.70305. Re-run the audit with more seeds after each lane-logic change.
 - [ ] Owner: check the 3D car (size, colours, behaviour in tunnels / under bridges) and the automatic theme on the phone.
 - [ ] Owner: check the car overlay (size vs. road at different zooms, tilt changes, pan away and recenter) and the
       corners (v0.4.3).

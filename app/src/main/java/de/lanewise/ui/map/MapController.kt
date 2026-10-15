@@ -607,7 +607,10 @@ class MapController(private val context: Context) {
     private var roadBikes = true
     private var roadExtras = LaneRibbonBuilder.RoadExtras()
     private val roadChunks = HashMap<Int, List<LaneRibbonBuilder.Shape>>()
+    /** Carriageways beside the route in its direction (context lanes, e.g. a parallel motorway carriageway). */
+    private var sideShapes: List<LaneRibbonBuilder.Shape> = emptyList()
     private var roadClosuresOn = false
+    @Volatile private var sideRoute: Route? = null
     private var shownChunks: Set<Int> = emptySet()
 
     /**
@@ -631,7 +634,7 @@ class MapController(private val context: Context) {
             LaneRibbonBuilder.buildRoad(route, c * ROAD_CHUNK, minOf(route.distance, (c + 1) * ROAD_CHUNK), showBikeLanes, roadExtras)
         }
         roadChunks.keys.retainAll { it in (first - 1)..(want.max() + 1) }
-        return want to features(want.sorted().flatMap { roadChunks[it].orEmpty() })
+        return want to features(want.sorted().flatMap { roadChunks[it].orEmpty() } + sideShapes)
     }
 
     /** What the shown highlight was built for; a new build is needed only when this changes or the car moved on. */
@@ -655,6 +658,13 @@ class MapController(private val context: Context) {
                 val result = runCatching {
                     withContext(Dispatchers.Default) {
                         val r = LaneRibbonBuilder.build(snap.route, snap.lanes, along, fade = fade, withChevrons = chev)
+                        if (snap.route !== sideRoute) {
+                            sideRoute = snap.route
+                            sideShapes = runCatching {
+                                de.lanewise.osm.StreetLanes.build(snap.route.sideRoads.map { de.lanewise.osm.OsmStreet(it.geometry, it.tags) })
+                                    .filter { it.kind != LaneRibbonBuilder.Kind.BIKE }
+                            }.getOrDefault(emptyList())
+                        }
                         val road = if (showRibbons && !streetsMode) buildRoad(snap.route, along, showBikeLanes, shown, furniture, closures) else null
                         Triple(r, if (showRibbons) features(r.shapes) else null, road)
                     }
