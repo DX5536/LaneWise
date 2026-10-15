@@ -34,6 +34,17 @@
             </intent-filter>
         </activity>
 
+        <!-- Lane reports shared from Settings (lane_reports.geojson → JOSM / iD / mail). -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <service
             android:name=".nav.NavigationService"
             android:exported="false"

@@ -374,4 +374,24 @@ class LanePlannerTest {
         assertEquals(0, plan[0].recommended)                          // already in the left lane at the first node
         assertEquals(0, plan[1].changeFromPrevious)                   // no change between the two nodes
     }
+
+    /** Audit leftovers: no drift into a widening lane and back; a "straight" with only left-arrow lanes is a left turn. */
+    @Test
+    fun noFreeDriftAndHiddenTurns() {
+        // One lane widening to [L | S | S+R], then [L | S+R] again: stay in the right lane, no 0 → 1 → 0.
+        val a = site(500.0, listOf(L, S, S or R), S)
+        val b = site(1100.0, listOf(L, S or R), S)
+        val counts: (Double) -> Int? = { d -> if (d < 420) 1 else if (d < 520) 3 else 2 }
+        val plan = LanePlanner().plan(listOf(a, b), LanePlanner.Options(currentLateral = 0, laneCountAt = counts))
+        assertEquals(0, a.lateral(plan[0].recommended))
+        assertEquals(0, b.lateral(plan[1].recommended))
+        // Aegidientorplatz: straight on the two left-arrow lanes = a left turn.
+        val hidden = LaneSite(9949.0, listOf(L, L, LaneDir.SLIGHT_RIGHT, LaneDir.SLIGHT_RIGHT), listOf(true, true, false, false), S, false, RoadKind.URBAN)
+        val t = turnsHiddenAsStraight(listOf(hidden)).single()
+        assertTrue(t.isManeuver)
+        assertEquals(L, t.turn)
+        // A normal straight site (through lanes usable) stays as it is.
+        val normal = LaneSite(100.0, listOf(L, S, S), listOf(false, true, true), S, false, RoadKind.URBAN)
+        assertEquals(normal, turnsHiddenAsStraight(listOf(normal)).single())
+    }
 }

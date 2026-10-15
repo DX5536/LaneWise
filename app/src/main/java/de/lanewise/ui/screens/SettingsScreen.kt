@@ -34,6 +34,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -69,14 +70,18 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, ui: UiState, onBack: () ->
     }
     fun set(t: (AppSettings) -> AppSettings) = vm.updateSettings(t)
 
+    val dark = MaterialTheme.colorScheme.background.let { (it.red + it.green + it.blue) / 3f < 0.5f }
     Column(
         Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
-            .windowInsetsPadding(WindowInsets.safeDrawing).verticalScroll(rememberScrollState()).padding(16.dp),
+            .windowInsetsPadding(WindowInsets.safeDrawing).padding(horizontal = 16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = onBack) { Text(str.back) }
             Text(str.settings, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         }
+        // Pinned live preview: every look option shows here at once, no demo needed.
+        SettingsPreview(s, dark, str.preview)
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
 
         Section(str.language) {
             AppLanguage.entries.forEach { l ->
@@ -123,7 +128,12 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, ui: UiState, onBack: () ->
             LabeledSlider(str.laneOpacity, s.laneOpacity, 0.2f..1f, "${(s.laneOpacity * 100).toInt()} %", step = 0.05f) { v ->
                 set { it.copy(laneOpacity = v) }
             }
-            LanePreview(s.laneOpacity)
+            // Lane reports (long-press on the lane bar): count + share sheet instead of adb pull.
+            val reports = remember { vm.laneReportCount() }
+            Text(str.laneReports, fontSize = 15.sp, modifier = Modifier.padding(top = 8.dp))
+            Text(String.format(str.laneReportsSub, reports), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            OutlinedButton(onClick = { vm.laneReportShareIntent()?.let { context.startActivity(it) } }, enabled = reports > 0,
+                modifier = Modifier.padding(top = 4.dp)) { Text(str.shareReports) }
         }
 
         Section(str.testDrive) {
@@ -237,6 +247,7 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, ui: UiState, onBack: () ->
         // Which build this is (CI run number + commit), so screenshots and bug reports can be matched to the code.
         Text("LaneWise ${de.lanewise.BuildConfig.VERSION_NAME} · ${de.lanewise.BuildConfig.GIT_SHA}" +
             if (de.lanewise.BuildConfig.DEBUG) " · debug" else "", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        }
     }
 }
 
@@ -304,40 +315,4 @@ private fun Field(label: String, value: String, secret: Boolean = false, onChang
         keyboardOptions = KeyboardOptions(keyboardType = if (secret) KeyboardType.Password else KeyboardType.Uri),
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
     )
-}
-
-/**
- * Live preview of the recommended-lane strip at [opacity]: a short three-lane road like on the map (asphalt, dashed
- * lines, usable-lane band, strip in the middle lane), in the current theme's colours.
- */
-@Composable
-private fun LanePreview(opacity: Float) {
-    val dark = MaterialTheme.colorScheme.background.let { (it.red + it.green + it.blue) / 3f < 0.5f }
-    val highlight = if (dark) Color(0xFFB8F33A) else Color(0xFF6C4CF5)
-    val base = if (dark) 0.85f else 0.95f
-    androidx.compose.foundation.Canvas(
-        Modifier.fillMaxWidth().padding(vertical = 6.dp).height(96.dp).clip(RoundedCornerShape(14.dp))
-            .background(if (dark) Color(0xFF14161C) else Color(0xFFE8EAF0)),
-    ) {
-        val w = size.width; val h = size.height
-        val road = w * 0.62f; val left = (w - road) / 2; val lane = road / 3
-        drawRect(if (dark) Color(0xFF1C1F27) else Color(0xFF2B2F38), androidx.compose.ui.geometry.Offset(left, 0f),
-            androidx.compose.ui.geometry.Size(road, h))
-        // Usable lanes (soft band) and the recommended strip in the middle lane.
-        drawRect(highlight.copy(alpha = if (dark) 0.28f else 0.3f), androidx.compose.ui.geometry.Offset(left + 0.1f * lane, 0f),
-            androidx.compose.ui.geometry.Size(lane * 1.8f, h))
-        drawRect(highlight.copy(alpha = (base * opacity).coerceIn(0f, 1f)), androidx.compose.ui.geometry.Offset(left + lane * 1.14f, 0f),
-            androidx.compose.ui.geometry.Size(lane * 0.72f, h))
-        val edge = if (dark) Color(0xFFC9CDD8) else Color.White
-        drawLine(edge, androidx.compose.ui.geometry.Offset(left, 0f), androidx.compose.ui.geometry.Offset(left, h), 3f)
-        drawLine(edge, androidx.compose.ui.geometry.Offset(left + road, 0f), androidx.compose.ui.geometry.Offset(left + road, h), 3f)
-        for (k in 1..2) {
-            val x = left + k * lane
-            var y = 0f
-            while (y < h) {
-                drawLine(Color.White, androidx.compose.ui.geometry.Offset(x, y), androidx.compose.ui.geometry.Offset(x, minOf(h, y + 14f)), 3f)
-                y += 28f
-            }
-        }
-    }
 }

@@ -170,6 +170,7 @@ class MapController(private val context: Context) {
     private fun setupLayers(s: Style, isDark: Boolean) {
         s.addImage(IMG_CAR, carBitmap(if (isDark) 0xFF9A82FF.toInt() else 0xFF6C4CF5.toInt()))
         s.addImage(IMG_DEST, pinBitmap())
+        s.addImage(IMG_BIKE, bikeSymbolBitmap())
         de.lanewise.core.model.AutobahnPoiKind.entries.forEach { s.addImage("lw-ab-${it.name}", abPoiBitmap(it)) }
         FeatureKind.entries.forEach { s.addImage("lw-feat-${it.name}", RoadSignArt.feature(it, 64)) }
         listOf(SRC_ROUTE, SRC_ALT, SRC_LANES, SRC_LANES_DYN, SRC_CHEV, SRC_CAR, SRC_CAR3D, SRC_LABEL, SRC_ABPOI, SRC_DEST, SRC_INC, SRC_FEAT, SRC_SIGNAL).forEach { s.addSource(GeoJsonSource(it)) }
@@ -213,6 +214,14 @@ class MapController(private val context: Context) {
         ))
         fill("lane-surface", "SURFACE", if (isDark) 0xFF1C1F27.toInt() else 0xFF2B2F38.toInt(), 0.97f)
         fill("lane-bike", "BIKE", bikeColor, 0.9f)
+        // Bike symbol painted on the bike lane: lies flat on the road, points along it, ~1 m wide in real metres.
+        add(SymbolLayer("lane-bike-symbol", SRC_LANES).withFilter(kind("BIKE_SYMBOL")).withProperties(
+            PropertyFactory.iconImage(IMG_BIKE), PropertyFactory.iconRotate(Expression.get("b")),
+            PropertyFactory.iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP),
+            PropertyFactory.iconPitchAlignment(Property.ICON_PITCH_ALIGNMENT_MAP),
+            PropertyFactory.iconAllowOverlap(true), PropertyFactory.iconIgnorePlacement(true),
+            PropertyFactory.iconOpacity(0.9f), PropertyFactory.iconSize(metresToIconScale(1.3, BIKE_BMP_W)),
+        ))
         // Highlight: lime on the dark map, violet on the light map (lime has too little contrast on light grey).
         val highlight = if (isDark) 0xFFB8F33A.toInt() else 0xFF6C4CF5.toInt()
         fill("lane-allowed", "ALLOWED", highlight, if (isDark) 0.28f else 0.3f, SRC_LANES_DYN)
@@ -488,6 +497,18 @@ class MapController(private val context: Context) {
     }
 
     /** line-width in pixels for a feature property "w" in metres, exact at the current latitude. */
+    /**
+     * Icon scale so that an icon [bitmapPx] wide covers [metres] on the map at every zoom. MapLibre treats the bitmap as
+     * drawn at the screen density, so the scale is multiplied by it (without, the bike symbols were a quarter size).
+     */
+    private fun metresToIconScale(metres: Double, bitmapPx: Int): Expression {
+        val z1 = 10.0; val z2 = 24.0
+        val density = context.resources.displayMetrics.density
+        return Expression.interpolate(Expression.exponential(2f), Expression.zoom(),
+            Expression.stop(z1, metres / Geo.metersPerPixel(lastLat, z1) / bitmapPx * density),
+            Expression.stop(z2, metres / Geo.metersPerPixel(lastLat, z2) / bitmapPx * density))
+    }
+
     private fun metresToPixels(): Expression {
         val z1 = 10.0
         val z2 = 24.0
@@ -568,13 +589,17 @@ class MapController(private val context: Context) {
 
     /** Plain object building, safe off the UI thread. */
     private fun features(shapes: List<LaneRibbonBuilder.Shape>): FeatureCollection = FeatureCollection.fromFeatures(shapes.map { sh ->
-        val geom = if (sh.polygon) Polygon.fromLngLats(listOf(sh.points.map { Point.fromLngLat(it.lon, it.lat) }))
-        else line(sh.points)
+        val geom = when {
+            sh.kind == LaneRibbonBuilder.Kind.BIKE_SYMBOL -> Point.fromLngLat(sh.points[0].lon, sh.points[0].lat)
+            sh.polygon -> Polygon.fromLngLats(listOf(sh.points.map { Point.fromLngLat(it.lon, it.lat) }))
+            else -> line(sh.points)
+        }
         Feature.fromGeometry(geom).apply {
             addStringProperty("k", sh.kind.name)
             addNumberProperty("w", sh.widthM)
             if (sh.opacity != 1.0) addNumberProperty("o", sh.opacity)
             if (sh.index >= 0) addNumberProperty("i", sh.index)
+            if (sh.kind == LaneRibbonBuilder.Kind.BIKE_SYMBOL) addNumberProperty("b", sh.bearing)
         }
     })
 
@@ -927,6 +952,27 @@ class MapController(private val context: Context) {
         return bmp
     }
 
+    /**
+     * Sinnbild Radfahrer (StVO 1992, the symbol of Zeichen 237), white on transparent, from its SVG paths (1000 x 600):
+     * two wheels and the frame, sized on the map by [metresToIconScale].
+     */
+    private fun bikeSymbolBitmap(): Bitmap {
+        // Stretched 1.8 x along the lane, like the paint on the road (readable from a low angle).
+        val k = BIKE_BMP_W / 1000f
+        val bmp = Bitmap.createBitmap(BIKE_BMP_W, (600 * k * 1.8f).toInt(), Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        c.scale(k, k * 1.8f)
+        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFFFFF.toInt() }
+        p.style = Paint.Style.STROKE; p.strokeWidth = 40f
+        c.drawCircle(215f, 409f, 161f, p)
+        c.drawCircle(790f, 406f, 161f, p)
+        p.style = Paint.Style.FILL
+        val frame = androidx.core.graphics.PathParser.createPathFromPathData(BIKE_FRAME_PATH)
+        frame.fillType = android.graphics.Path.FillType.EVEN_ODD
+        c.drawPath(frame, p)
+        return bmp
+    }
+
     private fun pinBitmap(): Bitmap {
         val bmp = Bitmap.createBitmap(72, 96, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
@@ -957,6 +1003,18 @@ class MapController(private val context: Context) {
         private const val ROAD_CHUNK = 1000.0
         private const val SRC_CAR = "lw-car"
         private const val SRC_CAR3D = "lw-car3d"
+        private const val IMG_BIKE = "lw-bike-symbol"
+        private const val BIKE_BMP_W = 200
+        /** Frame of the Sinnbild Radfahrer (Wikimedia Commons "Sinnbild Radfahrer, StVO 1992.svg", official sign symbol). */
+        private const val BIKE_FRAME_PATH = "M 429.48437,15.467118 C 296.91790,16.759190 319.39993,1.7711686 248.07762,230.98455 " +
+            "C 189.97511,414.12586 196.30387,394.15363 196.00000,407.00000 C 195.78704,416.98022 203.84333,424.89312 213.96694,425.57043 " +
+            "C 235.02054,423.44166 226.16492,427.84741 299.15748,201.18078 C 565.86963,482.53640 465.80592,436.91194 609.34064,442.62576 " +
+            "C 797.98299,440.81686 813.31557,452.44550 815.55516,424.79518 C 815.29674,415.40613 810.90371,409.80716 681.43820,121.67535 " +
+            "L 693.84208,87.564675 L 736.48042,86.789433 L 734.92994,51.128275 L 576.00521,51.128275 " +
+            "C 561.96471,70.337063 581.69033,70.250925 652.75423,86.014190 L 640.35035,120.90010 L 323.27614,121.67535 " +
+            "C 344.63838,47.079788 332.57905,51.731243 428.70913,51.903518 L 429.48437,15.467118 z " +
+            "M 314.11415,159.91012 L 624.37752,159.36001 L 534.70921,400.30922 L 314.11415,159.91012 z " +
+            "M 661.78516,174.21304 L 573.76718,405.26023 L 766.30650,405.81034 L 661.78516,174.21304 z"
         private const val SRC_CHEV = "lw-chevrons"
         private const val SRC_LABEL = "lw-car-label"
         private const val SRC_ABPOI = "lw-ab-poi"

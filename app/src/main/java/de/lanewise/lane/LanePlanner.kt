@@ -46,6 +46,12 @@ class LanePlanner(private val config: Config = Config()) {
         val turnEntryCost: Double = 1.0,
         /** Per lane change that can only be made across a solid line (no legal stretch in the gap). */
         val solidLinePenalty: Double = 200.0,
+        /**
+         * Per lane moved where the move is free (lanes that open): far below a change, but above the centring
+         * tie-breaker, so the strip does not drift into a widening lane and back for nothing (audit: Hildesheimer
+         * Straße, Bornumer Straße — "lane 0 → 1 → 0").
+         */
+        val freeMoveCost: Double = 0.05,
     )
 
     data class Options(
@@ -264,7 +270,7 @@ class LanePlanner(private val config: Config = Config()) {
         }
 
         fun edgeCost(changes: Int, fromLat: Int, toLat: Int, d0: Double, d1: Double, kind: RoadKind): Double {
-            if (changes == 0) return 0.0
+            if (changes == 0) return if (includeTieBreakers) config.freeMoveCost * abs(toLat - fromLat) else 0.0
             val gap = d1 - d0
             val usable = gap - blockedLength(options.changeSpans, fromLat, toLat, d0, d1)
             val per = metersPerChange(kind)

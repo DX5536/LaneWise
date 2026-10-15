@@ -1,6 +1,6 @@
 # Status & roadmap
 
-_Last updated: 2026-10-15 (v0.4.3: car pinned to the camera, round corners, lane strip fix, Settings-after-demo fix, smoother demo, zebra rule checked on aerial photos, lane opacity setting, built-in test drive)._
+_Last updated: 2026-10-15 (v0.4.3 incl. lane audit, Settings preview, report sharing: car pinned to the camera, round corners, lane strip fix, Settings-after-demo fix, smoother demo, zebra rule checked on aerial photos, lane opacity setting, built-in test drive)._
 
 ## Done (v0.1)
 - [x] Reverse-engineering notes for Petal Maps 4.7 and AMAP 17.00 lane guidance (`docs/REVERSE_ENGINEERING.md`)
@@ -375,11 +375,32 @@ Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which
       phone (the app's own top route, 20 km B 443 / B 3 / B 6 / Westschnellweg): right lane on the expressways, one
       change for the Westschnellweg exit, no zig-zag, 120 fps without frame gaps (longest repeat 2 frames).
 
+## Done (v0.4.3, part 6, 2026-10-15)
+- [x] **Audit leftovers fixed** (STRIP_ZIGZAG): (1) free moves into lanes that open now cost a little (0.05 per lane,
+      `LanePlanner.Config.freeMoveCost` — far below a change, above the centring tie-break), so the strip no longer
+      drifts into a widening lane and back (Hildesheimer Straße, Bornumer Straße); (2) a "straight" whose only usable
+      lanes carry turn arrows only is the turn it really is (`turnsHiddenAsStraight`, Aegidientorplatz → Friedrichswall:
+      `left | left | slight_right | slight_right`). Tests `noFreeDriftAndHiddenTurns`. Re-audit of the affected routes:
+      0 findings; **fresh audit, 20 new random routes (seed 2, 4 with Autobahn, up to 28.7 km motorway): 0 findings**.
+- [x] **Lane reports: share button** (was Next 3): Settings → Lane assist → "Lane reports: N saved" + "Share
+      (GeoJSON)" — share sheet via FileProvider (`${applicationId}.files`, `res/xml/file_paths.xml`), DE/EN/VI.
+- [x] **Settings without other apps' names**: "Dynamic lane map" / "Show all streets while driving" (no AMAP / Petal).
+- [x] **Live preview pinned at the top of Settings, drawn by the real map** (`SettingsPreview`, tap the title to fold):
+      its own small MapView + `MapController` drives a demo car in a loop along Vahrenwalder Straße (three lanes, bike lane
+      — Radfahrstreifen then Schutzstreifen, in the chosen colour —,
+      traffic lights, a zebra, a closed lane) with every setting the navigation uses — tilt, dynamic / fixed zoom, lane
+      ribbons, opacity, fade, chevrons, 3D car / arrow and size, road name, poles, see-through buildings, theme — and the
+      same camera framing (42 % above the car). The car keeps driving while settings change. (A first hand-drawn version
+      did not match the real view — owner's screenshots — and was replaced.)
+- [x] **Bike symbol on bike lanes** (owner's request, photo): the official Sinnbild Radfahrer (StVO, symbol of
+      Zeichen 237) in white on every on-street bike lane — one in the middle of a short lane (< 160 m), every 100 m on a
+      long one (placed by the whole bike lane span, not per 1 km road piece), lying flat on the road, pointing along it,
+      1.3 m wide and stretched 1.8 x along the lane like the real paint (`LaneRibbonBuilder.bikeSymbolSpots`, layer
+      `lane-bike-symbol`; the icon is drawn from the SVG paths). MapLibre scales icons by the screen density — the
+      metre-to-icon scale accounts for it. The Settings preview road got a bike lane (Radfahrstreifen, then
+      Schutzstreifen) to show it.
+
 ## Video review — still open
-- [ ] Audit leftovers (STRIP_ZIGZAG): Aegidientorplatz → Friedrichswall (`left | left | slight_right | slight_right`,
-      route "straight" on the left lanes: the slight-right lanes count as right pockets, the strip shifts one lane after
-      the junction), Hildesheimer Straße 52.32476,9.78265 (no assumed lane yet after a turn), Bornumer
-      Straße 52.35799,9.70305. Re-run the audit with more seeds after each lane-logic change.
 - [ ] Owner: check the 3D car (size, colours, behaviour in tunnels / under bridges) and the automatic theme on the phone.
 - [ ] Owner: check the car overlay (size vs. road at different zooms, tilt changes, pan away and recenter) and the
       corners (v0.4.3).
@@ -421,7 +442,7 @@ Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which
    `change:lanes` is tagged in Hannover on the phone first.
 2. In-app lane corrections applied over OSM (reports are saved already, see v0.4), and/or fixing OSM directly —
    wrong lane counts found so far are OSM tagging errors, not imagery (DOP20 flown 2025-03-06).
-3. Lane reports: a share button in Settings (FileProvider) instead of `adb pull`.
+3. ~~Lane reports: a share button in Settings~~ — done (v0.4.3 part 6).
 4. Lane-count continuity between sites from OSM `lanes`/`lanes:forward` instead of the next-site approximation
    (partly done: pocket length by road kind).
 5. Owner's lane drawing ("coMap" sketch) was referenced but not attached in the first chat —

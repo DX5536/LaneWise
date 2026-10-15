@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Files other apps may read through LaneWise's FileProvider: the lane reports (Settings → Lane reports → Share). -->
+<paths>
+    <external-files-path name="reports" path="." />
+    <files-path name="reports_internal" path="." />
+</paths>

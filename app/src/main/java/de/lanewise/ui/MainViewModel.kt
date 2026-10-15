@@ -566,6 +566,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun laneReportFile() = File(ctx.getExternalFilesDir(null) ?: ctx.filesDir, "lane_reports.geojson")
 
+    /** Number of saved lane reports (Settings). */
+    fun laneReportCount(): Int = runCatching { de.lanewise.osm.LaneReports.read(laneReportFile()).size }.getOrDefault(0)
+
+    /** Share sheet for lane_reports.geojson (FileProvider), or null if there is nothing to share. */
+    fun laneReportShareIntent(): android.content.Intent? {
+        val f = laneReportFile()
+        if (!f.exists() || laneReportCount() == 0) return null
+        val uri = androidx.core.content.FileProvider.getUriForFile(ctx, ctx.packageName + ".files", f)
+        val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "application/geo+json"
+            putExtra(android.content.Intent.EXTRA_STREAM, uri)
+            putExtra(android.content.Intent.EXTRA_SUBJECT, "LaneWise lane reports")
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        return android.content.Intent.createChooser(send, null).addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+
     fun overrideLane(index: Int) {
         val advice = _ui.value.nav?.lanes?.nextAdvice ?: return
         laneGuidance.overrideCurrentLane(advice.site, index)

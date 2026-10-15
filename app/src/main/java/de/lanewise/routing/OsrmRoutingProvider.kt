@@ -139,13 +139,13 @@ class OsrmRoutingProvider(
             distance = r["distance"].dbl ?: line.length,
             duration = r["duration"].dbl ?: 0.0,
             steps = steps,
-            laneSites = de.lanewise.lane.mergeDoubleNodeJunctions(de.lanewise.lane.attachTurnsToLaneSites(
+            laneSites = de.lanewise.lane.turnsHiddenAsStraight(de.lanewise.lane.mergeDoubleNodeJunctions(de.lanewise.lane.attachTurnsToLaneSites(
                 sites.sortedBy { it.distanceAlong }.distinctBy { it.distanceAlong.toInt() },
                 steps.filter {
                     it.maneuver.type != de.lanewise.core.model.ManeuverType.DEPART &&
                         it.maneuver.type != de.lanewise.core.model.ManeuverType.ARRIVE
                 }.map { it.distanceAlong to it.maneuver.modifier.toLaneDir() },
-            )),
+            ))),
             roadSpans = spans,
         )
     }

@@ -24,11 +24,13 @@ object LaneRibbonBuilder {
         SURFACE, BIKE, RECOMMENDED, ALLOWED, ARROW, EDGE, DIVIDER, DIVIDER_SOLID, STOP, TURN_ARROW,
         /** Zebra stripes, signal poles and heads (extruded), closed-lane tint and cross, moving chevrons. */
         ZEBRA, POLE, SIGNAL_HEAD, CLOSED_LANE, CLOSED_X, CHEVRON,
+        /** Bike symbol painted on a bike lane (point + [Shape.bearing]). */
+        BIKE_SYMBOL,
     }
 
     /** Either a closed polygon (fill) or an open line; [widthM] is used for lines only; [opacity] multiplies the layer's. */
     data class Shape(val points: List<LatLon>, val kind: Kind, val polygon: Boolean, val widthM: Double = 0.15,
-                     val opacity: Double = 1.0, val index: Int = -1)
+                     val opacity: Double = 1.0, val index: Int = -1, val bearing: Double = 0.0)
 
     /** Optional road details: zebra crossings + traffic-light poles ([furniture]) and closed lanes. */
     data class RoadExtras(val furniture: Boolean = false, val closures: List<LaneClosure> = emptyList())
@@ -106,6 +108,14 @@ object LaneRibbonBuilder {
         return slight && !lights && approach != RoadKind.URBAN && site.lanes.all { it and (LaneDir.LEFT or LaneDir.RIGHT or LaneDir.SHARP_LEFT or LaneDir.SHARP_RIGHT) == 0 }
     }
 
+    /** Route distances of the bike symbols on [span]: the middle if it is short, else every 100 m. */
+    fun bikeSymbolSpots(span: de.lanewise.core.model.BikeLaneSpan): List<Double> {
+        val len = span.to - span.from
+        if (len < 15) return emptyList()
+        if (len < 160) return listOf(span.from + len / 2)
+        return generateSequence(span.from + 40) { it + 100 }.takeWhile { it < span.to - 20 }.toList()
+    }
+
     /** Number of lanes drawn at route distance [d] (diagnostics, live tests). */
     fun drawnLanes(route: Route, d: Double): Int? =
         gridSamples(route, max(0.0, d - 130), min(route.geometry.length, d + 130)).minByOrNull { abs(it.d - d) }?.nominal
@@ -141,6 +151,13 @@ object LaneRibbonBuilder {
                 val bw = if (span.exclusive) 1.6 else 1.3
                 out += polygon(line(run) { it.right + 0.35 }, line(run) { it.right + 0.35 + bw }, Kind.BIKE)
                 out += Shape(line(run) { it.right + 0.2 }, Kind.EDGE, polygon = false, widthM = 0.15)
+                // Bike symbol (Sinnbild Radfahrer) on the lane: one in the middle of a short lane, every 100 m on a long
+                // one - placed by the whole bike lane span, so the 1 km road pieces do not each add their own.
+                for (d in bikeSymbolSpots(span)) {
+                    if (d < run.first().d || d > run.last().d) continue
+                    val s = run.minBy { abs(it.d - d) }
+                    out += Shape(listOf(s.at(s.right + 0.35 + bw / 2)), Kind.BIKE_SYMBOL, polygon = false, bearing = s.bearing)
+                }
             }
         }
 

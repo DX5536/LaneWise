@@ -43,6 +43,7 @@ A layered graph: one layer per site in the horizon (≤ 8 sites, ≤ 4 km), one 
 | keep-right (motorway/trunk, optional) | 0.5 × lanes left of rightmost through lane | §7 StVO tie-breaker, never worth an extra change |
 | centring (urban) | 0.02 × distance from centre of allowed lanes | avoids edge lanes (bus/bike/parking) on ties |
 | start | 10 × changes from the lane the car is assumed to be in | "don't move me if I'm fine" |
+| free move | 0.05 per lane moved where the move is free (lanes that open) | no drift into a widening lane and back |
 
 Solved with forward DP (Viterbi) + backward pass. Outputs per site:
 
@@ -75,6 +76,15 @@ On motorways and expressways the assumed lane returns to the rightmost through l
 200 m after the route is on that road, 150 m per lane to glide over), if most of the stretch to the next junction is
 motorway / trunk and there is room for the next change; the next manoeuvre is then planned from the right lane. In town
 there is free lane choice (§ 7 (3) StVO): the car keeps the lane the junction left it in.
+
+## Lane data clean-up (before planning)
+
+* `attachTurnsToLaneSites`: lanes on an intersection ≤ 80 m before a turn without own lane data are the turn's.
+* `mergeDoubleNodeJunctions`: at junctions with two nodes, lanes at the first node that point the way of the turn 20–50 m
+  later are usable there; a site ≤ 30 m after a turn that repeats its lanes is dropped.
+* `turnsHiddenAsStraight`: "straight" with only turn-arrow lanes usable is treated as that turn.
+* `trimToRoadLanes` (motorways): a lane picture wider than the OSM carriageway is trimmed to the usable lanes.
+* `markFullLengthLanes`: turn-only edge lanes that run the whole way are ordinary lanes, not pockets.
 
 ## Lanes that open are not lane changes
 

@@ -353,3 +353,23 @@ fun mergeDoubleNodeJunctions(sites: List<LaneSite>): List<LaneSite> {
     }
     return out
 }
+
+/**
+ * "Straight on" for the route, but the only usable lanes have turn arrows only (e.g. `left | left | slight_right |
+ * slight_right`, usable = the two left lanes): the road turns there although the name continues (Aegidientorplatz →
+ * Friedrichswall). Treated as that turn, so the lanes before and after are matched like at a turn — measured from the
+ * right edge they did not line up and the strip shifted one lane after the junction (audit STRIP_ZIGZAG).
+ */
+fun turnsHiddenAsStraight(sites: List<LaneSite>): List<LaneSite> = sites.map { s ->
+    if (s.isManeuver || s.turn != LaneDir.STRAIGHT) return@map s
+    val pv = s.providerValid ?: return@map s
+    if (pv.size != s.lanes.size || pv.none { it }) return@map s
+    val used = s.lanes.filterIndexed { i, _ -> pv[i] }
+    if (used.any { it == LaneDir.NONE || it and LaneDir.STRAIGHT != 0 }) return@map s
+    val dir = when {
+        used.all { it and LaneDir.ANY_LEFT != 0 && it and LaneDir.ANY_RIGHT == 0 } -> LaneDir.LEFT
+        used.all { it and LaneDir.ANY_RIGHT != 0 && it and LaneDir.ANY_LEFT == 0 } -> LaneDir.RIGHT
+        else -> return@map s
+    }
+    s.copy(turn = dir, isManeuver = true)
+}
