@@ -74,6 +74,8 @@ object StreetLanes {
     private class Layout(t: Map<String, String>) {
         val hw = t["highway"].orEmpty()
         val oneway = OsmTags.onewayDir(t) != 0
+        /** One-way against the drawing direction (`oneway=-1`): travel runs from the way's end to its start. */
+        val reverse = OsmTags.onewayDir(t) < 0
         val minor = hw == "residential" || hw == "living_street" || hw == "unclassified"
         val fwd = OsmTags.lanesInDirection(t, true, oneway) ?: 1
         val bwd = if (oneway) 0 else OsmTags.lanesInDirection(t, false, false) ?: 1
@@ -94,9 +96,12 @@ object StreetLanes {
                 atNode.getOrPut(n) { ArrayList(4) } += k
             }
         }
+        // Plain way splits (a node shared by exactly two way ends): both ways get the same direction and road edges
+        // there, so lines and bike lanes run on without a step or kink (owner's standby screenshot, Celler Straße).
+        val joins = streets.mapIndexed { k, st -> joinAt(k, st, true, streets, layouts, degree, atNode) to joinAt(k, st, false, streets, layouts, degree, atNode) }
         // Road surfaces first: markings of one street stop where they enter another street's surface (junctions,
         // carriageways merging), so lines never run across another road and meet its edge exactly.
-        val geo = streets.mapIndexed { k, st -> runCatching { Geometry(st, layouts[k]) }.getOrNull() }
+        val geo = streets.mapIndexed { k, st -> runCatching { Geometry(st, layouts[k], joins[k].first, joins[k].second) }.getOrNull() }
         val out = ArrayList<Shape>()
         streets.forEachIndexed { k, st ->
             val g = geo[k] ?: return@forEachIndexed
@@ -116,14 +121,66 @@ object StreetLanes {
         out
     }
 
+    /**
+     * The neighbour at a plain way split, seen in this way's direction: its direction there and its road edges
+     * ([left], [right], m from the centre line, + = right). Both ways blend into the average of the two.
+     */
+    private class Join(val bearing: Double, val left: Double, val right: Double)
+
+    /** [Join] at the start ([atStart]) or end of street [k]; null at junctions, dead ends and loops. */
+    private fun joinAt(
+        k: Int, st: OsmStreet, atStart: Boolean, streets: List<OsmStreet>, layouts: List<Layout>,
+        degree: Map<Long, Int>, atNode: Map<Long, List<Int>>,
+    ): Join? {
+        if (st.nodes.size < 2 || st.geometry.size < 2) return null
+        val n = if (atStart) st.nodes.first() else st.nodes.last()
+        if ((degree[n] ?: 0) != 2) return null
+        val j = atNode[n].orEmpty().singleOrNull { it != k } ?: return null
+        val o = streets[j]
+        if (o.geometry.size < 2) return null
+        val oStart = o.nodes.first() == n
+        if (!oStart && o.nodes.last() != n) return null
+        // The neighbour's direction away from / towards the node, turned into this way's direction of travel.
+        val oAway = if (oStart) Geo.bearing(o.geometry[0], o.geometry[1])
+        else Geo.bearing(o.geometry.last(), o.geometry[o.geometry.size - 2])
+        val bearing = if (atStart) (oAway + 180.0) % 360.0 else oAway
+        // Same orientation (end → start): edges as they are; opposite: mirrored.
+        val same = atStart != oStart
+        val lo = layouts[j]
+        return if (same) Join(bearing, lo.left, lo.right) else Join(bearing, -lo.right, -lo.left)
+    }
+
     /** Smoothed centre line, normals and road surface of one street. */
-    private class Geometry(st: OsmStreet, lay: Layout) {
+    private class Geometry(st: OsmStreet, lay: Layout, startJoin: Join? = null, endJoin: Join? = null) {
         val pts = smooth(Polyline(st.geometry))
+        private val along = DoubleArray(pts.size).also { a -> for (i in 1 until pts.size) a[i] = a[i - 1] + Geo.distance(pts[i - 1], pts[i]) }
         val bearings = pts.indices.map { i ->
             val a = pts[max(0, i - 2)]; val b = pts[min(pts.size - 1, i + 2)]
-            if (a == b) 0.0 else Geo.bearing(a, b)
+            var br = if (a == b) 0.0 else Geo.bearing(a, b)
+            // Towards a plain split, turn to the joint direction (the mean of both ways), reached at the node.
+            val toStart = along[i]; val toEnd = along.last() - along[i]
+            // Same raw end segments as the neighbour uses, so both ways get exactly the same joint direction.
+            if (startJoin != null && toStart < BLEND_M) br = blend(br, mean(Geo.bearing(st.geometry[0], st.geometry[1]), startJoin.bearing), 1 - toStart / BLEND_M)
+            if (endJoin != null && toEnd < BLEND_M) br = blend(br, mean(Geo.bearing(st.geometry[st.geometry.size - 2], st.geometry.last()), endJoin.bearing), 1 - toEnd / BLEND_M)
+            br
         }
-        fun at(i: Int, off: Double) = Geo.destination(pts[i], bearings[i] + 90.0, off)
+        /** Road edges at point [i]: this way's, tapering over [TAPER_M] to the mean with the neighbour at a split. */
+        private val edgeL = DoubleArray(pts.size) { i -> edgeAt(i, lay.left, startJoin?.left, endJoin?.left) }
+        private val edgeR = DoubleArray(pts.size) { i -> edgeAt(i, lay.right, startJoin?.right, endJoin?.right) }
+        private fun edgeAt(i: Int, own: Double, start: Double?, end: Double?): Double {
+            var v = own
+            val toStart = along[i]; val toEnd = along.last() - along[i]
+            if (start != null && toStart < TAPER_M) v += ((own + start) / 2 - own) * smoothstep(1 - toStart / TAPER_M)
+            if (end != null && toEnd < TAPER_M) v += ((own + end) / 2 - own) * smoothstep(1 - toEnd / TAPER_M)
+            return v
+        }
+        private val layL = lay.left
+        private val span = (lay.right - lay.left).takeIf { it > 0.1 } ?: 1.0
+        /** Point at nominal lateral [off] (as in [Layout]), mapped onto this point's (tapered) road edges. */
+        fun at(i: Int, off: Double): LatLon {
+            val f = (off - layL) / span
+            return Geo.destination(pts[i], bearings[i] + 90.0, edgeL[i] + f * (edgeR[i] - edgeL[i]))
+        }
         val surface: List<LatLon> = pts.indices.map { at(it, lay.left - 0.3) } + pts.indices.reversed().map { at(it, lay.right + 0.3) } + at(0, lay.left - 0.3)
         val bbox = Box(surface)
 
@@ -140,6 +197,18 @@ object StreetLanes {
             return inside
         }
     }
+
+    /** Direction blending at way splits (m) and width taper towards the neighbour (m). */
+    private const val BLEND_M = 10.0
+    private const val TAPER_M = 15.0
+
+    private fun smoothstep(t: Double) = t.coerceIn(0.0, 1.0).let { it * it * (3 - 2 * it) }
+
+    /** Circular mean of two bearings. */
+    private fun mean(a: Double, b: Double): Double = (a + Geo.bearingDelta(a, b) / 2 + 360.0) % 360.0
+
+    /** From bearing [a] towards [b] by [t] (0..1), the short way round. */
+    private fun blend(a: Double, b: Double, t: Double): Double = (a + Geo.bearingDelta(a, b) * smoothstep(t) + 360.0) % 360.0
 
     private class Box(pts: List<LatLon>) {
         val s = pts.minOf { it.lat }; val n = pts.maxOf { it.lat }
@@ -208,17 +277,17 @@ object StreetLanes {
         for (k in 1 until fwd) lines(fwdStart + k * w, divider(changeF, k, fwd), 0.15)
         for (k in 1 until bwd) lines(-k * w, divider(changeB, k, bwd), 0.15)
 
-        // Bike lanes on the right edge of each direction.
-        OsmTags.bikeLaneRight(t, forward = true, oneway = oneway)?.let { exclusive ->
+        // Bike lanes on the right edge of each direction of travel (a reversed one-way travels on the way's left).
+        if (!lay.reverse) OsmTags.bikeLaneRight(t, forward = true, oneway = oneway)?.let { exclusive ->
             strip(right + 0.35, right + 0.35 + if (exclusive) 1.6 else 1.3, Kind.BIKE)
         }
-        if (!oneway) OsmTags.bikeLaneRight(t, forward = false, oneway = false)?.let { exclusive ->
+        if (!oneway || lay.reverse) OsmTags.bikeLaneRight(t, forward = false, oneway = oneway)?.let { exclusive ->
             strip(left - 0.35, left - 0.35 - if (exclusive) 1.6 else 1.3, Kind.BIKE)
         }
 
         // Turn arrows + stop line at the end of each direction (turn:lanes apply where the way ends).
-        val turnF = t["turn:lanes:forward"] ?: if (oneway) t["turn:lanes"] else null
-        val turnB = t["turn:lanes:backward"]
+        val turnF = t["turn:lanes:forward"] ?: if (oneway && !lay.reverse) t["turn:lanes"] else null
+        val turnB = t["turn:lanes:backward"] ?: if (lay.reverse) t["turn:lanes"] else null
         val len = line.length
         // Stop line in front of the crossing road, not inside the junction.
         val endCut = cuts.filter { it.d > len - 1 }.maxOfOrNull { it.r } ?: 0.0
@@ -227,9 +296,10 @@ object StreetLanes {
             val masks = LaneDir.parseTurnLanes(turnF)
             paint(masks, forward = true, fromStart = len - endCut, line, w, if (oneway) left else 0.0, out)
         }
-        if (turnB != null && len > 25 + startCut && !oneway) {
+        if (turnB != null && len > 25 + startCut && (!oneway || lay.reverse)) {
             val masks = LaneDir.parseTurnLanes(turnB)
-            paint(masks, forward = false, fromStart = startCut, line, w, 0.0, out)
+            // Two-way: the backward lanes lie left of the centre line; reversed one-way: from its right edge leftwards.
+            paint(masks, forward = false, fromStart = startCut, line, w, if (lay.reverse) right else 0.0, out)
         }
     }
 
@@ -246,11 +316,11 @@ object StreetLanes {
         }
         val stopD = fromStart + dir * 2.0
         // Lane i offset from the way's centre line (forward: right of it, backward: left of it).
-        fun laneCentre(i: Int) = if (forward) edge + (i + 0.5) * w else -(i + 0.5) * w
+        fun laneCentre(i: Int) = if (forward) edge + (i + 0.5) * w else edge - (i + 0.5) * w
         val n = masks.size
         val (sp, sb) = alongPoint(stopD)
-        val a = if (forward) edge else 0.0
-        val b = if (forward) edge + n * w else -n * w
+        val a = edge
+        val b = if (forward) edge + n * w else edge - n * w
         out += Shape(listOf(Geo.destination(sp, sb + 90.0, a), Geo.destination(sp, sb + 90.0, b)), Kind.STOP, false, 0.5)
 
         val top = fromStart + dir * 6.0

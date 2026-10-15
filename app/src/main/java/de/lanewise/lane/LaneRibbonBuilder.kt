@@ -129,6 +129,10 @@ object LaneRibbonBuilder {
     fun drawnLanes(route: Route, d: Double): Int? =
         gridSamples(route, max(0.0, d - 130), min(route.geometry.length, d + 130)).minByOrNull { abs(it.d - d) }?.nominal
 
+    /** Lanes actually drawn at [d] after tapers and connectors (diagnostics, live tests). */
+    fun drawnLaneWidth(route: Route, d: Double): Double? =
+        gridSamples(route, max(0.0, d - 130), min(route.geometry.length, d + 130)).minByOrNull { abs(it.d - d) }?.lanes
+
     /** Samples on the fixed route grid covering [from]..[to] (plus smoothing context), with lane data. */
     private fun gridSamples(route: Route, from: Double, to: Double): List<S> {
         val a = max(0.0, kotlin.math.floor(from / GRID) * GRID)
@@ -564,7 +568,9 @@ object LaneRibbonBuilder {
             s.w = laneWidth(kind)
             s.twoWay = span?.twoWay ?: false
             val next = sites.firstOrNull { it.distanceAlong >= s.d - 1 }
-            val osm = route.laneCountAt(s.d)
+            // Just after a turn the 25 m OSM samples may still hold the road we came from: use the new road's count.
+            val prevTurn = sites.lastOrNull { it.distanceAlong < s.d && s.d - it.distanceAlong < 30 && it.isManeuver && it.turn != LaneDir.STRAIGHT }
+            val osm = prevTurn?.let { route.laneCountAt(it.distanceAlong + 30) } ?: route.laneCountAt(s.d)
             when {
                 next != null && next.distanceAlong - s.d < pocketLength(kind) -> {
                     s.nominal = next.laneCount; s.rightPockets = next.rightPockets(); s.leftPockets = next.leftPockets()
@@ -576,8 +582,17 @@ object LaneRibbonBuilder {
                         s.rightPockets = next.rightPockets(); s.leftPockets = next.leftPockets()
                     }
                 }
-                next != null && next.distanceAlong - s.d < 500 ->
-                    s.nominal = (next.laneCount - next.leftPockets() - next.rightPockets()).coerceAtLeast(1)
+                next != null && next.distanceAlong - s.d < 500 -> {
+                    // The next junction's lanes without its turn pockets - unless the block is too short for pockets
+                    // to open (< 150 m from the last junction): then its lanes run the whole block (Berliner Allee,
+                    // Königstraße → Schiffgraben, 127 m: 5 - 3 pockets drew a 2-lane choke between two 5-lane stop
+                    // lines). Never fewer than the lanes carried on from the last junction.
+                    val prev = sites.lastOrNull { it.distanceAlong < s.d - 1 }
+                    val core = (next.laneCount - next.leftPockets() - next.rightPockets()).coerceAtLeast(1)
+                    val shortBlock = prev != null && next.distanceAlong - prev.distanceAlong < 150
+                    s.nominal = if (shortBlock) next.laneCount else max(core, carriedLanes(sites, s.d) ?: 0)
+                    if (shortBlock) { s.rightPockets = next.rightPockets(); s.leftPockets = next.leftPockets() }
+                }
                 else -> s.nominal = carriedLanes(sites, s.d) ?: defaultLanes(kind)
             }
         }
@@ -587,9 +602,16 @@ object LaneRibbonBuilder {
         // Lanes that end *at* a junction (turn lanes leaving there) stop at the stop line instead of tapering
         // into the next lane after the junction.
         val endsAtJunction = BooleanArray(samples.size) { i -> sites.any { abs(it.distanceAlong - samples[i].d) < 8 } }
-        val f = taper(samples, { it.nominal }, len, endsAtJunction)
-        val rp = taper(samples, { it.rightPockets }, len, endsAtJunction)
-        val lp = taper(samples, { it.leftPockets }, len, endsAtJunction)
+        // Going straight through, the ending lanes narrow in a short funnel across the junction box; at a turn the
+        // connector already joins the new road, so there they stop at the stop line (a funnel there bulged the new
+        // road to 4 lanes right behind the corner - Berliner Allee → Schiffgraben).
+        val turnAt = BooleanArray(samples.size) { i ->
+            sites.any { abs(it.distanceAlong - samples[i].d) < 8 && it.isManeuver && it.turn != LaneDir.STRAIGHT && !flowing(route, it) }
+        }
+        val funnel = BooleanArray(samples.size) { endsAtJunction[it] && !turnAt[it] }
+        val f = taper(samples, { it.nominal }, len, endsAtJunction, funnel)
+        val rp = taper(samples, { it.rightPockets }, len, endsAtJunction, funnel)
+        val lp = taper(samples, { it.leftPockets }, len, endsAtJunction, funnel)
         for (i in samples.indices) {
             val s = samples[i]
             s.lanes = f[i]
@@ -655,7 +677,7 @@ object LaneRibbonBuilder {
     }
 
     /** Integer series → smooth series: increases ramp up *before* the change point, decreases ramp down after it. */
-    private fun taper(samples: List<S>, value: (S) -> Int, len: DoubleArray, stepDown: BooleanArray): DoubleArray {
+    private fun taper(samples: List<S>, value: (S) -> Int, len: DoubleArray, stepDown: BooleanArray, funnel: BooleanArray): DoubleArray {
         val f = DoubleArray(samples.size) { value(samples[it]).toDouble() }
         for (i in 1 until samples.size) {
             val a = value(samples[i - 1]); val b = value(samples[i])
@@ -668,11 +690,11 @@ object LaneRibbonBuilder {
                     val t = 1 - (di - samples[j].d) / l
                     f[j] = max(f[j], a + (b - a) * smooth(t)); j--
                 }
-            } else {
+            } else if (!stepDown[i] || funnel[i]) {
                 // Lanes ending at a stop line narrow across the junction box (a short funnel) instead of in one grid
                 // step: the 6 m step left a rectangular notch and 76° kinks in the edges (render audit).
-                val ll = if (stepDown[i]) max(18.0, 9.0 * (a - b)) else l
-                val d0 = if (stepDown[i]) samples[i - 1].d else di
+                val ll = if (funnel[i]) max(18.0, 9.0 * (a - b)) else l
+                val d0 = if (funnel[i]) samples[i - 1].d else di
                 var j = i
                 while (j < samples.size && samples[j].d - d0 < ll) {
                     val t = 1 - (samples[j].d - d0) / ll
@@ -738,7 +760,7 @@ object LaneRibbonBuilder {
         val krLat = state.keepRightFromLateral
         if (krFrom != null && krLat != null) {
             keys.clear()
-            val end = krFrom + LaneGuidance.KEEP_RIGHT_PER_LANE * krLat
+            val end = krFrom + LaneGuidance.KEEP_RIGHT_PER_LANE * (krLat - startLat).coerceAtLeast(0.0)
             keys += min(carDistance - behind, krFrom) to krLat.toDouble()
             keys += krFrom to krLat.toDouble()
             keys += end to startLat

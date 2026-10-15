@@ -153,4 +153,17 @@ class LaneRibbonBuilderTest {
         val same = later.first { it.index == chev[5].index }
         assertTrue(Geo.distance(same.points[1], chev[5].points[1]) < 0.05)
     }
+
+    /** Owner's screenshot (Berliner Allee): 3 lanes, 55 m tagged 2 under a bridge, 3 again - no choke. */
+    @Test
+    fun shortLaneDipIsFilled() {
+        val spans = listOf(LaneCountSpan(0.0, 300.0, 3), LaneCountSpan(300.0, 355.0, 2), LaneCountSpan(355.0, 600.0, 3),
+            LaneCountSpan(600.0, 900.0, 4))
+        val f = de.lanewise.core.model.fillShortLaneDips(spans, listOf(300.0, 900.0))
+        org.junit.Assert.assertEquals(listOf(3, 3, 3, 4), f.map { it.count })
+        // A junction inside the narrow stretch, or a long one, stays as tagged.
+        org.junit.Assert.assertEquals(2, de.lanewise.core.model.fillShortLaneDips(spans, listOf(330.0))[1].count)
+        val long = spans.toMutableList().also { it[1] = LaneCountSpan(300.0, 500.0, 2); it[2] = LaneCountSpan(500.0, 600.0, 3) }
+        org.junit.Assert.assertEquals(2, de.lanewise.core.model.fillShortLaneDips(long, emptyList())[1].count)
+    }
 }

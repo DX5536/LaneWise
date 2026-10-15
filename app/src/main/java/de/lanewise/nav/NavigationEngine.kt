@@ -44,6 +44,11 @@ data class NavSnapshot(
     val bikeLane: BikeLaneSpan? = null,
     /** Metres to where a solid line starts (lane changes no longer allowed), if within 250 m. */
     val solidLineIn: Double? = null,
+    /**
+     * The next turn (within 400 m) has no lane data: no lane is recommended until it is passed - the driver follows
+     * the road markings. A guessed lane can be dangerous (owner, Aegidientorplatz).
+     */
+    val lanesUnknown: Boolean = false,
 )
 
 /** Something to say. [key] de-duplicates so each announcement is spoken once. */
@@ -58,6 +63,14 @@ class NavigationEngine(
     private val route: Route,
     private val laneGuidance: LaneGuidance = LaneGuidance(),
 ) {
+    /** Roadworks closures along the route: the lane advice must not lead into a closed lane. */
+    private val closures = de.lanewise.lane.LaneClosure.along(route, route.incidents)
+    /** Solid lines plus "no change into a closed lane". */
+    private val changeSpans = route.laneChanges + closures.mapNotNull { it.toChangeSpan() }
+    /** Junctions plus a checkpoint before each closure (only open lanes usable there). */
+    private val guidanceSites = (route.laneSites + closures.mapNotNull { c ->
+        c.site(route.roadSpanAt(c.from)?.kind ?: de.lanewise.lane.RoadKind.MOTORWAY)
+    }).sortedBy { it.distanceAlong }
     private var hint = 0
     private var lastAlong = 0.0
     private var offRouteCount = 0
@@ -118,8 +131,13 @@ class NavigationEngine(
         overActive = status == SpeedStatus.OVER
 
         val kind = route.roadSpanAt(along)?.kind ?: RoadKind.URBAN
-        val lanes = laneGuidance.update(route.laneSites, along, settings.avoidLaneChanges, settings.keepRight, route.laneChanges,
+        val planned = laneGuidance.update(guidanceSites, along, settings.avoidLaneChanges, settings.keepRight, changeSpans,
             route::laneCountAt.takeIf { route.laneCounts.isNotEmpty() }, { d -> route.roadSpanAt(d)?.kind })
+        // Safety: a turn ahead without lane data → no recommended lane (the plan would only know later junctions and
+        // could send the driver into a lane that cannot make this turn).
+        val unknownTurn = unknownTurnAhead(along)
+        val lanes = if (unknownTurn) LaneState.EMPTY.copy(assumedLateral = planned.assumedLateral, assumedSince = planned.assumedSince)
+        else planned
         val arrived = remaining < 25
 
         val ahead = route.features.filter { it.distanceAlong > along - 5 && it.distanceAlong - along < 400 }
@@ -148,11 +166,24 @@ class NavigationEngine(
         val bike = route.bikeLaneAt(along) ?: route.bikeLaneAt(along + 50)
 
         val snap = NavSnapshot(route, fix, along, remaining, remainingSec, next, distNext, after, limit, noLimit,
-            status, lanes, kind, offRoute, arrived, upcoming, signals, bike, solidLineIn = solidLineAhead(along))
+            status, lanes, kind, offRoute, arrived, upcoming, signals, bike, solidLineIn = solidLineAhead(along),
+            lanesUnknown = unknownTurn)
         return snap to announcements(snap, phrases)
     }
 
     /** Distance to where lane changes stop being allowed (OSM `change:lanes`), within 250 m; null otherwise. */
+    /**
+     * A real turn (turn, fork, exit, end of road) within 400 m with no lane site within 40 m of it, while the road has
+     * more than one lane there. Roundabouts, merges and straight continuations do not count.
+     */
+    private fun unknownTurnAhead(along: Double): Boolean {
+        val step = route.steps.firstOrNull { it.distanceAlong > along - 5 && it.distanceAlong - along < 400 &&
+            it.maneuver.type in UNKNOWN_CHECK && it.maneuver.modifier != de.lanewise.core.model.Modifier.STRAIGHT } ?: return false
+        if (guidanceSites.any { kotlin.math.abs(it.distanceAlong - step.distanceAlong) < 40 }) return false
+        val lanesThere = route.laneCountAt(step.distanceAlong - 30) ?: return false
+        return lanesThere > 1
+    }
+
     private fun solidLineAhead(along: Double): Double? {
         fun restricted(c: de.lanewise.lane.ChangeSpan) = c.perms.any { it != (de.lanewise.lane.ChangeSpan.LEFT or de.lanewise.lane.ChangeSpan.RIGHT) }
         if (route.laneChanges.any { along >= it.from && along < it.to && restricted(it) }) return null   // already inside
@@ -196,5 +227,9 @@ class NavigationEngine(
 
     private fun say(out: MutableList<Announcement>, key: String, parts: List<String>, prio: Int = 0) {
         if (spoken.add(key)) out += Announcement(key, parts.joinToString(" "), prio, parts)
+    }
+
+    private companion object {
+        val UNKNOWN_CHECK = setOf(ManeuverType.TURN, ManeuverType.FORK, ManeuverType.OFF_RAMP, ManeuverType.END_OF_ROAD)
     }
 }

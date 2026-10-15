@@ -465,6 +465,106 @@ Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which
       (`core/net/ServerHealth.kt`, test `ServerHealthTest`).
 - [ ] Phone check of all of the above (built and unit-tested on the PC only).
 
+## Done (v0.4.4, part 3, 2026-10-15) — checked on the owner's phone over adb
+- [x] Verified on the phone: category icons in search results, Home / Work / Favourites chips, saved places as presets,
+      swap / add stop, smart stop (Tankstelle → Aral +2 min), routing through the stop, demo pause and scrub bar (jumps
+      to the dragged point, lane advice follows), server dot.
+- [x] **Browse map at way splits**: where one OSM way simply continues into the next (node shared by two way ends),
+      both now use the same joint direction (blended over 10 m) and their road edges taper over 15 m to the mean of the
+      two, so edges, lane lines, surfaces and bike lanes meet without a step or kink; every lateral offset is mapped
+      onto the tapered edges (`StreetLanes.Join`, test `linesMeetAtAWaySplit`). Reversed one-ways (`oneway=-1`) now get
+      their bike lane and turn arrows on the side / end they are driven.
+- [x] Floating buttons (layers, recenter, satellite badge) no longer cover the search results.
+- [x] Route overview frames the route above the (taller) preview panel — the panel's height is measured.
+- [x] Stops shown on the map as numbered lime pins.
+- [x] Server dot: probed with a tiny spatial query (two mirrors answered an id lookup but failed every map query with
+      HTTP 500); a timeout counts as busy (red), only no connection as unreachable (grey). The browse-map street fetch
+      probes first too (every 2 min at most), so it starts on a working mirror.
+- [x] Smart-stop search asks the two healthiest mirrors at once and takes the first answer (`Overpass.jsonRace`;
+      ~40 s → ~25 s on a busy day).
+- [ ] Render audit leftovers (dumps): the usable-lane band (ALLOWED) runs straight on into a fork branch for a few
+      metres; a small hook where a left-turn connector meets the new road's outer edge; a dark bulge where a 3-lane
+      road funnels to 1 right behind a junction.
+
+## Done (v0.4.4, part 4, 2026-10-15) — Berliner Allee choke (owner's screenshot + Street View), test drive
+- [x] **Lanes only from the ways the route drives on**: OSRM now returns the route's OSM node ids
+      (`annotations=nodes`, `Route.osmNodes`); the corridor keeps each way's nodes (`out body geom`) and, wherever a
+      way sharing a route segment is in reach, matches lanes / limits / bike lanes / `change:lanes` only from those —
+      never from the Raschplatzhochstraße bridge above Berliner Allee, a road below or a parallel service road.
+- [x] **No choke between close junctions without OSM counts**: Berliner Allee southbound, Königstraße → Schiffgraben is
+      127 m; the fallback "next junction's lanes minus its turn pockets" (5 − 3 = 2) drew 5 → 2 → 5. Blocks shorter than
+      150 m now keep the next junction's lanes; longer ones never drop below the lanes carried on from the last junction.
+- [x] **No bulge after a turn**: the stop-line funnel only applies going straight through (at a turn the connector
+      joins the new road), and within 30 m after a turn the new road's OSM count is used (the 25 m samples still held
+      the old road's 5 lanes). Trace: 5 lanes to the Schiffgraben stop line, right-turn connector, 2 lanes on.
+- [x] **Short lane-count dips filled** (`fillShortLaneDips`): < 120 m with fewer lanes than both neighbours and no
+      junction inside → the smaller neighbour count (bridges / underpasses mapped as their own way). Test
+      `shortLaneDipIsFilled`.
+- [x] `RouteRenderLiveTest`: `LANEWISE_PROFILE_STEP` for a fine lane profile with positions; `drawnLaneWidth`.
+- [x] **Test drive on the phone** (×4, city → B 3 → A 37 → A 7 → exit → L 383): lane advice consistent (keep right on
+      the Autobahn, exit lanes in time, merge banners), no rendering breaks seen. The search box no longer keeps the
+      demo destination ("B") after arriving.
+- [x] Voice download failing silently in Settings (owner's video): the "not published yet" message only showed on the
+      map screen - Settings now shows messages as a toast. The `voices-v1` release does not exist yet (404); the two
+      English test packs were pushed over USB (`tools/voice_pack/04_push.py`) and show up in Settings.
+- [x] The map's (i) attribution button sits top left in the Settings preview; the main map keeps MapLibre's default
+      place (owner: top left there floated over the HUD).
+- [x] **Lanes shifting and breaking on short routes** (owner's video): on routes under 8 km the OSM corridor was
+      refetched on every fix (4 / s) - "8 km before the fetched stretch ends" was always true - and every answer
+      replaced the route, so the road was rebuilt from slightly different data all the time (also while paused) and
+      the public Overpass servers got hammered. Now: only when there is route left to fetch, one fetch at a time, 30 s
+      pause after a failure. Checked on the phone: three frames while paused are identical.
+- [x] **Voice packs: no pause between clips** ("Turn right onto … Celler Straße"): MediaPlayer `setNextMediaPlayer`
+      left an audible gap on the S24. The clips are now decoded (MediaCodec), trimmed of silence and joined with a
+      60 ms gap into one sound played by an AudioTrack on a worker thread (queue order kept, flush on urgent
+      announcements; `PcmJoin`, test `PcmJoinTest`). Owner to listen on the phone.
+- [x] **Test run** (Südstadt → city multi-lane junctions → Westschnellweg → roundabout Garbsen as a stop → A 2 →
+      B 441 → Wunstorf, ×4, 45 screenshots): lanes stable, no chokes or bulges, junction arrows / connectors clean,
+      roundabout and arrival fine. Found: on the A 2 the advice kept right *into a lane closed by roadworks*.
+- [x] **Roadworks closures in the lane advice**: closures were only drawn. Now each closure is (1) a checkpoint for
+      the planner just before it where only the open lanes are usable (`LaneClosure.site`, not drawn) and (2) a
+      "no change into the closed lane" span like a solid line (`toChangeSpan`); keep right stops at the rightmost open
+      lane, and a change into a lane that is closed waits for the last legal stretch (even a short one right before
+      the exit). Phone: the car stays next to the closure for kilometres and moves over only at the exit. Tests
+      `closedLaneIsNotEnteredBeforeTheClosureEnds`, `keepRightStopsAtAClosedLane`.
+- [x] Debug demo intent: `--es demo_via "lat,lon;lat,lon"` for stops (e.g. through a roundabout).
+- [x] **Aegidientorplatz: no arrows / stop line and the wrong lane before the light** (owner's screenshot, AMAP shown
+      for comparison only - no AMAP data or code used): OSM has the lanes (`reverse;left|left|right|right|right`, the 2
+      left lanes turn left), but OSRM drops lane data at this split multi-node junction - the route had no lane site
+      there at all. Now the corridor returns the `turn:lanes` of the ways the route drives on (by OSM node ids), and
+      `Route.withOsmTurnLanes` adds a lane site at the way's end where OSRM gave none within 40 m (turn from the route
+      step, else from the bend of the route line) - arrows, stop line and lane choice work there. Also: a road whose
+      lanes all turn the same way has no "pockets" (both left-turn lanes were treated as one lane further on, so the
+      strip took the leftmost and shifted a lane at the next node). Trace: one left-turn lane, kept through both nodes
+      into Hildesheimer Straße, 0 changes. Test `allTurnLanesAreNoPockets`. Phone check pending (phone disconnected).
+- [ ] Lane choice by the next manoeuvre where it has no lane data (e.g. right turn after the left turn into
+      Hildesheimer Straße: prefer the right one of the two left-turn lanes) - tie-break from the route steps.
+- [x] **Safety rule: no guessed lane before a turn without lane data.** If the next turn / fork / exit / end of road
+      (≤ 400 m, road wider than 1 lane) has no lane site, no lane is recommended (no strip, no change instruction) and
+      the HUD says "No lane data here – follow the road markings" (DE/EN/VI) until the turn is passed
+      (`NavSnapshot.lanesUnknown`). Before, the plan only knew later junctions and could point into a lane that cannot
+      make the turn (Aegidientorplatz). Product goal saved: accuracy first, for drivers unfamiliar with the area.
+- [x] **Junction audit on the official aerial photos** (`JunctionAuditLiveTest` + `tools/aerial_lanes/junction_audit.py`):
+      every lane site and every signal of a route as DOP20 crop, driving direction up, plain next to the app's lanes,
+      arrows, stop line and recommended lane. Südstadt → Garbsen (15 km): lane sites 18 (OSRM) → **33** with the OSM
+      `turn:lanes` fallback; 15 signalised junctions still have no lane data (OSM has no `turn:lanes` there).
+      Findings: lane counts and junction layout match the photos; the drawn road is often 2–4 m to the side of the real
+      carriageway (OSM way not in the middle of the carriageway) and the stop line sits at the OSM junction node,
+      a few metres past the painted one. **Arrow directions cannot be read from 20 cm photos** (arrows are a few white
+      pixels) - they must come from OSM `turn:lanes` (or street-level imagery, e.g. Mapillary).
+- [ ] Align the drawn road with the real carriageway (lane edges detected on DOP20 by the U-Net, or OSM `width` /
+      `placement`) and put the stop line at the painted one (OSM `stop` nodes / `traffic_signals:direction`).
+- [ ] Signals without lane data on the test routes: list them for the owner to map `turn:lanes` in OSM.
+- [ ] **Reference screenshots from AMAP / Petal Maps** (later, owner's decision): at flagged junctions (audit, no lane
+      data, owner reports) open AMAP / Petal on the phone and screenshot their lane view; disagreements are checked
+      against DOP20 and reality - never copied (see `docs/DATA_SOURCES.md`). Note: Herschelstraße / Celler Straße is
+      outdated in OSM and in AMAP / Petal alike.
+- [ ] Phone check of the safety rule ("No lane data – follow the road markings") and of Aegidientorplatz (installed
+      2026-10-15, not yet checked on the phone).
+- [ ] Overpass was overloaded most of the day (mirrors HTTP 500 / 504, ~25 s answers): without corridor data the app
+      falls back to OSRM lane sites only. A self-hosted Overpass (or caching corridor data per way id) would make lanes
+      reliable.
+
 ## Video review — still open
 - [ ] Owner: check the 3D car (size, colours, behaviour in tunnels / under bridges) and the automatic theme on the phone.
 - [ ] Owner: check the car overlay (size vs. road at different zooms, tilt changes, pan away and recenter) and the
@@ -483,10 +583,8 @@ Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which
       enters the left pocket where it opens; Overpass timed out in the PC check of the 8.4 km route option, so those
       were only checked without OSM lane counts.
 
-- [ ] **Browse / standby map: lines broken at OSM way splits** (owner's screenshot, 2026-10-15, Herschelstraße /
-      Celler Straße): without a route, edge lines and red bike lanes of `StreetLanes` stop and restart offset where one
-      OSM way ends and the next begins (different lane counts / widths per way). Join consecutive ways of the same
-      street into one chain before offsetting, and taper width changes like the route ribbon does.
+- [x] **Browse / standby map: lines broken at OSM way splits** (owner's screenshot, 2026-10-15, Herschelstraße /
+      Celler Straße) — fixed in v0.4.4 part 3.
 
 ## Aerial lanes — next sessions
 1. Owner spot-checks `work/spot/index.html` → `spot_checks.csv`; hand-correct 20–50 label tiles → retrain.

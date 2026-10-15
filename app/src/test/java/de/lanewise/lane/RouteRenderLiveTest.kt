@@ -30,9 +30,9 @@ class RouteRenderLiveTest {
         val routes = OsrmRoutingProvider().route(req)
         println("${routes.size} routes: " + routes.joinToString { "${it.distance.toInt()} m" })
         var route: Route = routes.getOrElse(System.getenv("LANEWISE_ALT")?.toIntOrNull() ?: 1) { routes.first() }
-        val c = runCatching { SpeedLimitProvider().corridor(route.geometry, 0.0, route.distance) }
+        val c = runCatching { SpeedLimitProvider().corridor(route.geometry, 0.0, route.distance, route.osmNodes) }
             .onFailure { println("corridor unavailable (${it.message}) - checking without OSM lane counts") }.getOrNull()
-        if (c != null) route = route.copy(laneChanges = c.laneChanges, bikeLanes = c.bikeLanes, sideRoads = c.sideRoads).withLaneCounts(c.laneCounts)
+        if (c != null) route = route.copy(laneChanges = c.laneChanges, bikeLanes = c.bikeLanes, sideRoads = c.sideRoads).withOsmTurnLanes(c.turnLanes.map { it.distanceAlong to it.lanes }).withLaneCounts(c.laneCounts)
         println("route ${route.distance.toInt()} m, ${route.laneSites.size} lane sites, ${route.laneCounts.size} lane-count spans, ${route.sideRoads.size} side roads")
         route.steps.forEach { st -> println("  step @${st.distanceAlong.toInt()} ${st.maneuver.type} ${st.maneuver.modifier} ${st.name}") }
         route.laneSites.forEach { println("  site @${it.distanceAlong.toInt()} lanes=${it.lanes} turn=${it.turn} maneuver=${it.isManeuver} valid=${it.providerValid}") }
@@ -97,14 +97,16 @@ class RouteRenderLiveTest {
                 d += 20.0
             }
         }
-        // 5) Lane-count profile (LANEWISE_PROFILE=1): OSM lanes, road kind and the drawn lane count every 200 m.
+        // 5) Lane-count profile (LANEWISE_PROFILE=1): OSM lanes, road kind and the drawn lane count every 200 m
+        //    (LANEWISE_PROFILE_STEP=m for a finer one), with the position for checking on a map.
         if (System.getenv("LANEWISE_PROFILE") == "1") {
             var d = 0.0
             while (d < route.distance) {
                 val span = route.roadSpanAt(d)
+                val pos = route.geometry.pointAt(d)
                 println("  profile ${d.toInt()} osmLanes=${route.laneCountAt(d)} kind=${span?.kind} twoWay=${span?.twoWay} " +
-                    "drawn=${LaneRibbonBuilder.drawnLanes(route, d)}")
-                d += 200.0
+                    "nominal=${LaneRibbonBuilder.drawnLanes(route, d)} drawn=${"%.1f".format(LaneRibbonBuilder.drawnLaneWidth(route, d) ?: 0.0)} @${"%.5f,%.5f".format(java.util.Locale.US, pos.lat, pos.lon)}")
+                d += System.getenv("LANEWISE_PROFILE_STEP")?.toDoubleOrNull() ?: 200.0
             }
         }
         println("problems: $problems")

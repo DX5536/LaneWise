@@ -27,6 +27,9 @@ interface RoutingProvider {
 
 class RoutingException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
+/** Lane arrow bit of a manoeuvre modifier (also for lane sites added from OSM, see [Route.withOsmTurnLanes]). */
+fun laneDirOf(m: Modifier): Int = m.toLaneDir()
+
 internal fun Modifier.toLaneDir(): Int = when (this) {
     Modifier.UTURN -> LaneDir.UTURN
     Modifier.SHARP_RIGHT -> LaneDir.SHARP_RIGHT

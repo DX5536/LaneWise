@@ -394,4 +394,51 @@ class LanePlannerTest {
         val normal = LaneSite(100.0, listOf(L, S, S), listOf(false, true, true), S, false, RoadKind.URBAN)
         assertEquals(normal, turnsHiddenAsStraight(listOf(normal)).single())
     }
+
+    /** A2 test run: right lane closed by roadworks until 800 m - no move into it before that (exit lane after it). */
+    @Test
+    fun closedLaneIsNotEnteredBeforeTheClosureEnds() {
+        val span = LaneClosure(200.0, 800.0, listOf(true, true, false)).toChangeSpan()!!
+        // Lateral 0 = the closed right lane, 1 = the open lane next to it: it may not move right, the closed one may leave.
+        org.junit.Assert.assertFalse(span.canMoveRight(1))
+        org.junit.Assert.assertTrue(span.canMoveLeft(0))
+        org.junit.Assert.assertTrue(span.canMoveRight(2))
+        val windows = LaneGuidance().legalWindows(listOf(span), 1, 0, 0.0, 1000.0)
+        org.junit.Assert.assertEquals(listOf(0.0..200.0, 800.0..1000.0), windows)
+        org.junit.Assert.assertNull(LaneClosure(0.0, 10.0, listOf(true, true)).toChangeSpan())
+    }
+
+    /** Keep right on the Autobahn stops left of a lane closed by roadworks. */
+    @Test
+    fun keepRightStopsAtAClosedLane() {
+        val s = RoadKind.MOTORWAY
+        val st = LaneDir.STRAIGHT
+        val a = LaneSite(100.0, listOf(st, st, st), null, st, false, s)
+        val b = LaneSite(4000.0, listOf(st, st, st), null, st, false, s)
+        // Right lane closed from 500 m to 3500 m.
+        val c = LaneClosure(500.0, 3500.0, listOf(true, true, false))
+        val closure = c.toChangeSpan()!!
+        val sites = listOf(a, c.site(s)!!, b)
+        val g = LaneGuidance()
+        // As in NavigationEngine: the closure is a checkpoint (open lanes only) and a no-change-into span.
+        g.update(sites, 50.0, true, true, listOf(closure), roadKindAt = { s })
+        g.update(sites, 300.0, true, true, listOf(closure), roadKindAt = { s })
+        val st2 = g.update(sites, 1500.0, true, true, listOf(closure), roadKindAt = { s })
+        org.junit.Assert.assertTrue("lateral ${st2.assumedLateral}", (st2.assumedLateral ?: 0) >= 1)
+    }
+
+    /** Aegidientorplatz: a road whose lanes all turn left has no pockets - each left-turn lane stays its own lane. */
+    @Test
+    fun allTurnLanesAreNoPockets() {
+        val armLanes = LaneDir.parseTurnLanes("reverse;left|left")
+        val arm = LaneSite(696.0, armLanes, null, LaneDir.SLIGHT_LEFT, true, RoadKind.URBAN)
+        org.junit.Assert.assertEquals(0, arm.leftPockets())
+        org.junit.Assert.assertEquals(listOf(1, 0), listOf(arm.lateral(0), arm.lateral(1)))
+        val approach = LaneSite(637.0, LaneDir.parseTurnLanes("reverse;left|left|right|right|right"), null, LaneDir.LEFT, true, RoadKind.URBAN)
+        val allowed = approach.allowed()
+        // The 1st left-turn lane enters the arm's left lane, the 2nd its right lane - not both the same one.
+        val p = LanePlanner()
+        org.junit.Assert.assertEquals(1, p.entryLateral(approach, 0, allowed, arm))
+        org.junit.Assert.assertEquals(0, p.entryLateral(approach, 1, allowed, arm))
+    }
 }

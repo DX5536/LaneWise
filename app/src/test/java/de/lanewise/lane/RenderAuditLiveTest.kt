@@ -58,10 +58,10 @@ class RenderAuditLiveTest {
         var totals = HashMap<String, Int>()
         for ((i, base) in picked.withIndex()) {
             val c = (1..3).firstNotNullOfOrNull {
-                runCatching { SpeedLimitProvider().corridor(base.geometry, 0.0, base.distance) }.getOrNull() ?: run { delay(4000); null }
+                runCatching { SpeedLimitProvider().corridor(base.geometry, 0.0, base.distance, base.osmNodes) }.getOrNull() ?: run { delay(4000); null }
             }
             val route = if (c == null) base else base.copy(laneChanges = c.laneChanges, bikeLanes = c.bikeLanes, sideRoads = c.sideRoads,
-                features = c.features).withLaneCounts(c.laneCounts)
+                features = c.features).withOsmTurnLanes(c.turnLanes.map { it.distanceAlong to it.lanes }).withLaneCounts(c.laneCounts)
             val spots = audit(route)
             spots.groupingBy { it.kind }.eachCount().forEach { (k, v) -> totals[k] = (totals[k] ?: 0) + v }
             val km = route.distance / 1000

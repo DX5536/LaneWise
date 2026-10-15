@@ -14,9 +14,18 @@
 | **HERE** Traffic API v7 | incidents | yes | Settings or `HERE_API_KEY`. |
 | **Mobilithek** (NAP Deutschland) | DATEX II traffic messages, e.g. VMZ Niedersachsen | subscription + client cert | Subscribe on mobilithek.info, then enter the feed URL and import the `.p12` certificate in Settings. Generic DATEX II v2/v3 `situationRecord` parser. |
 
-## Why not Petal/AMAP data
-Their German lane data is outdated (owner's observation). OSM lane tagging in Hannover is actively
-maintained by the community and reaches users within hours via FOSSGIS/Overpass.
+## AMAP / Petal Maps: reference screenshots only, never data
+Their German lane data is mostly correct, but some lanes are outdated (owner's observation) — and some are wrong in
+exactly the same way as OSM (Herschelstraße / Celler Straße), so agreeing with them proves nothing. Rules (owner's
+decision, 2026-10-15):
+- **Allowed:** opening AMAP / Petal on the owner's phone and taking screenshots of their lane view at a junction, like
+  the owner does by hand, to spot where LaneWise disagrees.
+- **Not allowed:** copying their lanes, arrows or geometry into LaneWise or into OSM (OSM forbids imports from
+  proprietary maps), reverse-engineering their app or data, or automated bulk capture.
+- A disagreement is a pointer: the junction is then checked against the official aerial photo (DOP20, junction audit)
+  and reality, and fixed in our logic or by the owner in OSM.
+- The most up-to-date reference is the aerial photo (LGLN DOP20, flown 2025): lane lines and counts are clear; painted
+  arrow directions are too small at 20 cm and come from OSM `turn:lanes`.
 
 ## Attribution
 Shown in Settings and by MapLibre's attribution button: © OpenStreetMap contributors (ODbL),

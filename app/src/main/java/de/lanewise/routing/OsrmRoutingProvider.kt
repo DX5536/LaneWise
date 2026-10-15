@@ -45,7 +45,7 @@ class OsrmRoutingProvider(
             if (request.avoidMotorways) add("motorway")
         }.takeIf { it.isNotEmpty() }?.joinToString(",", prefix = "&exclude=") ?: ""
         val url = "$baseUrl/route/v1/driving/$coords?steps=true&overview=full&geometries=geojson" +
-            "&alternatives=${request.alternatives}&annotations=duration,distance$bearings$exclude"
+            "&alternatives=${request.alternatives}&annotations=duration,distance,nodes$bearings$exclude"
         val root = try {
             Http.getJson(url)
         } catch (e: Exception) {
@@ -67,6 +67,12 @@ class OsrmRoutingProvider(
         var hint = 0
 
         val legs = r["legs"].arr.orEmpty()
+        // OSM node ids along the route (each leg starts with the node the previous one ended on).
+        val osmNodes = ArrayList<Long>()
+        for (leg in legs) for (n in leg["annotation"]["nodes"].arr.orEmpty()) {
+            val id = n.dbl?.toLong() ?: continue
+            if (osmNodes.lastOrNull() != id) osmNodes += id
+        }
         for ((legIdx, leg) in legs.withIndex()) {
             for (s in leg["steps"].arr.orEmpty()) {
                 val m = s["maneuver"]
@@ -151,6 +157,7 @@ class OsrmRoutingProvider(
                 }.map { it.distanceAlong to it.maneuver.modifier.toLaneDir() },
             ))),
             roadSpans = spans,
+            osmNodes = osmNodes,
         )
     }
 

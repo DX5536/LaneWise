@@ -54,4 +54,24 @@ class StreetLanesTest {
         val edges = StreetLanes.build(listOf(a, b)).filter { it.kind == Kind.EDGE }
         assertTrue("expected 4 unbroken edges, got ${edges.size}", edges.size == 4)
     }
+
+    /**
+     * Owner's standby screenshot (Celler Straße): at a way split with a bend, a lane-count change and the second way
+     * drawn the other way round, the edges and the bike lane of both ways meet at the same points (no step, no kink).
+     */
+    @Test
+    fun linesMeetAtAWaySplit() = runBlocking {
+        // a: west → c (2 lanes, bike lane right); b drawn from the north-east back to c (3 lanes, reversed: its
+        // backward direction is ours).
+        val a = OsmStreet(listOf(p(0.0, -150.0), c), mapOf("highway" to "secondary", "lanes" to "2", "oneway" to "yes",
+            "cycleway:right" to "lane"), id = 1, nodes = listOf(10, 2))
+        val b = OsmStreet(listOf(p(100.0, 120.0), c), mapOf("highway" to "secondary", "lanes" to "3", "oneway" to "-1",
+            "cycleway:left" to "lane"), id = 2, nodes = listOf(11, 2))
+        val edges = StreetLanes.build(listOf(a, b)).filter { it.kind == Kind.EDGE }
+        // Every edge end near the split has a partner end of the other way within 0.15 m.
+        val ends = edges.flatMap { listOf(it.points.first(), it.points.last()) }.filter { Geo.distance(it, c) < 8 }
+        assertTrue("no edge ends at the split", ends.size >= 4)
+        for (e in ends) assertTrue("edge end ${Geo.distance(e, c)} m from c has no partner",
+            ends.any { it !== e && Geo.distance(it, e) < 0.15 })
+    }
 }

@@ -131,6 +131,9 @@ data class LaneSite(
     /** Number of turn-pocket lanes on the left edge that only serve left turns / U-turns. */
     fun leftPockets(): Int {
         if (fullLength) return 0
+        // Every lane turns left (a slip road / the turning arm of a split junction): the whole road turns, no pockets
+        // (Aegidientorplatz: `reverse;left|left` - as pockets both left-turn lanes looked like one lane further on).
+        if (lanes.all { it != LaneDir.NONE && it and LaneDir.ANY_LEFT.inv() == 0 }) return 0
         var n = 0
         while (n < lanes.size - 1) {
             val m = lanes[n]
@@ -142,6 +145,7 @@ data class LaneSite(
     /** Number of turn-pocket lanes on the right edge that only serve right turns. */
     fun rightPockets(): Int {
         if (fullLength) return 0
+        if (lanes.all { it != LaneDir.NONE && it and LaneDir.ANY_RIGHT.inv() == 0 }) return 0
         var n = 0
         while (n < lanes.size - 1 - leftPockets()) {
             val m = lanes[lanes.size - 1 - n]

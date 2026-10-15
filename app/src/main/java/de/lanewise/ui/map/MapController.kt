@@ -117,11 +117,29 @@ class MapController(private val context: Context) {
         }
     }
 
+    private var attributionTopPx = 0
+
+    /** Distance of the (i) attribution button from the top of the map (px), below whatever the screen shows there. */
+    fun setAttributionTop(px: Int) {
+        attributionTopPx = px
+        val m = map ?: return
+        val side = (12 * context.resources.displayMetrics.density).toInt()
+        m.uiSettings.attributionGravity = android.view.Gravity.TOP or android.view.Gravity.START
+        m.uiSettings.setAttributionMargins(side, px, 0, 0)
+    }
+
     fun attach(view: MapView, darkMode: Boolean) {
         view.getMapAsync { m ->
             map = m
             m.uiSettings.isCompassEnabled = false
             m.uiSettings.isAttributionEnabled = true
+            // Settings preview: the (i) attribution button top left (owner's request; bottom left it covered the road).
+            // The main map keeps MapLibre's default place.
+            if (attributionTopPx > 0) {
+                m.uiSettings.attributionGravity = android.view.Gravity.TOP or android.view.Gravity.START
+                val side = (12 * context.resources.displayMetrics.density).toInt()
+                m.uiSettings.setAttributionMargins(side, attributionTopPx, 0, 0)
+            }
             m.uiSettings.isLogoEnabled = false
             m.uiSettings.isRotateGesturesEnabled = true
             m.uiSettings.isTiltGesturesEnabled = true
@@ -170,6 +188,7 @@ class MapController(private val context: Context) {
     private fun setupLayers(s: Style, isDark: Boolean) {
         s.addImage(IMG_CAR, carBitmap(if (isDark) 0xFF9A82FF.toInt() else 0xFF6C4CF5.toInt()))
         s.addImage(IMG_DEST, pinBitmap())
+        s.addImage(IMG_STOP, pinBitmap(0xFFB8F33A.toInt(), 0xFFFFFFFF.toInt()))
         s.addImage(IMG_BIKE, bikeSymbolBitmap())
         de.lanewise.core.model.AutobahnPoiKind.entries.forEach { s.addImage("lw-ab-${it.name}", abPoiBitmap(it)) }
         FeatureKind.entries.forEach { s.addImage("lw-feat-${it.name}", RoadSignArt.feature(it, 64)) }
@@ -299,9 +318,17 @@ class MapController(private val context: Context) {
             PropertyFactory.iconAllowOverlap(true), PropertyFactory.iconIgnorePlacement(true),
             PropertyFactory.iconPitchAlignment(Property.ICON_PITCH_ALIGNMENT_VIEWPORT),
         ))
-        s.addLayer(SymbolLayer("dest", SRC_DEST).withProperties(
+        s.addLayer(SymbolLayer("dest", SRC_DEST).withFilter(Expression.not(Expression.has("n"))).withProperties(
             PropertyFactory.iconImage(IMG_DEST), PropertyFactory.iconAnchor(Property.ICON_ANCHOR_BOTTOM),
             PropertyFactory.iconAllowOverlap(true), PropertyFactory.iconIgnorePlacement(true),
+        ))
+        s.addLayer(SymbolLayer("stops", SRC_DEST).withFilter(Expression.has("n")).withProperties(
+            PropertyFactory.iconImage(IMG_STOP), PropertyFactory.iconAnchor(Property.ICON_ANCHOR_BOTTOM),
+            PropertyFactory.iconAllowOverlap(true), PropertyFactory.iconIgnorePlacement(true),
+            PropertyFactory.textField(Expression.get("n")), PropertyFactory.textFont(arrayOf("Noto Sans Bold")),
+            // The number sits in the white dot of the pin (60 px above its tip; 10 sp text = 37.5 px per em on the phone).
+            PropertyFactory.textSize(10f), PropertyFactory.textColor("#6C4CF5"), PropertyFactory.textOffset(arrayOf(0f, -1.6f)),
+            PropertyFactory.textAllowOverlap(true), PropertyFactory.textIgnorePlacement(true),
         ))
         s.addLayer(SymbolLayer("car", SRC_CAR).withProperties(
             PropertyFactory.iconImage(IMG_CAR), PropertyFactory.iconRotate(Expression.get("bearing")),
@@ -523,14 +550,16 @@ class MapController(private val context: Context) {
 
     // --- data updates ---------------------------------------------------------------------------
 
-    fun showRoutes(main: Route?, alternatives: List<Route>, destination: LatLon?) {
+    fun showRoutes(main: Route?, alternatives: List<Route>, destination: LatLon?, stops: List<LatLon> = emptyList()) {
         val s = style ?: return
         (s.getSource(SRC_ROUTE) as? GeoJsonSource)?.setGeoJson(
             FeatureCollection.fromFeatures(listOfNotNull(main?.let { Feature.fromGeometry(line(it.geometry.points)) })))
         (s.getSource(SRC_ALT) as? GeoJsonSource)?.setGeoJson(
             FeatureCollection.fromFeatures(alternatives.map { Feature.fromGeometry(line(it.geometry.points)) }))
         (s.getSource(SRC_DEST) as? GeoJsonSource)?.setGeoJson(
-            FeatureCollection.fromFeatures(listOfNotNull(destination?.let { Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat)) })))
+            FeatureCollection.fromFeatures(listOfNotNull(destination?.let { Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat)) }) +
+                // Stops: numbered lime pins ("n" = 1, 2 …).
+                stops.mapIndexed { i, p -> Feature.fromGeometry(Point.fromLngLat(p.lon, p.lat)).apply { addStringProperty("n", "${i + 1}") } }))
         if (main == null) stopTween()
     }
 
@@ -973,18 +1002,18 @@ class MapController(private val context: Context) {
         return bmp
     }
 
-    private fun pinBitmap(): Bitmap {
+    private fun pinBitmap(body: Int = 0xFF6C4CF5.toInt(), dot: Int = 0xFFB8F33A.toInt()): Bitmap {
         val bmp = Bitmap.createBitmap(72, 96, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         val p = Paint(Paint.ANTI_ALIAS_FLAG)
-        p.color = 0xFF6C4CF5.toInt()
+        p.color = body
         val path = Path().apply {
             moveTo(36f, 94f); cubicTo(36f, 94f, 4f, 56f, 4f, 36f); cubicTo(4f, 16f, 18f, 4f, 36f, 4f)
             cubicTo(54f, 4f, 68f, 16f, 68f, 36f); cubicTo(68f, 56f, 36f, 94f, 36f, 94f); close()
         }
         c.drawPath(path, p)
-        p.color = 0xFFB8F33A.toInt()
-        c.drawCircle(36f, 36f, 13f, p)
+        p.color = dot
+        c.drawCircle(36f, 36f, if (dot == 0xFFFFFFFF.toInt()) 20f else 13f, p)
         return bmp
     }
 
@@ -1029,5 +1058,6 @@ class MapController(private val context: Context) {
             "&REQUEST=GetMap&LAYERS=ni_dop20&STYLES=&CRS=EPSG:3857&BBOX={bbox-epsg-3857}&WIDTH=256&HEIGHT=256&FORMAT=image/jpeg"
         private const val IMG_CAR = "lw-car-img"
         private const val IMG_DEST = "lw-dest-img"
+        private const val IMG_STOP = "lw-stop-img"
     }
 }

@@ -115,12 +115,16 @@ class LaneGuidance(private val planner: LanePlanner = LanePlanner()) {
             if (keepRight && lat != null && lat > 0 && fastFrom != null && fastShare >= 0.6) {
                 val motorway = kinds.any { it.second == RoadKind.MOTORWAY }
                 val start = fastFrom + if (motorway) 300.0 else 200.0
-                val back = KEEP_RIGHT_PER_LANE * lat
+                // Only as far right as no closure / solid line forbids on this stretch: a lane closed by roadworks is
+                // not the "right lane" (A 2 test run: the strip moved into the closed lane before an exit).
+                var target = lat
+                while (target > 0 && changeSpans.none { it.to > start && it.from < end && !it.canMoveRight(target) }) target--
+                val back = KEEP_RIGHT_PER_LANE * (lat - target)
                 val nextKind = nextSite?.let { roadKindAt?.invoke(it.distanceAlong - 100.0) ?: it.roadKind } ?: passed.roadKind
-                if (end - start > back + leadDistance(nextKind, max(1, lat)) + 200.0) {
+                if (target < lat && end - start > back + leadDistance(nextKind, max(1, lat - target)) + 200.0) {
                     keepRightFrom = start
                     keepRightFromLateral = lat
-                    assumedLateral = 0
+                    assumedLateral = target
                     assumedSince = start + back
                 }
             }
@@ -166,8 +170,10 @@ class LaneGuidance(private val planner: LanePlanner = LanePlanner()) {
                 val lead = leadDistance(a.site.roadKind, abs(a.changeFromPrevious))
                 val target = a.site.lateral(a.recommended)
                 // Change where the line is dashed: the last legal stretch before the site (solid lines from OSM).
-                val window = legalWindows(spans, target - a.changeFromPrevious, target, prevDist + 10.0, a.site.distanceAlong - 10.0)
-                    .lastOrNull { it.endInclusive - it.start >= 20.0 }
+                val windows = legalWindows(spans, target - a.changeFromPrevious, target, prevDist + 10.0, a.site.distanceAlong - 10.0)
+                // The last legal stretch; a short one right before the site still beats changing before a closure and
+                // driving through it in the closed lane.
+                val window = windows.lastOrNull { it.endInclusive - it.start >= 5.0 }
                 if (window != null) {
                     val start = max(window.start, window.endInclusive - lead)
                     return LaneChangeInstruction(start, a.site, a.changeFromPrevious, a.recommended, deadline = window.endInclusive)

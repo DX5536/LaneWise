@@ -196,7 +196,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (s.overSpeedSound && snap.speedStatus == SpeedStatus.OVER && (fix.timeMs / 1000) % 5 == 0L) voice.beep()
         if (snap.arrived) { stopNavigation(); _ui.update { it.copy(message = phrases.instruction(snap.route.steps.last())) }; return }
         if (snap.offRoute && !fix.simulated) reroute(fix)
-        if (snap.route.provider != "offline" && snap.distanceAlong > speedFetchedUntil - 8_000) fetchCorridor(snap.route, snap.distanceAlong)
+        // Next stretch of OSM data 8 km before the fetched one ends - only if there is more route to fetch, one fetch at
+        // a time and not again within 30 s of a failure. Short routes (< 8 km) were refetched on every fix (4 / s),
+        // and each answer replaced the route: the lanes shifted and broke constantly (owner's video).
+        if (snap.route.provider != "offline" && snap.distanceAlong > speedFetchedUntil - 8_000 &&
+            speedFetchedUntil < snap.route.distance - 1 && corridorJob?.isActive != true &&
+            System.currentTimeMillis() - corridorFailedAt > 30_000) fetchCorridor(snap.route, snap.distanceAlong)
     }
 
     private var aerial: AerialLanes? = null
@@ -215,7 +220,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (streetsJob?.isActive == true || !isOnline()) return
         streetsCenter = p
         streetsJob = viewModelScope.launch {
-            val nearby = runCatching { de.lanewise.osm.StreetLanes.fetchNearby(p) }.getOrNull()
+            // Healthiest Overpass mirror first (some answer every map query with HTTP 500 for hours).
+            if (System.currentTimeMillis() - de.lanewise.core.net.ServerHealth.lastProbeMs > 120_000) {
+                runCatching { de.lanewise.core.net.ServerHealth.probe(settings.value.osrmUrl) }.getOrNull()
+                    ?.let { r -> _ui.update { it.copy(serverHealth = r.overall) } }
+            }
+            val res = runCatching { de.lanewise.osm.StreetLanes.fetchNearby(p) }
+            res.exceptionOrNull()?.let { if (it !is kotlinx.coroutines.CancellationException) android.util.Log.w("LaneWise", "nearby streets: $it") }
+            val nearby = res.getOrNull()
             val streets = nearby?.streets
             if (streets == null) { streetsCenter = c; return@launch }   // retry on next fix
             _ui.update { it.copy(nearbyStreets = streets, nearbyFeatures = nearby?.features.orEmpty()) }
@@ -377,12 +389,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun startTestDrive() = startDemo(TEST_FROM, TEST_TO, strings.testStart, strings.testEnd, preferTestRoute = true)
 
     /** Demo from [from] to [to] (test drive; debug builds also accept it from adb, see MainActivity). */
-    fun startDemo(from: LatLon, to: LatLon, fromName: String = "A", toName: String = "B", preferTestRoute: Boolean = false, speed: Double? = null) {
+    fun startDemo(from: LatLon, to: LatLon, fromName: String = "A", toName: String = "B", preferTestRoute: Boolean = false, speed: Double? = null,
+                  via: List<LatLon> = emptyList()) {
         testDrivePending = true
         testPreferA7 = preferTestRoute
         speed?.let { s -> _ui.update { it.copy(demoSpeed = s) } }
         _ui.update {
             it.copy(origin = Place(fromName, "", from), destination = Place(toName, "", to),
+                stops = via.mapIndexed { i, p -> Place("${strings.stop} ${i + 1}", "", p) },
                 results = emptyList(), query = toName, mode = Mode.PREVIEW)
         }
         computeRoutes()
@@ -541,11 +555,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Speed limits (OSRM only; TomTom/offline bring their own), signs and bike lanes for the next 40 km. */
+    private var corridorJob: Job? = null
+    private var corridorFailedAt = 0L
+
     private fun fetchCorridor(route: Route, from: Double) {
         val to = minOf(route.distance, from + 40_000)
+        val before = speedFetchedUntil
         speedFetchedUntil = to
-        viewModelScope.launch {
-            val data = runCatching { speedLimits.corridor(route.geometry, from, to) }.getOrNull() ?: return@launch
+        corridorJob?.cancel()
+        corridorJob = viewModelScope.launch {
+            val data = runCatching { speedLimits.corridor(route.geometry, from, to, route.osmNodes) }.getOrNull()
+            if (data == null) {
+                // Try again later (from where the car is then), not on the next fix.
+                speedFetchedUntil = before
+                corridorFailedAt = System.currentTimeMillis()
+                return@launch
+            }
             val base = currentRoute ?: route
             val updated = base.copy(
                 speedLimits = if (base.provider == "osrm") (base.speedLimits.filter { it.to <= from } + data.limits).sortedBy { it.from }
@@ -555,7 +580,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 laneChanges = de.lanewise.lane.ChangeSpan.merge(
                     (base.laneChanges.filter { it.to <= from && it !in base.tomtomLaneLines } + data.laneChanges).sortedBy { it.from }, base.tomtomLaneLines),
                 sideRoads = base.sideRoads + data.sideRoads,
-            ).withLaneCounts((base.laneCounts.filter { it.to <= from } + data.laneCounts).sortedBy { it.from })
+            ).withOsmTurnLanes(data.turnLanes.map { it.distanceAlong to it.lanes })
+                .withLaneCounts((base.laneCounts.filter { it.to <= from } + data.laneCounts).sortedBy { it.from })
             if (_ui.value.mode == Mode.NAVIGATING) {
                 engine = NavigationEngine(updated, laneGuidance).also { it.rehydrate(engine) }
                 currentRoute = updated
@@ -566,14 +592,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun previewCorridor(route: Route) {
         viewModelScope.launch {
-            val data = runCatching { speedLimits.corridor(route.geometry, 0.0, minOf(route.distance, 15_000.0)) }.getOrNull()
+            val data = runCatching { speedLimits.corridor(route.geometry, 0.0, minOf(route.distance, 15_000.0), route.osmNodes) }.getOrNull()
                 ?: return@launch
             val updated = route.copy(
                 speedLimits = if (route.provider == "osrm") data.limits else route.speedLimits,
                 features = data.features, bikeLanes = data.bikeLanes,
                 laneChanges = de.lanewise.lane.ChangeSpan.merge(data.laneChanges, route.tomtomLaneLines),
                 sideRoads = data.sideRoads,
-            ).withLaneCounts(data.laneCounts)
+            ).withOsmTurnLanes(data.turnLanes.map { it.distanceAlong to it.lanes }).withLaneCounts(data.laneCounts)
             _ui.update { st -> st.copy(routes = st.routes.map { if (it === route) updated else it }) }
         }
     }
@@ -666,7 +692,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         de.lanewise.nav.NavigationService.stop(ctx)
         engine = null; currentRoute = null
         _ui.update { it.copy(mode = Mode.BROWSE, nav = null, simulating = false, routes = emptyList(), destination = null, laneHint = null, laneHintCountdown = null,
-            origin = null, originResults = emptyList(), stops = emptyList()) }
+            origin = null, originResults = emptyList(), stops = emptyList(), query = "", results = emptyList()) }
     }
 
     /** Long-press on the lane bar: remember this spot as "lanes wrong here" (GeoJSON for fixing OSM later). */

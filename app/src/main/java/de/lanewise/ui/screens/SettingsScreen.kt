@@ -61,15 +61,11 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.DirectionsBike
 import androidx.compose.material.icons.rounded.AltRoute
 import androidx.compose.material.icons.rounded.AutoAwesome
-import androidx.compose.material.icons.rounded.BrightnessAuto
 import androidx.compose.material.icons.rounded.CloudOff
-import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.DirectionsCar
 import androidx.compose.material.icons.rounded.Download
-import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.Map
 import androidx.compose.material.icons.rounded.Palette
-import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.RecordVoiceOver
 import androidx.compose.material.icons.rounded.Share
@@ -99,6 +95,11 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, ui: UiState, onBack: () ->
         }
     }
     fun set(t: (AppSettings) -> AppSettings) = vm.updateSettings(t)
+    // Messages from actions on this screen (voice download failed, offline region …) - the map screen's message
+    // banner is not visible here, so a failed download looked like nothing happened (owner's video).
+    androidx.compose.runtime.LaunchedEffect(ui.message) {
+        ui.message?.let { android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_LONG).show(); vm.clearMessage() }
+    }
 
     val dark = MaterialTheme.colorScheme.background.let { (it.red + it.green + it.blue) / 3f < 0.5f }
     Column(
@@ -121,12 +122,9 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, ui: UiState, onBack: () ->
 
         Section(str.appearance, Icons.Rounded.Palette) {
             Segmented(ThemeMode.entries, s.theme, { m ->
-                when (m) { ThemeMode.AUTO -> str.themeAuto.substringBefore(" ("); ThemeMode.SYSTEM -> str.themeSystem
+                when (m) { ThemeMode.AUTO -> str.themeAutoShort; ThemeMode.SYSTEM -> str.themeSystem
                     ThemeMode.LIGHT -> str.themeLight; ThemeMode.DARK -> str.themeDark }
-            }, icon = { m ->
-                when (m) { ThemeMode.AUTO -> Icons.Rounded.BrightnessAuto; ThemeMode.SYSTEM -> Icons.Rounded.PhoneAndroid
-                    ThemeMode.LIGHT -> Icons.Rounded.LightMode; ThemeMode.DARK -> Icons.Rounded.DarkMode }
-            }) { m -> set { it.copy(theme = m) } }
+            }, showIcon = false) { m -> set { it.copy(theme = m) } }
             if (s.theme == ThemeMode.AUTO) Text(str.themeAuto, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp))
             Spacer(Modifier.height(6.dp))
@@ -324,13 +322,24 @@ private fun ButtonIcon(icon: ImageVector) {
 
 /** Segmented single choice (language, theme) instead of a column of radio buttons. */
 @Composable
-private fun <T> Segmented(options: List<T>, selected: T, label: (T) -> String, icon: ((T) -> ImageVector)? = null, onSelect: (T) -> Unit) {
+private fun <T> Segmented(
+    options: List<T>, selected: T, label: (T) -> String, icon: ((T) -> ImageVector)? = null,
+    /** false: label only - four segments with icon and label overlapped on a phone (owner's screenshot). */
+    showIcon: Boolean = true,
+    onSelect: (T) -> Unit,
+) {
     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
         options.forEachIndexed { i, o ->
             SegmentedButton(
                 selected = o == selected, onClick = { onSelect(o) },
                 shape = SegmentedButtonDefaults.itemShape(i, options.size),
-                icon = { if (icon != null) Icon(icon(o), null, Modifier.size(18.dp)) else SegmentedButtonDefaults.Icon(o == selected) },
+                icon = {
+                    when {
+                        !showIcon -> {}
+                        icon != null -> Icon(icon(o), null, Modifier.size(18.dp))
+                        else -> SegmentedButtonDefaults.Icon(o == selected)
+                    }
+                },
             ) { Text(label(o), fontSize = 12.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
         }
     }

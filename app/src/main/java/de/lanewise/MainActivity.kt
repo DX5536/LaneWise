@@ -94,6 +94,7 @@ class MainActivity : ComponentActivity() {
     /**
      * Debug builds: start a demo from adb to check any route in the real app, e.g.
      * `adb shell am start -S -n de.lanewise.app.debug/de.lanewise.MainActivity --es demo_from 52.37,9.74 --es demo_to 52.50,9.81 --ef demo_speed 4`
+ * (optional `--es demo_via "lat,lon;lat,lon"`: stops on the way, e.g. to pass a roundabout).
      */
     private fun handleDemoIntent(i: android.content.Intent?) {
         if (!BuildConfig.DEBUG || i == null) return
@@ -104,6 +105,7 @@ class MainActivity : ComponentActivity() {
         val from = ll(i.getStringExtra("demo_from")) ?: return
         val to = ll(i.getStringExtra("demo_to")) ?: return
         val speed = i.getFloatExtra("demo_speed", 0f).takeIf { it > 0f }?.toDouble()
-        window.decorView.postDelayed({ vm.startDemo(from, to, speed = speed) }, 1500)
+        val via = i.getStringExtra("demo_via")?.split(';')?.mapNotNull { ll(it) }.orEmpty()
+        window.decorView.postDelayed({ vm.startDemo(from, to, speed = speed, via = via) }, 1500)
     }
 }

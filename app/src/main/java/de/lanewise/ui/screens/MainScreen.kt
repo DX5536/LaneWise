@@ -52,6 +52,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -121,6 +122,8 @@ fun MainScreen(
     val context = LocalContext.current
     val controller = remember { MapController(context) }
     var following by remember { mutableStateOf(true) }
+    // Height of the route preview panel (px), so the overview frames the route above it.
+    var previewPanelPx by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     val phrases = remember(settings.language) { Phrases(settings.language) }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -154,12 +157,13 @@ fun MainScreen(
         LaunchedEffect(settings.car3d, settings.carScale) { controller.setCarAppearance(settings.car3d, settings.carScale.toDouble()) }
         LaunchedEffect(settings.bikeLaneColor) { controller.setBikeColor(settings.bikeLaneColor) }
         LaunchedEffect(settings.satellite, dark) { controller.setSatellite(settings.satellite) }
-        LaunchedEffect(ui.routes, ui.selected, ui.mode, ui.destination, settings.showSigns, ui.nearbyFeatures) {
+        LaunchedEffect(ui.routes, ui.selected, ui.mode, ui.destination, settings.showSigns, ui.nearbyFeatures, previewPanelPx) {
             val main = ui.selectedRoute
-            controller.showRoutes(main, ui.routes.filterIndexed { i, _ -> i != ui.selected }, ui.destination?.position)
+            controller.showRoutes(main, ui.routes.filterIndexed { i, _ -> i != ui.selected }, ui.destination?.position,
+                ui.stops.map { it.position })
             // Without a route: the lights / signs around the car (fetched with the nearby streets).
             controller.showFeatures(if (main != null) main.features else ui.nearbyFeatures, settings.showSigns)
-            if (ui.mode == Mode.PREVIEW && main != null) controller.overview(main, 420, 900)
+            if (ui.mode == Mode.PREVIEW && main != null) controller.overview(main, 420, maxOf(900, previewPanelPx + 80))
         }
         LaunchedEffect(ui.incidents) { controller.showIncidents(ui.incidents) }
         // Without an active route: lanes and markings of all nearby streets (like Petal / AMAP).
@@ -202,7 +206,7 @@ fun MainScreen(
 
         when (ui.mode) {
             Mode.BROWSE -> BrowseOverlay(vm, ui, settings, onOpenSettings, onRecenter = { controller.recenter(); following = true })
-            Mode.PREVIEW -> PreviewOverlay(vm, ui, phrases)
+            Mode.PREVIEW -> PreviewOverlay(vm, ui, phrases) { previewPanelPx = it }
             Mode.NAVIGATING -> ui.nav?.let { nav ->
                 NavigationOverlay(vm, ui, nav, settings, phrases, following,
                     onRecenter = { controller.recenter(); following = true },
@@ -322,6 +326,8 @@ private fun BrowseOverlay(vm: MainViewModel, ui: UiState, settings: AppSettings,
                 ui.browseLimit?.let { SpeedLimitSign(limit = it.takeIf { v -> v > 0 }, noLimit = it == OsmTags.NO_LIMIT) }
             }
         }
+        // The floating buttons give way to the result list (they were drawn on top of it).
+        if (ui.results.isEmpty()) {
         GnssBadge(ui.gnss, ui.online, Modifier.align(Alignment.BottomStart).padding(16.dp))
         // Layer toggle: map ↔ official aerial imagery (LGLN DOP20).
         Box(
@@ -334,6 +340,7 @@ private fun BrowseOverlay(vm: MainViewModel, ui: UiState, settings: AppSettings,
             Modifier.align(Alignment.BottomEnd).padding(16.dp).size(56.dp).clip(CircleShape).background(c.chip).clickable(onClick = onRecenter),
             contentAlignment = Alignment.Center,
         ) { Icon(painterResource(R.drawable.ic_locate), str.myPosition, tint = MaterialTheme.colorScheme.primary) }
+        }
         ui.offlineProgress?.let {
             Text(it, Modifier.align(Alignment.BottomCenter).padding(bottom = 84.dp).clip(RoundedCornerShape(12.dp))
                 .background(c.chip).padding(10.dp), color = c.onChip, fontSize = 13.sp)
@@ -518,7 +525,7 @@ private fun SavePlaceDialog(place: Place, onSave: (PlaceKind, String, String?, L
 // --- Route preview ------------------------------------------------------------------------------
 
 @Composable
-private fun PreviewOverlay(vm: MainViewModel, ui: UiState, phrases: Phrases) {
+private fun PreviewOverlay(vm: MainViewModel, ui: UiState, phrases: Phrases, onPanelHeight: (Int) -> Unit = {}) {
     val c = LocalLaneColors.current
     val str = LocalStrings.current
     var saving by remember { mutableStateOf(false) }
@@ -526,7 +533,9 @@ private fun PreviewOverlay(vm: MainViewModel, ui: UiState, phrases: Phrases) {
     var addingStop by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
         Column(
-            Modifier.align(Alignment.BottomCenter).fillMaxWidth().clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                .onGloballyPositioned { onPanelHeight(it.size.height) }
+                .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
                 .background(c.chip).padding(18.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -884,6 +893,8 @@ private fun NavigationOverlay(
                 BikeLaneChip(bikeHere.exclusive, bikeColor, Modifier.align(Alignment.CenterHorizontally))
             }
             ui.laneHint?.let { Spacer(Modifier.height(8.dp)); LaneHint(it, countdown = ui.laneHintCountdown) }
+            // Safety: no lane data for the next turn - say so instead of guessing a lane.
+            if (ui.nav?.lanesUnknown == true && ui.laneHint == null) { Spacer(Modifier.height(8.dp)); LaneHint(str.lanesUnknown) }
         }
 
         SpeedPanel(nav.fix.speedKmh, nav.speedStatus, Modifier.align(Alignment.CenterStart).padding(start = 12.dp, top = 160.dp))

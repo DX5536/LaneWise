@@ -29,7 +29,7 @@ class StopFinder(private val durations: suspend (List<LatLon>) -> Array<DoubleAr
      */
     suspend fun find(query: String, route: Polyline, waypoints: List<LatLon>, limit: Int = 8): List<StopCandidate> {
         val q = buildQuery(query, route) ?: return emptyList()
-        val found = parse(Overpass.json(q))
+        val found = parse(Overpass.jsonRace(q))
         if (found.isEmpty()) return emptyList()
         // Rough pre-ranking by the distance off the route (there and back), then real driving times for the best ones.
         val pre = found.map { p ->

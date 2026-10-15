@@ -75,7 +75,7 @@ fun SettingsPreview(s: AppSettings, dark: Boolean, title: String) {
 @Composable
 private fun PreviewMap(s: AppSettings, dark: Boolean) {
     val context = LocalContext.current
-    val controller = remember { MapController(context) }
+    val controller = remember { MapController(context).also { it.setAttributionTop((8 * context.resources.displayMetrics.density).toInt()) } }
     val mapView = remember { MapView(context).also { it.onCreate(null); controller.attach(it, dark) } }
     val container = remember {
         FrameLayout(context).also { f ->

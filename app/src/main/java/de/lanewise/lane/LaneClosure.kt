@@ -13,6 +13,34 @@ import kotlin.math.ceil
  */
 data class LaneClosure(val from: Double, val to: Double, val open: List<Boolean>) {
 
+    /**
+     * The closure as a "no lane change into it" span for the lane planner (like a solid line): an open lane next to a
+     * closed one may not move into it; closed lanes may be left. So the advice never sends the car into a closed lane
+     * — e.g. into the exit lane while it is still closed by roadworks (A 2 test run) — and keeps right only as far as
+     * the rightmost open lane. Lanes are counted from the right edge, like [ChangeSpan].
+     */
+    /**
+     * A checkpoint for the lane planner just before the closure: only the open lanes may be used, so the advice moves
+     * the car out of a lane that is about to close in time and keeps right only as far as the rightmost open lane.
+     * Not drawn (no stop line / arrows) - for the planner and the lane bar only.
+     */
+    fun site(kind: RoadKind): LaneSite? {
+        if (open.all { it } || open.none { it }) return null
+        return LaneSite((from - 20.0).coerceAtLeast(0.0), List(open.size) { LaneDir.STRAIGHT }, open, LaneDir.STRAIGHT,
+            isManeuver = false, roadKind = kind)
+    }
+
+    fun toChangeSpan(): ChangeSpan? {
+        if (open.all { it } || open.none { it }) return null
+        val perms = open.indices.map { i ->
+            var p = ChangeSpan.LEFT or ChangeSpan.RIGHT
+            if (open[i] && i + 1 < open.size && !open[i + 1]) p = p and ChangeSpan.RIGHT.inv()
+            if (open[i] && i - 1 >= 0 && !open[i - 1]) p = p and ChangeSpan.LEFT.inv()
+            p
+        }
+        return ChangeSpan(from, to, perms)
+    }
+
     companion object {
         /**
          * Closures of [incidents] that run along [route] in its direction: ≥ 30 m of the incident line within 14 m of

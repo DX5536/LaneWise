@@ -55,12 +55,12 @@ class LaneAuditLiveTest {
             var route = routes?.firstOrNull() ?: continue
             if (route.laneSites.size < 2) continue
             val c = (1..3).firstNotNullOfOrNull {
-                runCatching { SpeedLimitProvider().corridor(route.geometry, 0.0, route.distance) }.getOrNull()
+                runCatching { SpeedLimitProvider().corridor(route.geometry, 0.0, route.distance, route.osmNodes) }.getOrNull()
                     ?: run { delay(5000); null }
             }
             if (c == null) { println("route ${routesDone + 1}: corridor unavailable, skipped"); continue }
             route = route.copy(laneChanges = c.laneChanges, bikeLanes = c.bikeLanes, sideRoads = c.sideRoads, features = c.features)
-                .withLaneCounts(c.laneCounts)
+                .withOsmTurnLanes(c.turnLanes.map { it.distanceAlong to it.lanes }).withLaneCounts(c.laneCounts)
             routesDone++
             val findings = audit(route)
             total += findings.size

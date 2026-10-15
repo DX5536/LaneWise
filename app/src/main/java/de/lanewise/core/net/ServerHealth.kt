@@ -16,7 +16,10 @@ enum class Health { FREE, MODERATE, BUSY, DOWN }
 
 object ServerHealth {
 
-    /** Request timeout of a probe (s): no answer within it counts as unreachable. */
+    /** When the last probe finished (ms), so other fetches can refresh the mirror order when it is old. */
+    @Volatile var lastProbeMs = 0L
+
+    /** Request timeout of a probe (s): no answer within it counts as busy. */
     private const val PROBE_TIMEOUT_S = 8L
     private val probeClient: OkHttpClient by lazy {
         Http.client.newBuilder().callTimeout(PROBE_TIMEOUT_S, TimeUnit.SECONDS).build()
@@ -55,11 +58,15 @@ object ServerHealth {
         val op = results.minOf { it.second.first.ordinal }.let { Health.entries[it] }
         val rt = osrm.await().first
         Overpass.preferred = order
+        lastProbeMs = System.currentTimeMillis()
         Report(worse(op, rt), op, rt, order)
     }
 
-    /** Smallest valid Overpass query (one node id), answered in ~0.2 s by a free server. */
-    private const val PROBE_QUERY = "[out:json][timeout:5];node(1);out ids;"
+    /**
+     * A tiny spatial query (one way id within 30 m of Hannover centre), answered in ~0.2 s by a free server. A lookup
+     * by id was not enough: two mirrors answered it while failing every map query with HTTP 500 (2026-10-15).
+     */
+    private const val PROBE_QUERY = "[out:json][timeout:5];way(around:30,52.3759,9.7320)[\"highway\"];out ids 1;"
 
     private suspend fun timed(build: () -> Request): Pair<Health, Long> {
         val t0 = System.nanoTime()
@@ -67,6 +74,10 @@ object ServerHealth {
             Http.fetch(build(), probeClient).code
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
+        } catch (e: java.io.InterruptedIOException) {
+            // Timed out: the server is there but too slow (searches then take ~20 s or fail) - busy, not unreachable.
+            val ms = (System.nanoTime() - t0) / 1_000_000
+            return Health.BUSY to ms
         } catch (e: Exception) {
             null
         }

@@ -104,18 +104,45 @@ data class Route(
     val trafficEta: Boolean = false,
     /** Carriageways running beside the route in the same direction (OSM), drawn as context lanes. */
     val sideRoads: List<SideRoad> = emptyList(),
+    /**
+     * OSM node ids the route drives through, in order (OSRM `annotations=nodes`; empty for other providers). Lets the
+     * corridor take lanes / limits only from the ways the route is on — not from a bridge above or a road below
+     * (owner: Berliner Allee under the Raschplatzhochstraße).
+     */
+    val osmNodes: List<Long> = emptyList(),
 ) {
     fun laneChangeAt(d: Double): de.lanewise.lane.ChangeSpan? = laneChanges.firstOrNull { d >= it.from && d < it.to }
     fun laneCountAt(d: Double): Int? = laneCounts.firstOrNull { d >= it.from && d < it.to }?.count
 
     /** With OSM lane counts; lane sites are re-checked for turn lanes that run the whole way ([markFullLengthLanes]). */
-    fun withLaneCounts(counts: List<LaneCountSpan>): Route = copy(laneCounts = counts).let { r ->
+    fun withLaneCounts(counts: List<LaneCountSpan>): Route = copy(laneCounts = fillShortLaneDips(counts, laneSites.map { it.distanceAlong })).let { r ->
         r.copy(laneSites = de.lanewise.lane.markFullLengthLanes(
             de.lanewise.lane.trimToRoadLanes(r.laneSites, r::laneCountAt) { d ->
                 r.roadSpanAt(d)?.kind.let { it == de.lanewise.lane.RoadKind.MOTORWAY || it == de.lanewise.lane.RoadKind.TRUNK }
             },
             r::laneCountAt))
     }
+    /**
+     * Adds lane sites from OSM `turn:lanes` ([at]: route distance and value) where OSRM gave none within 40 m: the
+     * turn there is the route's step (or the bend of the route line), so the planner, the arrows and the stop line
+     * work at junctions OSRM drops lanes at (Aegidientorplatz, left into Hildesheimer Straße).
+     */
+    fun withOsmTurnLanes(at: List<Pair<Double, String>>): Route {
+        val added = at.filter { (d, _) -> laneSites.none { kotlin.math.abs(it.distanceAlong - d) < 40 } }.mapNotNull { (d, v) ->
+            val masks = de.lanewise.lane.LaneDir.parseTurnLanes(v)
+            if (masks.size < 2) return@mapNotNull null
+            val step = steps.firstOrNull { kotlin.math.abs(it.distanceAlong - d) < 25 &&
+                it.maneuver.type != ManeuverType.DEPART && it.maneuver.type != ManeuverType.ARRIVE && it.maneuver.type != ManeuverType.WAYPOINT }
+            val turn = step?.let { de.lanewise.routing.laneDirOf(it.maneuver.modifier) }
+                ?: de.lanewise.lane.LaneDir.fromTurnAngle(de.lanewise.core.geo.Geo.bearingDelta(
+                    geometry.bearingAt((d - 20).coerceAtLeast(0.0)), geometry.bearingAt((d + 20).coerceAtMost(geometry.length))))
+            val kind = roadSpanAt(d - 5)?.kind ?: de.lanewise.lane.RoadKind.URBAN
+            de.lanewise.lane.LaneSite(d, masks, null, turn, turn != de.lanewise.lane.LaneDir.STRAIGHT, kind)
+        }
+        if (added.isEmpty()) return this
+        return copy(laneSites = (laneSites + added).sortedBy { it.distanceAlong })
+    }
+
     fun bikeLaneAt(d: Double): BikeLaneSpan? = bikeLanes.firstOrNull { d >= it.from && d < it.to }
     fun speedLimitAt(d: Double): SpeedLimitSpan? = speedLimits.firstOrNull { d >= it.from && d < it.to }
     fun roadSpanAt(d: Double): RoadSpan? = roadSpans.firstOrNull { d >= it.from && d < it.to }
@@ -208,5 +235,26 @@ data class SignalCluster(
  * [exclusive] = Radfahrstreifen (solid line, Zeichen 237), false = Schutzstreifen / advisory or shared lane.
  */
 data class LaneCountSpan(val from: Double, val to: Double, val count: Int)
+
+/**
+ * A short stretch with fewer lanes than on both sides of it, and no junction inside, is taken as the smaller of its
+ * neighbours: such dips are almost always mapping artefacts — a bridge or underpass split off as its own way and
+ * tagged with fewer lanes (owner: Berliner Allee northbound under the railway bridge, `lanes=2` for 55 m between 3 and
+ * 3, "should have all 4 lanes") — and drew a choke in the road. [siteDistances]: junctions with lane data.
+ */
+fun fillShortLaneDips(spans: List<LaneCountSpan>, siteDistances: List<Double>, maxLen: Double = 120.0): List<LaneCountSpan> {
+    if (spans.size < 3) return spans
+    val out = spans.toMutableList()
+    for (i in 1 until spans.size - 1) {
+        val prev = out[i - 1]; val cur = spans[i]; val next = spans[i + 1]
+        if (cur.from - prev.to > 5 || next.from - cur.to > 5) continue   // not one continuous road
+        if (cur.to - cur.from > maxLen) continue
+        val around = minOf(prev.count, next.count)
+        if (cur.count >= around) continue
+        if (siteDistances.any { it > cur.from + 10 && it < cur.to - 10 }) continue
+        out[i] = cur.copy(count = around)
+    }
+    return out
+}
 
 data class BikeLaneSpan(val from: Double, val to: Double, val exclusive: Boolean)

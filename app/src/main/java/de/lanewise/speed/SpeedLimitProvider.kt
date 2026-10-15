@@ -30,7 +30,12 @@ data class CorridorData(
     val laneCounts: List<LaneCountSpan> = emptyList(),
     val laneChanges: List<ChangeSpan> = emptyList(),
     val sideRoads: List<de.lanewise.core.model.SideRoad> = emptyList(),
+    /** OSM `turn:lanes` at the end of ways the route drives on (for junctions OSRM gives no lanes for). */
+    val turnLanes: List<TurnLanesAt> = emptyList(),
 )
+
+/** `turn:lanes` value (travel direction) of a way the route drives on, at the route distance where that way ends. */
+data class TurnLanesAt(val distanceAlong: Double, val lanes: String)
 
 /**
  * Fetches OSM data for a corridor along the route in one Overpass request (route line as `around`
@@ -39,7 +44,9 @@ data class CorridorData(
  */
 class SpeedLimitProvider {
 
-    private class OsmWay(val geom: List<LatLon>, val tags: Map<String, String>) {
+    private class OsmWay(val geom: List<LatLon>, val tags: Map<String, String>, val nodes: List<Long> = emptyList()) {
+        /** Shares a segment (two consecutive nodes) with the route: the route really drives on this way. */
+        var onRoute = false
         val line = Polyline(geom)
         val minLat = geom.minOf { it.lat }; val maxLat = geom.maxOf { it.lat }
         val minLon = geom.minOf { it.lon }; val maxLon = geom.maxOf { it.lon }
@@ -53,7 +60,7 @@ class SpeedLimitProvider {
     }
 
     /** Data for [fromDist]..[toDist] metres along [line]. */
-    suspend fun corridor(line: Polyline, fromDist: Double, toDist: Double): CorridorData = withContext(Dispatchers.Default) {
+    suspend fun corridor(line: Polyline, fromDist: Double, toDist: Double, routeNodes: List<Long> = emptyList()): CorridorData = withContext(Dispatchers.Default) {
         val sample = line.slice(fromDist, toDist, step = 120.0)
         if (sample.size < 2) return@withContext CorridorData(emptyList(), emptyList(), emptyList())
         val c = sample.joinToString(",") { String.format(Locale.US, "%.5f,%.5f", it.lat, it.lon) }
@@ -62,15 +69,17 @@ class SpeedLimitProvider {
             "way(around:25,$c)[\"highway\"][~\"^cycleway\"~\"lane\"];" +
             "way(around:25,$c)[\"highway\"][~\"^(lanes|turn:lanes)\"~\".\"];" +
             OsmTags.featureNodeQuery("(around:20,$c)") +
-            ");out tags geom;"
+            ");out body geom;"
         val elements = Overpass.json(q)["elements"].arr.orEmpty()
         val ways = elements.filter { it["type"].str == "way" }.mapNotNull { el ->
             val geom = el["geometry"].arr.orEmpty().mapNotNull { p ->
                 val la = p["lat"].dbl; val lo = p["lon"].dbl
                 if (la != null && lo != null) LatLon(la, lo) else null
             }
-            if (geom.size < 2) null else OsmWay(geom, tagsOf(el))
+            val ids = el["nodes"].arr.orEmpty().mapNotNull { it.dbl?.toLong() }
+            if (geom.size < 2) null else OsmWay(geom, tagsOf(el), ids)
         }
+        markOnRoute(ways, routeNodes)
         val nodes = elements.filter { it["type"].str == "node" }.mapNotNull { el ->
             val la = el["lat"].dbl ?: return@mapNotNull null
             val lo = el["lon"].dbl ?: return@mapNotNull null
@@ -78,7 +87,7 @@ class SpeedLimitProvider {
         }
         val m = matchWays(line, fromDist, toDist, ways)
         CorridorData(m.limits, matchFeatures(line, fromDist, toDist, nodes), m.bikes, m.lanes, m.changes,
-            sideRoads(line, fromDist, toDist, ways.map { it.geom to it.tags }))
+            sideRoads(line, fromDist, toDist, ways.map { it.geom to it.tags }), turnLanesOnRoute(line, fromDist, toDist, ways))
     }
 
     /**
@@ -90,6 +99,33 @@ class SpeedLimitProvider {
         val line = Polyline(listOf(back, position))
         val last = corridor(line, 0.0, line.length).limits.lastOrNull() ?: return null
         return last.kmh ?: OsmTags.NO_LIMIT
+    }
+
+    /**
+     * `turn:lanes` of the ways the route drives on, at the route distance of the way's end in travel direction (where
+     * the arrows apply). OSRM drops lane data at many complex junctions (Aegidientorplatz: 5 lanes
+     * `reverse;left|left|right|right|right` in OSM, nothing from OSRM); these fill the gap.
+     */
+    private fun turnLanesOnRoute(line: Polyline, fromDist: Double, toDist: Double, ways: List<OsmWay>): List<TurnLanesAt> =
+        ways.filter { it.onRoute }.mapNotNull { w ->
+            val a = line.project(w.geom.first()) ?: return@mapNotNull null
+            val b = line.project(w.geom.last()) ?: return@mapNotNull null
+            val forward = b.distanceAlong > a.distanceAlong
+            val end = if (forward) b else a
+            if (abs(end.signedOffset) > 8 || end.distanceAlong < fromDist || end.distanceAlong > toDist) return@mapNotNull null
+            val t = w.tags
+            val value = if (forward) t["turn:lanes:forward"] ?: t["turn:lanes"]?.takeIf { w.oneway && !w.reverse }
+            else t["turn:lanes:backward"] ?: t["turn:lanes"]?.takeIf { w.reverse }
+            value?.takeIf { it.contains('|') }?.let { TurnLanesAt(end.distanceAlong, it) }
+        }.sortedBy { it.distanceAlong }
+
+    /** Marks the ways that share a segment with the route's OSM nodes (either direction). */
+    private fun markOnRoute(ways: List<OsmWay>, routeNodes: List<Long>) {
+        if (routeNodes.size < 2) return
+        val segs = HashSet<Long>(routeNodes.size * 2)
+        fun key(a: Long, b: Long) = minOf(a, b) * 31 + maxOf(a, b) * 1_000_003
+        for (i in 0 until routeNodes.size - 1) segs += key(routeNodes[i], routeNodes[i + 1])
+        for (w in ways) w.onRoute = (0 until w.nodes.size - 1).any { key(w.nodes[it], w.nodes[it + 1]) in segs }
     }
 
     private fun tagsOf(el: JsonElement): Map<String, String> =
@@ -174,7 +210,12 @@ class SpeedLimitProvider {
             var lanes: Int? = null
             var lanesDist = 18.0
             var change: List<Int>? = null
-            for (w in ways) {
+            // Ways the route really drives on (shared OSM nodes) win over anything else in reach - a bridge above,
+            // a road below or a parallel service road.
+            fun near(w: OsmWay) = !(p.lat < w.minLat - pad || p.lat > w.maxLat + pad || p.lon < w.minLon - pad || p.lon > w.maxLon + pad) &&
+                (w.line.project(p)?.let { abs(it.signedOffset) < 18.0 } == true)
+            val pool = if (ways.any { it.onRoute && near(it) }) ways.filter { it.onRoute } else ways
+            for (w in pool) {
                 if (p.lat < w.minLat - pad || p.lat > w.maxLat + pad || p.lon < w.minLon - pad || p.lon > w.maxLon + pad) continue
                 val proj = w.line.project(p) ?: continue
                 val off = abs(proj.signedOffset)
