@@ -135,6 +135,7 @@ fun MainScreen(
             vm.loadAutobahnPois(kinds, ui.selectedRoute)
         }
         LaunchedEffect(ui.autobahnPois) { controller.showAutobahnPois(ui.autobahnPois) }
+        LaunchedEffect(settings.laneOpacity, dark) { controller.setStripOpacity(settings.laneOpacity) }
         LaunchedEffect(settings.car3d, settings.carScale) { controller.setCarAppearance(settings.car3d, settings.carScale.toDouble()) }
         LaunchedEffect(settings.bikeLaneColor) { controller.setBikeColor(settings.bikeLaneColor) }
         LaunchedEffect(settings.satellite, dark) { controller.setSatellite(settings.satellite) }
@@ -232,7 +233,15 @@ private fun MapLayer(controller: MapController, dark: Boolean, onPanned: () -> U
         lifecycle.addObserver(obs)
         onDispose { lifecycle.removeObserver(obs) }
     }
-    AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
+    val container = remember {
+        android.widget.FrameLayout(context).also { f ->
+            f.addView(mapView)
+            val overlay = de.lanewise.ui.map.CarOverlayView(context)
+            f.addView(overlay)
+            controller.carOverlay = overlay
+        }
+    }
+    AndroidView(factory = { container }, modifier = Modifier.fillMaxSize())
 }
 
 // --- Browse -------------------------------------------------------------------------------------
@@ -653,7 +662,7 @@ private fun NavigationOverlay(
             onClose = vm::stopNavigation, onOverview = onOverview,
             // Whole journey, across re-routes: driven on earlier routes + driven on this one, out of that + remaining.
             progress = (ui.journeyDriven + nav.distanceAlong).let { done -> (done / (done + nav.remainingDistance).coerceAtLeast(1.0)).toFloat() },
-            modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding(),
+            modifier = Modifier.align(Alignment.BottomCenter),
         )
     }
 }

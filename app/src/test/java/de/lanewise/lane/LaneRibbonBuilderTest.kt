@@ -144,8 +144,12 @@ class LaneRibbonBuilderTest {
         assertTrue(along.all { it.signedOffset < 0 })
         // Chevrons follow the lane path and fade with distance.
         val ribbon = LaneRibbonBuilder.build(r, LaneState.EMPTY, 100.0)
-        val chev = LaneRibbonBuilder.chevrons(ribbon, 100.0, 3.0)
-        assertEquals(7, chev.size)
-        assertTrue(chev.zipWithNext().all { (a, b) -> b.opacity < a.opacity })
+        val chev = LaneRibbonBuilder.chevrons(ribbon, 100.0, 250.0)
+        assertTrue(chev.size in 15..17)
+        assertTrue(chev.zipWithNext().all { (a, b) -> b.index == a.index + 1 && b.opacity <= a.opacity })
+        // Fixed grid: a later build puts the same chevron at the same spot.
+        val later = LaneRibbonBuilder.chevrons(LaneRibbonBuilder.build(r, LaneState.EMPTY, 120.0), 120.0, 270.0)
+        val same = later.first { it.index == chev[5].index }
+        assertTrue(Geo.distance(same.points[1], chev[5].points[1]) < 0.05)
     }
 }

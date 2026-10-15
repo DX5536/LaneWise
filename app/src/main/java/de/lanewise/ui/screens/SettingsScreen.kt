@@ -120,6 +120,15 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, ui: UiState, onBack: () ->
                 }
             }
             Toggle(str.laneRibbons, str.laneRibbonsSub, s.laneRibbonsOnMap) { v -> set { it.copy(laneRibbonsOnMap = v) } }
+            LabeledSlider(str.laneOpacity, s.laneOpacity, 0.2f..1f, "${(s.laneOpacity * 100).toInt()} %", step = 0.05f) { v ->
+                set { it.copy(laneOpacity = v) }
+            }
+            LanePreview(s.laneOpacity)
+        }
+
+        Section(str.testDrive) {
+            Text(str.testDriveSub, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Button(onClick = { vm.startTestDrive(); onBack() }, modifier = Modifier.padding(top = 6.dp)) { Text(str.testDriveButton) }
         }
 
         Section(str.lookExtras) {
@@ -295,4 +304,40 @@ private fun Field(label: String, value: String, secret: Boolean = false, onChang
         keyboardOptions = KeyboardOptions(keyboardType = if (secret) KeyboardType.Password else KeyboardType.Uri),
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
     )
+}
+
+/**
+ * Live preview of the recommended-lane strip at [opacity]: a short three-lane road like on the map (asphalt, dashed
+ * lines, usable-lane band, strip in the middle lane), in the current theme's colours.
+ */
+@Composable
+private fun LanePreview(opacity: Float) {
+    val dark = MaterialTheme.colorScheme.background.let { (it.red + it.green + it.blue) / 3f < 0.5f }
+    val highlight = if (dark) Color(0xFFB8F33A) else Color(0xFF6C4CF5)
+    val base = if (dark) 0.85f else 0.95f
+    androidx.compose.foundation.Canvas(
+        Modifier.fillMaxWidth().padding(vertical = 6.dp).height(96.dp).clip(RoundedCornerShape(14.dp))
+            .background(if (dark) Color(0xFF14161C) else Color(0xFFE8EAF0)),
+    ) {
+        val w = size.width; val h = size.height
+        val road = w * 0.62f; val left = (w - road) / 2; val lane = road / 3
+        drawRect(if (dark) Color(0xFF1C1F27) else Color(0xFF2B2F38), androidx.compose.ui.geometry.Offset(left, 0f),
+            androidx.compose.ui.geometry.Size(road, h))
+        // Usable lanes (soft band) and the recommended strip in the middle lane.
+        drawRect(highlight.copy(alpha = if (dark) 0.28f else 0.3f), androidx.compose.ui.geometry.Offset(left + 0.1f * lane, 0f),
+            androidx.compose.ui.geometry.Size(lane * 1.8f, h))
+        drawRect(highlight.copy(alpha = (base * opacity).coerceIn(0f, 1f)), androidx.compose.ui.geometry.Offset(left + lane * 1.14f, 0f),
+            androidx.compose.ui.geometry.Size(lane * 0.72f, h))
+        val edge = if (dark) Color(0xFFC9CDD8) else Color.White
+        drawLine(edge, androidx.compose.ui.geometry.Offset(left, 0f), androidx.compose.ui.geometry.Offset(left, h), 3f)
+        drawLine(edge, androidx.compose.ui.geometry.Offset(left + road, 0f), androidx.compose.ui.geometry.Offset(left + road, h), 3f)
+        for (k in 1..2) {
+            val x = left + k * lane
+            var y = 0f
+            while (y < h) {
+                drawLine(Color.White, androidx.compose.ui.geometry.Offset(x, y), androidx.compose.ui.geometry.Offset(x, minOf(h, y + 14f)), 3f)
+                y += 28f
+            }
+        }
+    }
 }

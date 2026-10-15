@@ -57,8 +57,19 @@ object OsmTags {
             pedestrian = kind == FeatureKind.TRAFFIC_SIGNALS && tags["crossing"] == "traffic_signals",
             onDemand = tags["traffic_signals"] == "on_demand" || tags["button_operated"] == "only",
             greenArrow = tags["red_turn:right"] == "yes" || tags["traffic_sign"].orEmpty().contains("DE:720"),
+            zebra = kind == FeatureKind.CROSSING && isZebra(tags),
         )
     }
+
+    /**
+     * Zebra crossing as painted in Germany (Zeichen 293 with sign 350): `crossing=zebra`, `crossing_ref=zebra`,
+     * `crossing:markings=zebra…` or the sign DE:350. Plain `marked` / `uncontrolled` crossings (often just a lowered
+     * kerb or dashed lines) and crossings at traffic lights get no stripes — unlike China, Germany paints no zebra at
+     * signalised junctions.
+     */
+    fun isZebra(tags: Map<String, String>): Boolean =
+        tags["crossing"] == "zebra" || tags["crossing_ref"] == "zebra" ||
+            tags["crossing:markings"].orEmpty().startsWith("zebra") || tags["traffic_sign"].orEmpty().contains("DE:350")
 
     /** Classify an OSM node's tags; null if it is not a feature LaneWise shows. */
     fun featureKind(tags: Map<String, String>): FeatureKind? {

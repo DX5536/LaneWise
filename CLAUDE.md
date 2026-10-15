@@ -47,7 +47,7 @@ See `docs/ARCHITECTURE.md`. Core lane logic: `app/src/main/java/de/lanewise/lane
 - Never push for the owner — they review and push themselves.
 
 ## Status
-See `docs/ROADMAP.md` (v0.4.2, 2026-10-15). Builds locally, runs on the owner's phone (Samsung S24 Ultra,
+See `docs/ROADMAP.md` (v0.4.3, 2026-10-15). Builds locally, runs on the owner's phone (Samsung S24 Ultra,
 Android 16, package `de.lanewise.app.debug`); the CI build/release APK is the owner's job.
 
 ## Things learned (read before changing these areas)
@@ -55,6 +55,11 @@ Android 16, package `de.lanewise.app.debug`); the CI build/release APK is the ow
 - The app sandbox (Claude desktop) redirects `%LOCALAPPDATA%` writes; Python venvs/data live in git-ignored
   `tools/*/.venv` and `tools/*/work`.
 - Owner's test route: home in Hannover → a restaurant in Langenhagen (coordinates in `RouteRenderLiveTest`), 2nd route option.
+- Test drive for all road types: Settings → Test drive (or `LANEWISE_FROM=52.37390,9.74662 LANEWISE_TO=52.50796,9.81688
+  LANEWISE_ALT=0` with `RouteRenderLiveTest`): city, B 3 trunk road, A 37 / A 7, exit, roundabouts, rural L 383.
+- The phone can be driven over adb (screen 1440×3120; `adb shell input tap`, `uiautomator dump`, `screenrecord`); the
+  owner allowed this for checking bugs. In Git Bash set `MSYS_NO_PATHCONV=1` for `/sdcard/...` paths.
+- Never block coroutine IO threads with OkHttp `execute()`: use `Http.fetch` (async, cancellable).
 - Privacy: never write the owner's real addresses or places (start/destination) in docs, code, tests or UI text —
   use placeholders like "Musterstraße 1" / "Musterweg 3"; street names of lane bugs (not house numbers) are fine.
   `LANEWISE_LIVE=1 gradlew testDebugUnitTest --tests '*RouteRenderLiveTest*'` checks it (Overpass may time out;

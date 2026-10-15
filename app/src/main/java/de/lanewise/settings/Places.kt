@@ -26,7 +26,7 @@ data class SavedPlace(
     val lon: Double,
 )
 
-private val Context.placesStore: DataStore<Preferences> by preferencesDataStore(name = "places")
+private val Context.placesStore: DataStore<Preferences> by preferencesDataStore(name = "places", scope = storeScope)
 
 class PlacesRepository(private val context: Context) {
     private val key = stringPreferencesKey("places_json")

@@ -158,14 +158,17 @@ data class RoadFeature(
     val onDemand: Boolean = false,
     /** Green-arrow sign for turning right on red (Grünpfeil, Zeichen 720, OSM `red_turn:right=yes`). */
     val greenArrow: Boolean = false,
+    /** A real zebra crossing (Fußgängerüberweg, Zeichen 293) — the only crossing that gets stripes on the road. */
+    val zebra: Boolean = false,
 ) {
     /** Compact flag encoding for the offline graph (kind ordinal in the low nibble). */
-    fun encode(): Int = kind.ordinal or (if (pedestrian) 16 else 0) or (if (onDemand) 32 else 0) or (if (greenArrow) 64 else 0)
+    fun encode(): Int = kind.ordinal or (if (pedestrian) 16 else 0) or (if (onDemand) 32 else 0) or (if (greenArrow) 64 else 0) or
+        (if (zebra) 128 else 0)
 
     companion object {
         fun decode(code: Int, position: LatLon, distanceAlong: Double) = RoadFeature(
             FeatureKind.entries[code and 15], position, distanceAlong,
-            pedestrian = code and 16 != 0, onDemand = code and 32 != 0, greenArrow = code and 64 != 0,
+            pedestrian = code and 16 != 0, onDemand = code and 32 != 0, greenArrow = code and 64 != 0, zebra = code and 128 != 0,
         )
     }
 }

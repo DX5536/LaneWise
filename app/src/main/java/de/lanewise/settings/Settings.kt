@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.asCoroutineDispatcher
 import de.lanewise.BuildConfig
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -75,6 +76,8 @@ data class AppSettings(
     val car3d: Boolean = true,
     /** Size of the car / arrow on the map (× default). */
     val carScale: Float = 1f,
+    /** Opacity of the recommended-lane strip on the map (0.2 … 1, × the theme's own opacity). */
+    val laneOpacity: Float = 1f,
     // Lane view extras (Baidu / AMAP ideas, each optional): strip fades out ahead, moving chevrons, guide-sign banner
     // colours, road name under the car, closed lanes (Autobahn roadworks), zebras + signal poles, see-through buildings.
     val stripFade: Boolean = true,
@@ -93,7 +96,14 @@ data class AppSettings(
 /** Selectable bike-lane colours: red, orange, blue, green, magenta. */
 val BIKE_COLORS = listOf(0xFFE5484D.toInt(), 0xFFF2A93B.toInt(), 0xFF2F80ED.toInt(), 0xFF2EB67D.toInt(), 0xFFD63AF9.toInt())
 
-private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
+/**
+ * Own thread for the settings file: on the shared IO pool, saving waited for minutes whenever network calls had
+ * filled it (owner: Settings could not be changed after a demo run).
+ */
+internal val storeScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() +
+    java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "lanewise-store") }.asCoroutineDispatcher())
+
+private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings", scope = storeScope)
 
 class SettingsRepository(private val context: Context) {
 
@@ -108,6 +118,7 @@ class SettingsRepository(private val context: Context) {
         val fixedZoom = floatPreferencesKey("fixed_zoom")
         val car3d = booleanPreferencesKey("car_3d")
         val carScale = floatPreferencesKey("car_scale")
+        val laneOpacity = floatPreferencesKey("lane_opacity")
         val stripFade = booleanPreferencesKey("strip_fade")
         val laneChevrons = booleanPreferencesKey("lane_chevrons")
         val signColors = booleanPreferencesKey("sign_colors")
@@ -189,6 +200,7 @@ class SettingsRepository(private val context: Context) {
             fixedZoom = p[K.fixedZoom] ?: d.fixedZoom,
             car3d = p[K.car3d] ?: d.car3d,
             carScale = p[K.carScale] ?: d.carScale,
+            laneOpacity = p[K.laneOpacity] ?: d.laneOpacity,
             stripFade = p[K.stripFade] ?: d.stripFade,
             laneChevrons = p[K.laneChevrons] ?: d.laneChevrons,
             signColors = p[K.signColors] ?: d.signColors,
@@ -243,6 +255,7 @@ class SettingsRepository(private val context: Context) {
             p[K.fixedZoom] = s.fixedZoom
             p[K.car3d] = s.car3d
             p[K.carScale] = s.carScale
+            p[K.laneOpacity] = s.laneOpacity
             p[K.stripFade] = s.stripFade
             p[K.laneChevrons] = s.laneChevrons
             p[K.signColors] = s.signColors

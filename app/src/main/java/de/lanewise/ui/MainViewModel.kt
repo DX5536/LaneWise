@@ -280,6 +280,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (_ui.value.destination != null) computeRoutes()
     }
 
+    private var testDrivePending = false
+
+    /**
+     * Built-in test drive (Settings → Test drive): Hannover Hbf → B 3 Messeschnellweg (trunk road with a roundabout) →
+     * A 37 → A 7 → exit Großburgwedel → L 381 / L 383 → roundabout → rural L 383, 25 km. The demo starts by itself on the
+     * route option that really uses the A 7 and the roundabout.
+     */
+    fun startTestDrive() {
+        testDrivePending = true
+        _ui.update {
+            it.copy(origin = Place(strings.testStart, "", TEST_FROM), destination = Place(strings.testEnd, "", TEST_TO),
+                results = emptyList(), query = strings.testEnd, mode = Mode.PREVIEW)
+        }
+        computeRoutes()
+    }
+
     fun chooseDestination(place: Place) {
         _ui.update { it.copy(destination = place, results = emptyList(), query = place.title, mode = Mode.PREVIEW) }
         computeRoutes()
@@ -403,6 +419,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }.getOrDefault(emptyList()) else emptyList()
             val ranked = withContext(Dispatchers.Default) { RouteScorer.score(routes, incidents, s.avoidLaneChanges) }
             _ui.update { it.copy(routes = ranked, selected = 0, routing = false, incidents = incidents) }
+            if (testDrivePending && ranked.isNotEmpty()) {
+                testDrivePending = false
+                val i = ranked.indexOfFirst { r ->
+                    r.steps.any { it.ref.orEmpty().replace(" ", "").contains("A7") } &&
+                        r.steps.any { it.maneuver.type == de.lanewise.core.model.ManeuverType.ROUNDABOUT }
+                }.coerceAtLeast(0)
+                _ui.update { it.copy(selected = i) }
+                startNavigation(simulate = true)
+            }
             // Preview: fetch signs/bike lanes for the first stretch of the best route so they show on the map.
             if (online && ranked.first().provider != "offline") previewCorridor(ranked.first())
         }
@@ -657,3 +682,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val DEMO_SPEEDS = listOf(0.25, 0.5, 1.0, 2.0, 4.0, 8.0)
     }
 }
+
+/** Test drive start (Lavesstraße near Hannover Hbf) and end (L 383 west of Großburgwedel, after the roundabout). */
+val TEST_FROM = LatLon(52.37390, 9.74662)
+val TEST_TO = LatLon(52.50796, 9.81688)

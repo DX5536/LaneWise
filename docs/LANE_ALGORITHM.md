@@ -86,6 +86,8 @@ lanes of a junction after the next turn.
 
 `LaneRibbonBuilder` has two parts, both on a fixed 6 m sampling grid along the route, so the same spot of
 the route always gives the same geometry (no jitter):
+the centre line is averaged over ±12 m and Chaikin-smoothed, so corners are round enough that edges and lane lines
+several metres to the side never fold on the inside of a turn.
 
 * `buildRoad(from, to)` is the route's road: surface sized by lane count × lane width, dashed/solid dividers,
   edges, stop lines, painted arrows, bike lanes. Through lanes keep their place and turn pockets grow outward

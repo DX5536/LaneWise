@@ -29,11 +29,29 @@ object Overpass {
         Http.client.newBuilder().readTimeout(15, TimeUnit.MINUTES).build()
     }
 
-    /** Small queries: returns the parsed JSON. */
-    suspend fun json(query: String): JsonElement = withRetries(query, Http.client) { resp ->
-        val body = resp.body?.string().orEmpty()
-        if (!body.trimStart().startsWith("{")) throw IOException("Overpass returned no JSON (busy?)")
-        Http.json.parseToJsonElement(body)
+    /** Small queries: returns the parsed JSON. Asynchronous and cancellable (see [Http.fetch]). */
+    suspend fun json(query: String): JsonElement {
+        var last: Exception? = null
+        for (wait in BACKOFF_MS) {
+            if (wait > 0) delay(wait)
+            for (url in ENDPOINTS) {
+                try {
+                    val req = Request.Builder().url(url).header("Accept", "application/json")
+                        .post(FormBody.Builder().add("data", query).build()).build()
+                    val r = Http.fetch(req)
+                    if (!r.ok) throw IOException("Overpass HTTP ${r.code} at $url")
+                    if (!r.contentType.contains("json") || !r.body.trimStart().startsWith("{")) {
+                        throw IOException("Overpass returned no JSON (busy?) at $url")
+                    }
+                    return withContext(kotlinx.coroutines.Dispatchers.Default) { Http.json.parseToJsonElement(r.body) }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    last = e
+                }
+            }
+        }
+        throw last ?: IOException("No Overpass endpoint reachable")
     }
 
     /** Large downloads: hands the open response to [read] (stream it, don't buffer). */

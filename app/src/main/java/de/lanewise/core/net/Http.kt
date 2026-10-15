@@ -11,9 +11,15 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
+import kotlinx.coroutines.suspendCancellableCoroutine
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -31,37 +37,62 @@ object Http {
 
     val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
-    suspend fun getText(url: String, headers: Map<String, String> = emptyMap()): String =
-        withContext(Dispatchers.IO) {
-            val req = Request.Builder().url(url).apply { headers.forEach { (k, v) -> header(k, v) } }.build()
-            client.newCall(req).execute().use { resp ->
-                val body = resp.body?.string().orEmpty()
-                if (!resp.isSuccessful) throw IOException("HTTP ${resp.code} for ${url.substringBefore('?')}: ${body.take(200)}")
-                body
-            }
-        }
-
-    suspend fun getJson(url: String, headers: Map<String, String> = emptyMap()): JsonElement =
-        json.parseToJsonElement(getText(url, headers))
-
-    suspend fun postJson(url: String, body: String): JsonElement = withContext(Dispatchers.IO) {
-        val req = Request.Builder().url(url).post(body.toRequestBody("application/json".toMediaType())).build()
-        client.newCall(req).execute().use { resp ->
-            val text = resp.body?.string().orEmpty()
-            if (!resp.isSuccessful) throw IOException("HTTP ${resp.code} for ${url.substringBefore('?')}: ${text.take(200)}")
-            json.parseToJsonElement(text)
-        }
+    /** Status, content type and body of a finished request. */
+    data class Reply(val code: Int, val contentType: String, val body: String) {
+        val ok get() = code in 200..299
     }
 
-    suspend fun postForm(url: String, form: String): String = withContext(Dispatchers.IO) {
+    /**
+     * Runs [req] on OkHttp's own threads and reads the whole body there; cancelling the coroutine cancels the call.
+     * Never a blocking execute() inside withContext(Dispatchers.IO): it keeps its IO thread until the server answers or
+     * the read timeout (60 s, Overpass downloads up to 15 min) passes, even when nobody waits for it any more. A few
+     * route searches (about 20 traffic requests each) filled the shared IO pool, and Settings could not save for
+     * minutes after a demo run.
+     */
+    suspend fun fetch(req: Request, c: OkHttpClient = client): Reply = suspendCancellableCoroutine { cont ->
+        val call = c.newCall(req)
+        cont.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                if (cont.isActive) cont.resumeWithException(e)
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                val reply = try {
+                    response.use { Reply(it.code, it.header("Content-Type").orEmpty(), it.body?.string().orEmpty()) }
+                } catch (e: IOException) {
+                    if (cont.isActive) cont.resumeWithException(e)
+                    return
+                }
+                if (cont.isActive) cont.resume(reply)
+            }
+        })
+    }
+
+    suspend fun getText(url: String, headers: Map<String, String> = emptyMap()): String {
+        val req = Request.Builder().url(url).apply { headers.forEach { (k, v) -> header(k, v) } }.build()
+        val r = fetch(req)
+        if (!r.ok) throw IOException("HTTP ${r.code} for ${url.substringBefore('?')}: ${r.body.take(200)}")
+        return r.body
+    }
+
+    suspend fun getJson(url: String, headers: Map<String, String> = emptyMap()): JsonElement =
+        getText(url, headers).let { withContext(Dispatchers.Default) { json.parseToJsonElement(it) } }
+
+    suspend fun postJson(url: String, body: String): JsonElement {
+        val req = Request.Builder().url(url).post(body.toRequestBody("application/json".toMediaType())).build()
+        val r = fetch(req)
+        if (!r.ok) throw IOException("HTTP ${r.code} for ${url.substringBefore('?')}: ${r.body.take(200)}")
+        return withContext(Dispatchers.Default) { json.parseToJsonElement(r.body) }
+    }
+
+    suspend fun postForm(url: String, form: String): String {
         val req = Request.Builder().url(url)
             .post(form.toRequestBody("application/x-www-form-urlencoded".toMediaType()))
             .build()
-        client.newCall(req).execute().use { resp ->
-            val body = resp.body?.string().orEmpty()
-            if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}: ${body.take(200)}")
-            body
-        }
+        val r = fetch(req)
+        if (!r.ok) throw IOException("HTTP ${r.code}: ${r.body.take(200)}")
+        return r.body
     }
 }
 

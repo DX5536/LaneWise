@@ -28,7 +28,7 @@ object LaneRibbonBuilder {
 
     /** Either a closed polygon (fill) or an open line; [widthM] is used for lines only; [opacity] multiplies the layer's. */
     data class Shape(val points: List<LatLon>, val kind: Kind, val polygon: Boolean, val widthM: Double = 0.15,
-                     val opacity: Double = 1.0)
+                     val opacity: Double = 1.0, val index: Int = -1)
 
     /** Optional road details: zebra crossings + traffic-light poles ([furniture]) and closed lanes. */
     data class RoadExtras(val furniture: Boolean = false, val closures: List<LaneClosure> = emptyList())
@@ -85,6 +85,10 @@ object LaneRibbonBuilder {
     /** Fade of the recommended strip ahead of the car (option): full until FADE_FROM, gone at FADE_TO (m). */
     const val FADE_FROM = 220.0
     const val FADE_TO = 340.0
+
+    /** Chevrons: one every CHEVRON_SPACING m, up to CHEVRON_AHEAD m ahead of the car (FADE_FROM with the fade on). */
+    const val CHEVRON_SPACING = 9.0
+    const val CHEVRON_AHEAD = 180.0
 
     /** Samples on the fixed route grid covering [from]..[to] (plus smoothing context), with lane data. */
     private fun gridSamples(route: Route, from: Double, to: Double): List<S> {
@@ -169,7 +173,10 @@ object LaneRibbonBuilder {
      */
     private fun furniture(route: Route, all: List<S>, from: Double, to: Double, out: MutableList<Shape>) {
         fun sampleAt(d: Double) = all.minByOrNull { abs(it.d - d) }?.takeIf { abs(it.d - d) <= GRID && !it.junction }
-        for (f in route.features.filter { it.kind == de.lanewise.core.model.FeatureKind.CROSSING && it.distanceAlong >= from && it.distanceAlong < to }) {
+        val lights = route.features.filter { it.kind == de.lanewise.core.model.FeatureKind.TRAFFIC_SIGNALS }
+        for (f in route.features.filter { it.kind == de.lanewise.core.model.FeatureKind.CROSSING && it.zebra && it.distanceAlong >= from && it.distanceAlong < to }) {
+            // Never next to traffic lights (no zebra at signals in Germany, whatever the tagging says).
+            if (lights.any { abs(it.distanceAlong - f.distanceAlong) < 30 }) continue
             val s = sampleAt(f.distanceAlong) ?: continue
             var x = s.left + 0.3
             while (x + 0.5 <= s.right - 0.1) {
@@ -224,22 +231,24 @@ object LaneRibbonBuilder {
     }
 
     /**
-     * Chevrons (^ shapes) moving along the planned lane ([path]) from the car: [count] of them [spacing] m apart,
-     * shifted forward by [phase] m (0 <= phase < spacing), sized for a lane of [laneWidth] m, fading out with distance.
-     * Built every display frame by the map, so it must stay cheap.
+     * Chevrons (^ shapes) on the planned lane ([path]) from the car to [until]: one every [CHEVRON_SPACING] m on a fixed
+     * route grid, so successive builds put them at the same spots. [Shape.index] is the grid index: the map lights them
+     * up in a wave running forward by changing only the layer's opacity (no geometry update per frame).
      */
-    fun chevrons(path: Ribbon, car: Double, phase: Double, count: Int = 7, spacing: Double = 11.0, laneWidth: Double = 3.0): List<Shape> {
-        val out = ArrayList<Shape>(count)
+    fun chevrons(path: Ribbon, car: Double, until: Double, laneWidth: Double = 3.0): List<Shape> {
+        val out = ArrayList<Shape>()
         val half = laneWidth * 0.26
-        for (k in 0 until count) {
-            val d = car + 9 + k * spacing + phase
+        var k = kotlin.math.ceil((car + 6) / CHEVRON_SPACING).toInt()
+        while (k * CHEVRON_SPACING <= until) {
+            val d = k * CHEVRON_SPACING
             val p = path.pointAt(d) ?: break
             val ahead = path.pointAt(d + 2) ?: break
             val br = Geo.bearing(p, ahead)
             fun at(x: Double, y: Double) = Geo.destination(Geo.destination(p, br, y), br + 90, x)
             val ring = listOf(at(-half, -0.2), at(0.0, 0.7), at(half, -0.2), at(half, -0.8), at(0.0, 0.05), at(-half, -0.8))
-            val fade = 1.0 - (d - car - 9) / (count * spacing)
-            out += Shape(ring + ring.first(), Kind.CHEVRON, polygon = true, opacity = fade.coerceIn(0.0, 1.0))
+            val fade = (1.0 - (d - car) / (until - car + 1)).coerceIn(0.15, 1.0)
+            out += Shape(ring + ring.first(), Kind.CHEVRON, polygon = true, opacity = fade, index = k)
+            k++
         }
         return out
     }
@@ -252,6 +261,8 @@ object LaneRibbonBuilder {
         route: Route, state: LaneState, carDistance: Double, ahead: Double = 1200.0, behind: Double = 60.0,
         /** Let the recommended strip fade out between [FADE_FROM] and [FADE_TO] m ahead of the car (Baidu style). */
         fade: Boolean = false,
+        /** Chevrons on the strip ([chevrons]); the map animates them by index, without rebuilding. */
+        withChevrons: Boolean = false,
     ): Ribbon {
         val from = max(0.0, carDistance - behind)
         val to = min(route.geometry.length, carDistance + ahead)
@@ -274,7 +285,11 @@ object LaneRibbonBuilder {
         val out = ArrayList<Shape>()
         if (plan.isNotEmpty()) {
             val hw = samples.map { it.w * 0.36 }
-            val endIdx = samples.indexOfLast { it.d <= plan.last().site.distanceAlong + 40 }.coerceAtLeast(1)
+            // After the route's last junction with lane data the strip runs on to the destination in the same lane
+            // (owner: it stopped 40 m after the last Hauptstraße junction although the goal was further on).
+            val lastOfRoute = route.laneSites.maxOfOrNull { it.distanceAlong } == plan.last().site.distanceAlong
+            val endIdx = samples.indexOfLast { it.d <= if (lastOfRoute) route.geometry.length else plan.last().site.distanceAlong + 40 }
+                .coerceAtLeast(1)
             val strip = samples.subList(0, endIdx + 1)
             val pos = strip.indices.associateBy { strip[it] }
             fun piece(run: List<S>, opacity: Double) {
@@ -298,10 +313,21 @@ object LaneRibbonBuilder {
             }
             // Soft band under the lime strip: every lane the route can use up to each site (AMAP's two-level carpet).
             band(plan, samples, carDistance - behind)?.let { out += it }
+        } else if (state.assumedLateral != null && route.laneSites.isNotEmpty() && route.laneSites.all { it.distanceAlong < carDistance }) {
+            // Past the last junction with lane data: keep the strip in the lane the car is in, up to the destination.
+            val at = samples.indices.associateBy { samples[it] }
+            out += polygon(line(samples) { centres[at[it]!!] - it.w * 0.36 },
+                line(samples) { centres[at[it]!!] + it.w * 0.36 }, Kind.RECOMMENDED)
         }
 
         // Raised arrow through the next turn, from just before the stop line into the new road (AMAP style).
         val ribbonPath = Ribbon(emptyList(), lanePath)
+        if (withChevrons && plan.isNotEmpty()) {
+            val stripEnd = if (route.laneSites.maxOfOrNull { it.distanceAlong } == plan.last().site.distanceAlong) to
+                else min(plan.last().site.distanceAlong + 40, to)
+            out += chevrons(ribbonPath, carDistance, min(stripEnd - 4, carDistance + (if (fade) FADE_FROM else CHEVRON_AHEAD)),
+                laneWidth = samples.first().w)
+        }
         route.steps.firstOrNull { st ->
             st.distanceAlong > carDistance + 2 && st.distanceAlong - carDistance < 300 &&
                 st.maneuver.type != de.lanewise.core.model.ManeuverType.DEPART &&
@@ -408,6 +434,20 @@ object LaneRibbonBuilder {
         var d = from
         while (d < to) { val p = line.pointAt(d); pts += Triple(p.lat, p.lon, d); d += 6.0 }
         val e = line.pointAt(to); pts += Triple(e.lat, e.lon, to)
+        // Round the corners first: a weighted average over ±12 m (1-2-3-2-1). Chaikin alone left junction corners with a
+        // ~3 m radius — less than the 2–6 m the edges and dividers sit beside the centre line, so they folded on the
+        // inside of every turn (jagged, wonky lines) and the car's lane path turned abruptly. The road start/end keep
+        // their exact points. Same result for every piece of route (fixed grid, ±120 m context per piece).
+        if (pts.size >= 5) {
+            val w = doubleArrayOf(1.0, 2.0, 3.0, 2.0, 1.0)
+            pts = ArrayList(pts.indices.map { i ->
+                if (i < 2 || i > pts.size - 3) pts[i] else {
+                    var la = 0.0; var lo = 0.0
+                    for (k in -2..2) { la += pts[i + k].first * w[k + 2]; lo += pts[i + k].second * w[k + 2] }
+                    Triple(la / 9.0, lo / 9.0, pts[i].third)
+                }
+            })
+        }
         repeat(3) {
             if (pts.size < 3) return@repeat
             val n = ArrayList<Triple<Double, Double, Double>>(pts.size * 2)
@@ -421,9 +461,9 @@ object LaneRibbonBuilder {
             pts = n
         }
         val out = pts.map { S(LatLon(it.first, it.second), it.third) }
-        // Bearings from points ~8 m apart for stable normals.
+        // Bearings from points ~6 m apart (±4 samples of 0.75 m) for stable normals.
         for (i in out.indices) {
-            val a = out[max(0, i - 3)].p; val b = out[min(out.size - 1, i + 3)].p
+            val a = out[max(0, i - 4)].p; val b = out[min(out.size - 1, i + 4)].p
             out[i].bearing = if (a == b) 0.0 else Geo.bearing(a, b)
         }
         return out

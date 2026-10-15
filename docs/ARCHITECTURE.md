@@ -8,7 +8,7 @@ de.lanewise
 ├── core/geo/Geo.kt                   LatLon, distances, bearings, Polyline (projection, slice, offset)
 ├── core/geo/Sun.kt                   sun elevation → automatic light/dark theme
 ├── core/model/Route.kt               Route, RouteStep, Maneuver, SpeedLimitSpan, RoadSpan, TrafficIncident
-├── core/net/Http.kt                  OkHttp client + JsonElement helpers
+├── core/net/Http.kt                  OkHttp client (async, cancellable fetch — never blocks IO threads) + JSON helpers
 ├── lane/                             ★ the lane assist
 │   ├── LaneModel.kt                  LaneDir bitmask, LaneSite (lateral coords, pockets), LaneAdvice
 │   ├── LanePlanner.kt                DP over lane sites, minimises lane changes
@@ -36,6 +36,7 @@ de.lanewise
     │                                 AMAP-style or classic camera (auto or fixed zoom), car puck on the lane path,
     │                                 dead-reckoned every display frame between fixes
     ├── map/CarModel.kt               3D car as fill-extrusion blocks (body, cabin, wheels, lights)
+    ├── map/CarSprite.kt              the same car as a screen sprite + CarOverlayView (car pinned to the camera target)
     ├── lane/LaneArrows.kt, LaneViews.kt   vector lane glyphs, LaneBar, LaneScene3D, LaneHint
     ├── hud/Hud.kt                    speed border, speed sign, manoeuvre banner, ETA bar, GNSS chip
     ├── screens/                      MainScreen, SettingsScreen

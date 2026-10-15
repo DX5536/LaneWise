@@ -1,6 +1,6 @@
 # Status & roadmap
 
-_Last updated: 2026-10-15 (v0.4.2: Schulenburger Landstraße lane, smooth camera, auto zoom, automatic light/dark, 3D car, Bilibili ideas as options, Autobahn icons)._
+_Last updated: 2026-10-15 (v0.4.3: car pinned to the camera, round corners, lane strip fix, Settings-after-demo fix, smoother demo, zebra rule checked on aerial photos, lane opacity setting, built-in test drive)._
 
 ## Done (v0.1)
 - [x] Reverse-engineering notes for Petal Maps 4.7 and AMAP 17.00 lane guidance (`docs/REVERSE_ENGINEERING.md`)
@@ -218,11 +218,29 @@ _Last updated: 2026-10-15 (v0.4.2: Schulenburger Landstraße lane, smooth camera
 - [x] **Car / arrow size** slider (×0.5 … ×2, Appearance) for both the 3D car and the arrow.
 - [x] **3D car no longer hidden by 3D buildings**: buildings within 9 m of the car (or containing it — GPS indoors /
       in a courtyard) are drawn flat (`building-3d` height via MapLibre's `distance` expression, updated every 4 m).
-- [x] App version 0.4.2 (`appVersion`).
+- [x] App version 0.4.2 (`appVersion`); 0.4.3 for the parts below.
 - [x] **Settings froze after a demo** (owner): the per-frame car / camera loop was only stopped by the next real GPS fix
       (rare indoors), so after the demo it kept updating car, chevrons and label synchronously every frame and starved
       the UI thread. It now stops as soon as navigation ends, and pauses while Settings covers the map.
 - [x] Zoom-level and car-size sliders moved in whole steps only (the shared slider rounded to integers); now 0.1 steps.
+
+## Done (v0.4.3, part 1, 2026-10-15) — owner's demo video (Musterstraße 1 → Musterweg 3, Langenhagen, ×2)
+- [x] **Lime lane strip disappeared** (whole video: only the faint usable-lane band was visible): the strip's opacity
+      used `to-number(get("o"))`, and MapLibre turns a missing value into 0 — every strip piece without a fade value
+      was transparent. Now `number(get("o"), 1)`.
+- [x] **Car not moving with the camera**: car, chevrons and road-name label were map sources updated every frame;
+      MapLibre re-tiles such updates on a worker thread, so they appeared 0–2 frames after the camera (car jitter of a
+      few pixels) and the extra work dropped frames in turns. While the camera follows, the car (3D or arrow) and the
+      road name are now drawn by `CarOverlayView` at the camera target — fixed on screen, nothing to re-tile. The 3D car
+      is a sprite rendered from `CarModel` at the current size and tilt (`CarSprite`, re-rendered only when they
+      change); the map-layer car is used only when you pan away.
+- [x] **Chevrons** are built with the highlight (fixed 9 m grid, `LaneRibbonBuilder.chevrons`) and animated by a light
+      wave that only changes the layer's opacity (~30 ×/s) — no geometry update per frame.
+- [x] **Jagged / wonky lane lines in corners**: the road centre line was rounded with only a ~3 m radius at junction
+      corners, less than the 2–6 m the edges and dividers sit beside it, so they folded on the inside of each turn and
+      were trimmed into jagged lines; the car's lane path turned just as abruptly. The centre line is now averaged over
+      ±12 m (1-2-3-2-1) before the Chaikin smoothing, and normals come from points ~6 m apart. Live check of the test
+      route: no folded / backwards lines, highlight inside the road.
 - [x] Map style switch (light ↔ dark, now also at sunset while driving) re-sends road + highlight to the new style
       (sources start empty; the 25 m rebuild step would otherwise leave the road missing until the plan changed).
 
@@ -269,8 +287,50 @@ Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which
       tap an icon for its name and details (car/truck spaces, charge points, power, operator).
       Note: the API currently returns **no webcams** on any motorway checked (A1, A2, A3, A7, A8, A9, A37, A39, A352).
 
+## Done (v0.4.3, part 2, 2026-10-15) — checked on the owner's phone over adb
+- [x] **Settings unusable after a demo that runs to the end** (reproduced: taps registered, but the settings file was
+      written minutes later, and the screen still showed the old value): all coroutine IO threads (64) were blocked in
+      network calls — OkHttp `execute()` inside `withContext(Dispatchers.IO)` keeps its thread until the server answers
+      or the read timeout (60 s; Overpass 15 min) passes, even after the request was cancelled, and every route search
+      fires ~20 traffic requests (Autobahn GmbH × 3 services, TomTom, HERE). DataStore saves on the same pool. Now
+      `Http.fetch` runs requests on OkHttp's own queue (`enqueue`, cancellable, body read there) — `getText/getJson/
+      postJson/postForm` and Overpass queries no longer hold IO threads; settings and places have their own thread
+      (`storeScope`). Verified on the phone: demo at ×8 to the end, Settings change saved and shown at once.
+- [x] **Occasional lag at ×4/×8**: the car's speed came from the last two updates only — one that snapped slightly
+      backwards halved it and the map stood still for ~200 ms. Now the slope over the last ~1.2 s of updates.
+      Screen recording on the phone: no more stalls.
+- [x] **Car hidden by 3D buildings in the browse map**: MapLibre's `distance` expression does not take building
+      polygons (errors in logcat), so the building cut never worked. The car is now always the screen overlay — also
+      when browsing and when panned away (placed under the current camera, turned by its heading relative to the
+      camera; `CarSprite` renders any heading) — and always drawn above buildings.
+- [x] **Zebra stripes only at real zebra crossings**: OSM `crossing=zebra`, `crossing_ref=zebra`,
+      `crossing:markings=zebra…` or sign DE:350 (`OsmTags.isZebra`, `RoadFeature.zebra`, offline graph bit 128), never
+      within 30 m of traffic lights — Germany paints no zebra at signals (unlike China). Plain `marked` / `uncontrolled`
+      crossings get none.
+- [x] **Strip ends before the destination** (Hauptstraße): after the route's last junction with lane data the strip now
+      runs on to the destination in the car's lane.
+- [x] **Bottom panel reaches the screen edge** (its colour continues behind the system navigation bar).
+- [x] **Setting "Recommended lane opacity"** (20–100 %, DE/EN/VI) with a live preview of a three-lane road in Settings.
+
+## Done (v0.4.3, part 3, 2026-10-15)
+- [x] **Zebra rule checked against the aerial photos** (LGLN DOP20, 2025; 16 random OSM crossings per class in the
+      Hannover inner city, 24 m chips): `crossing=zebra` / `crossing_ref=zebra` 15/16 with visible stripes (one in a
+      shadow); `marked` / `uncontrolled` 0/16 — almost all are red cycle crossings (Radfahrerfurt) with dashed edges;
+      crossings at traffic lights 0/16 (dashed crossing lines, red cycle crossings). Counts in the area: 94 zebra, 139
+      marked/uncontrolled, 649 at signals. The rule stays; `ZebraTest`. Idea: draw the red cycle crossings (OSM
+      `crossing:markings=dashes` + `bicycle=yes`) as red strips — they are the most visible marking at Hannover junctions.
+- [x] **Built-in test drive** (Settings → Test drive, DE/EN/VI): Lavesstraße (Hbf) → B 3 Messeschnellweg (trunk road,
+      with a roundabout at the Pferdeturm exit) → A 37 → A 7 → exit Großburgwedel → L 381 / L 383 → roundabout → rural
+      L 383; 24 km. Routes and starts the demo by itself on the option that uses the A 7 and the roundabout
+      (`MainViewModel.startTestDrive`, `TEST_FROM` / `TEST_TO`). Live check (`RouteRenderLiveTest` with those points):
+      0 problems; advice: B 3 exit lane, keep-right lane past exits, fork lanes A 37 → A 7, A 7 exit lane, right-turn
+      lane on the L 381.
+
 ## Video review — still open
 - [ ] Owner: check the 3D car (size, colours, behaviour in tunnels / under bridges) and the automatic theme on the phone.
+- [ ] Owner: check the car overlay (size vs. road at different zooms, tilt changes, pan away and recenter) and the
+      corners (v0.4.3).
+
 - [ ] Owner: check the v0.4.2 lane-view options on the phone — chevron speed/colour, fade distance, label position under the
       3D car, pole size; closed lanes only show on a route through active Autobahn roadworks.
 - [ ] Re-check on the phone: puck/camera smoothness with the new dead reckoning (demo ×4 and a real drive), and that

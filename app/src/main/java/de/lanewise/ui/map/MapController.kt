@@ -78,6 +78,8 @@ class MapController(private val context: Context) {
     private var fixAlong = 0.0
     private var fixAt = 0L
     private var speedMps = 0.0
+    /** (time ms, route position) of the recent navigation updates, for [speedMps]. */
+    private val recent = ArrayDeque<Pair<Long, Double>>()
     private var lastFrameNanos = 0L
     private var shownAlong = Double.NaN
     private var shownBearing = Double.NaN
@@ -135,6 +137,9 @@ class MapController(private val context: Context) {
                 if (hit != null) onPoiTap?.invoke(hit.first, hit.second)
                 hit != null
             }
+            m.addOnCameraMoveListener {
+                if (tweenRoute == null && offRoutePos == null) lastCarPos?.let { placeOverlay(it, lastCarBearing) }
+            }
             m.addOnMapLongClickListener { ll ->
                 onMapLongPress?.invoke(LatLon(ll.latitude, ll.longitude)); true
             }
@@ -150,7 +155,6 @@ class MapController(private val context: Context) {
         style = null
         m.setStyle(Style.Builder().fromUri(styleUri(isDark))) { s ->
             style = s
-            buildingHeight = null; buildingBase = null; cutAt = null
             // New style = empty sources: force the next navigation update to hand over road + highlight again.
             geomKey = null; shownChunks = emptySet()
             setupLayers(s, isDark)
@@ -215,13 +219,12 @@ class MapController(private val context: Context) {
         add(FillLayer("lane-recommended", SRC_LANES_DYN).withFilter(kind("RECOMMENDED")).withProperties(
             PropertyFactory.fillColor(highlight), PropertyFactory.fillAntialias(true),
             // Pieces of the strip fade out ahead of the car (option): opacity per feature ("o").
-            PropertyFactory.fillOpacity(Expression.product(Expression.literal(if (isDark) 0.85f else 0.95f),
-                Expression.coalesce(Expression.toNumber(Expression.get("o")), Expression.literal(1f)))),
+            // NOT to-number(get("o")): to-number(null) is 0, which made every unfaded piece invisible.
+            PropertyFactory.fillOpacity(stripOpacity(isDark)),
         ))
-        add(FillLayer("lane-chevron", SRC_CHEV).withFilter(kind("CHEVRON")).withProperties(
+        add(FillLayer("lane-chevron", SRC_LANES_DYN).withFilter(kind("CHEVRON")).withProperties(
             PropertyFactory.fillColor(if (isDark) 0xFF1C1F27.toInt() else 0xFFFFFFFF.toInt()), PropertyFactory.fillAntialias(true),
-            PropertyFactory.fillOpacity(Expression.product(Expression.literal(0.8f),
-                Expression.coalesce(Expression.toNumber(Expression.get("o")), Expression.literal(1f)))),
+            PropertyFactory.fillOpacity(chevronOpacity(0.0)),
         ))
         fill("lane-arrow", "ARROW", 0xFFFFFFFF.toInt(), 0.92f)
         fill("lane-zebra", "ZEBRA", 0xFFFFFFFF.toInt(), 0.9f)
@@ -346,35 +349,24 @@ class MapController(private val context: Context) {
 
     fun setLookOptions(fade: Boolean, chevrons: Boolean, furniture: Boolean, closures: Boolean, softBuildings: Boolean, roadName: Boolean) {
         optFade = fade; optChevrons = chevrons; optFurniture = furniture; optClosures = closures; optRoadName = roadName
-        if (!chevrons) (style?.getSource(SRC_CHEV) as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(emptyList()))
-        if (!roadName) (style?.getSource(SRC_LABEL) as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(emptyList()))
         if (softBuildings != optSoftBuildings) { optSoftBuildings = softBuildings; style?.let { applyBuildings(it) } }
         geomKey = null   // rebuild road + highlight with the new options at the next update
     }
 
-    // Buildings at the car are flattened: the 3D car is depth-tested against the 3D buildings, and with the GPS
-    // position inside or right next to a building (parking, indoors) the building swallowed the car.
-    private var buildingHeight: Expression? = null
-    private var buildingBase: Expression? = null
-    private var cutAt: LatLon? = null
-
-    private fun cutBuildingsAt(s: Style, p: LatLon) {
-        val last = cutAt
-        if (last != null && Geo.distance(last, p) < 4.0) return
-        cutAt = p
-        val layer = s.getLayer("building-3d") as? FillExtrusionLayer ?: return
-        if (buildingHeight == null) {
-            buildingHeight = layer.fillExtrusionHeight.expression
-            buildingBase = layer.fillExtrusionBase.expression
-        }
-        val h = buildingHeight ?: return
-        val near = Expression.lt(
-            Expression.coalesce(Expression.distance(Point.fromLngLat(p.lon, p.lat)), Expression.literal(1e9)),
-            Expression.literal(BUILDING_CLEARANCE))
-        layer.setProperties(
-            PropertyFactory.fillExtrusionHeight(Expression.switchCase(near, Expression.literal(0f), h)),
-            PropertyFactory.fillExtrusionBase(Expression.switchCase(near, Expression.literal(0f), buildingBase ?: Expression.literal(0f))),
-        )
+    /**
+     * The car on the overlay at its screen position under the current camera, turned by its heading relative to the
+     * camera. Drawn above the map, so 3D buildings never hide it (GPS indoors / in a courtyard swallowed the map car).
+     */
+    private fun placeOverlay(pos: LatLon, heading: Double) {
+        val m = map ?: return
+        val overlay = carOverlay ?: return
+        val cam = m.cameraPosition
+        val target = m.projection.toScreenLocation(LatLng(pos.lat, pos.lon))
+        // Scale measured across the screen (never foreshortened by the tilt).
+        val side = m.projection.toScreenLocation(Geo.destination(pos, cam.bearing + 90, 10.0).let { LatLng(it.lat, it.lon) })
+        val pxPerMetre = (kotlin.math.hypot((side.x - target.x).toDouble(), (side.y - target.y).toDouble()) / 10.0).toFloat()
+        val rel = ((heading - cam.bearing) % 360 + 360) % 360
+        overlay.show(spriteFor(pxPerMetre, cam.tilt, rel), target.x, target.y, carLabel, dark == true)
     }
 
     /** 3D buildings see-through while navigating (option), so the road stays in front (Baidu / AMAP). */
@@ -411,6 +403,36 @@ class MapController(private val context: Context) {
     // --- car appearance (setting): arrow puck or 3D car, size ------------------------------------------------------
     private var car3d = true
     private var carScale = 1.0
+
+    /** Car drawn on screen while the camera follows it (set by the map composable); see [CarOverlayView]. */
+    var carOverlay: CarOverlayView? = null
+    private var sprite: CarSprite.Sprite? = null
+    private var spriteKey: List<Any>? = null
+    private var mapCarHidden = false
+    private var lastChevronFrame = 0L
+
+    /** The car sprite for the current size / tilt / look; re-rendered only when one of them changes noticeably. */
+    private fun spriteFor(pxPerMetre: Float, tilt: Double, heading: Double): CarSprite.Sprite {
+        val h = if (car3d) Math.round(heading / 3.0) * 3.0 % 360 else 0.0
+        val key = listOf((pxPerMetre * 20).toInt(), tilt.toInt(), carScale, car3d, dark == true, h)
+        sprite?.let { if (key == spriteKey) return it }
+        val s = if (car3d) CarSprite.render(pxPerMetre, tilt, CarModel.DEFAULT_EXAGGERATION * carScale, dark == true, h)
+        else {
+            val px = (48 * context.resources.displayMetrics.density * carScale).toInt().coerceAtLeast(8)
+            val b = Bitmap.createScaledBitmap(carBitmap(if (dark == true) 0xFF9A82FF.toInt() else 0xFF6C4CF5.toInt()), px, px, true)
+            CarSprite.Sprite(b, px / 2f, px / 2f)
+        }
+        sprite = s; spriteKey = key
+        return s
+    }
+
+    /** Empty the map's car sources once (the overlay draws the car meanwhile). */
+    private fun hideMapCar(s: Style) {
+        if (mapCarHidden) return
+        mapCarHidden = true
+        (s.getSource(SRC_CAR3D) as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(emptyList()))
+        (s.getSource(SRC_CAR) as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(emptyList()))
+    }
     private var lastCarPos: LatLon? = null
     private var lastCarBearing = 0.0
 
@@ -437,6 +459,33 @@ class MapController(private val context: Context) {
     private fun col(hex: String) = Expression.color(android.graphics.Color.parseColor(hex))
 
     private fun kind(k: String) = Expression.eq(Expression.get("k"), Expression.literal(k))
+
+    /** Opacity of the recommended strip (setting "Recommended lane opacity" × the theme's own). */
+    private var stripAlpha = 1f
+
+    private fun stripOpacity(isDark: Boolean) =
+        Expression.product(Expression.literal((if (isDark) 0.85f else 0.95f) * stripAlpha), featureOpacity())
+
+    fun setStripOpacity(alpha: Float) {
+        if (alpha == stripAlpha) return
+        stripAlpha = alpha
+        style?.getLayer("lane-recommended")?.setProperties(PropertyFactory.fillOpacity(stripOpacity(dark == true)))
+    }
+
+    /** Per-feature opacity "o" (strip fade, chevron distance), 1 where the feature has none. */
+    private fun featureOpacity() = Expression.number(Expression.get("o"), Expression.literal(1f))
+
+    /**
+     * Chevron opacity for animation [phase] (in chevron indices): a bright head running forward over the chevrons,
+     * each fading over the next [CHEV_WAVE] indices — only this paint value changes per frame, never the geometry.
+     */
+    private fun chevronOpacity(phase: Double): Expression {
+        val rel = Expression.mod(
+            Expression.sum(Expression.literal(phase + CHEV_WAVE * 10_000.0), Expression.product(Expression.literal(-1.0), Expression.number(Expression.get("i"), Expression.literal(0f)))),
+            Expression.literal(CHEV_WAVE))
+        val wave = Expression.subtract(Expression.literal(1.0), Expression.division(rel, Expression.literal(CHEV_WAVE)))
+        return Expression.product(featureOpacity(), Expression.sum(Expression.literal(0.25), Expression.product(Expression.literal(0.7), wave)))
+    }
 
     /** line-width in pixels for a feature property "w" in metres, exact at the current latitude. */
     private fun metresToPixels(): Expression {
@@ -525,6 +574,7 @@ class MapController(private val context: Context) {
             addStringProperty("k", sh.kind.name)
             addNumberProperty("w", sh.widthM)
             if (sh.opacity != 1.0) addNumberProperty("o", sh.opacity)
+            if (sh.index >= 0) addNumberProperty("i", sh.index)
         }
     })
 
@@ -594,8 +644,8 @@ class MapController(private val context: Context) {
      * car has moved [GEOM_STEP] — not at every fix (the hand-over of ~1 km of polygons to MapLibre runs on the UI thread).
      */
     private fun requestGeometry(snap: NavSnapshot, along: Double, showRibbons: Boolean, showBikeLanes: Boolean, streetsMode: Boolean) {
-        val fade = optFade; val furniture = optFurniture; val closures = optClosures
-        val key = listOf(snap.route, snap.lanes, showRibbons, showBikeLanes, streetsMode, geomGeneration, fade, furniture, closures)
+        val fade = optFade; val furniture = optFurniture; val closures = optClosures; val chev = optChevrons
+        val key = listOf(snap.route, snap.lanes, showRibbons, showBikeLanes, streetsMode, geomGeneration, fade, furniture, closures, chev)
         if (key == geomKey && abs(along - geomAlong) < GEOM_STEP) return
         geomKey = key; geomAlong = along
         val work = {
@@ -604,7 +654,7 @@ class MapController(private val context: Context) {
             geomJob = scope.launch {
                 val result = runCatching {
                     withContext(Dispatchers.Default) {
-                        val r = LaneRibbonBuilder.build(snap.route, snap.lanes, along, fade = fade)
+                        val r = LaneRibbonBuilder.build(snap.route, snap.lanes, along, fade = fade, withChevrons = chev)
                         val road = if (showRibbons && !streetsMode) buildRoad(snap.route, along, showBikeLanes, shown, furniture, closures) else null
                         Triple(r, if (showRibbons) features(r.shapes) else null, road)
                     }
@@ -629,8 +679,9 @@ class MapController(private val context: Context) {
     fun updateCar(position: LatLon, bearing: Double) {
         val s = style ?: return
         lastCarPos = position; lastCarBearing = bearing
+        if (carOverlay != null) { hideMapCar(s); placeOverlay(position, bearing); return }
+        mapCarHidden = false
         if (car3d) {
-            cutBuildingsAt(s, position)
             val blocks = CarModel.blocks(position, bearing, CarModel.DEFAULT_EXAGGERATION * carScale)
             (s.getSource(SRC_CAR3D) as? GeoJsonSource)?.setGeoJsonSync(FeatureCollection.fromFeatures(blocks.map { b ->
                 Feature.fromGeometry(Polygon.fromLngLats(listOf(b.ring.map { Point.fromLngLat(it.lon, it.lat) }))).apply {
@@ -677,10 +728,19 @@ class MapController(private val context: Context) {
             val dt = (now - fixAt) / 1000.0
             if (jump) {
                 shownAlong = along; tweenRoute = route; speedMps = snap.fix.speedKmh / 3.6
+                recent.clear(); recent.addLast(now to along)
             } else if (dt > 0.05) {
-                // Speed along the route from consecutive updates (the demo runs faster than the shown speed).
-                val measured = ((along - fixAlong) / dt).coerceIn(0.0, 150.0)
-                speedMps += (measured - speedMps) * 0.5
+                // Speed along the route from the updates of the last ~1.2 s (the demo runs faster than the shown speed).
+                // From one pair only, a fix that snapped a little backwards halved the speed and the car stalled for
+                // ~200 ms (owner's ×4 demo: "occasional lag").
+                recent.addLast(now to along)
+                while (recent.size > 2 && now - recent.first().first > 1200) recent.removeFirst()
+                val (t0, a0) = recent.first()
+                val span = (now - t0) / 1000.0
+                if (span >= 0.4) {
+                    val measured = ((along - a0) / span).coerceIn(0.0, 150.0)
+                    speedMps += (measured - speedMps) * 0.6
+                }
             }
             fixAlong = along
             fixAt = now
@@ -734,8 +794,7 @@ class MapController(private val context: Context) {
         (style?.getSource(SRC_LANES_DYN) as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(emptyList()))
         roadRoute = null; shownChunks = emptySet(); geomKey = null
         setNavigating(false); carLabel = null
-        (style?.getSource(SRC_CHEV) as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(emptyList()))
-        (style?.getSource(SRC_LABEL) as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(emptyList()))
+        lastCarPos?.let { updateCar(it, lastCarBearing) }
         shownAlong = Double.NaN; shownBearing = Double.NaN; shownZoom = Double.NaN; shownPitch = Double.NaN
     }
 
@@ -769,20 +828,13 @@ class MapController(private val context: Context) {
         shownZoom = if (shownZoom.isNaN()) targetZoom else shownZoom + (targetZoom - shownZoom) * ease(dt, 0.8)
         shownPitch = if (shownPitch.isNaN()) tweenPitch else shownPitch + (tweenPitch - shownPitch) * ease(dt, 0.8)
 
-        updateCar(pos, shownBearing)
         val st = style
-        if (st != null && off == null) {
-            val lane = ribbon
-            if (optChevrons && lane != null) {
-                // Chevrons glide forward at ~7 m/s on top of the car's own motion.
-                val phase = (SystemClock.uptimeMillis() / 1000.0 * 7.0) % CHEV_SPACING
-                val w = LaneRibbonBuilder.laneWidth(tweenRoute?.roadSpanAt(shownAlong)?.kind ?: RoadKind.URBAN)
-                (st.getSource(SRC_CHEV) as? GeoJsonSource)?.setGeoJsonSync(
-                    features(LaneRibbonBuilder.chevrons(lane, shownAlong, phase, spacing = CHEV_SPACING, laneWidth = w)))
-            }
-            val label = carLabel
-            if (label != null) (st.getSource(SRC_LABEL) as? GeoJsonSource)?.setGeoJsonSync(
-                Feature.fromGeometry(Point.fromLngLat(pos.lon, pos.lat)).apply { addStringProperty("t", label) })
+        // Chevron wave: only a paint value, ~30 times a second.
+        val now = SystemClock.uptimeMillis()
+        if (st != null && optChevrons && now - lastChevronFrame > 33) {
+            lastChevronFrame = now
+            (st.getLayer("lane-chevron") as? FillLayer)?.setProperties(
+                PropertyFactory.fillOpacity(chevronOpacity((now / 1000.0 * CHEV_RATE) % CHEV_WAVE)))
         }
         if (following) {
             val cam = CameraPosition.Builder()
@@ -794,6 +846,9 @@ class MapController(private val context: Context) {
                 .build()
             m.moveCamera(CameraUpdateFactory.newCameraPosition(cam))
         }
+        // The car on the screen overlay, after the camera moved: while following it sits exactly at the camera target
+        // (never lags the map); panned away it is placed under the current camera.
+        updateCar(pos, shownBearing)
     }
 
     /** Share of the remaining distance covered in [dt] s by exponential easing with time constant [tau] s. */
@@ -895,9 +950,9 @@ class MapController(private val context: Context) {
         private const val SRC_CHEV = "lw-chevrons"
         private const val SRC_LABEL = "lw-car-label"
         private const val SRC_ABPOI = "lw-ab-poi"
-        private const val CHEV_SPACING = 11.0
-        /** Buildings closer than this to the car (m, 0 = car inside) are drawn flat so they cannot hide the 3D car. */
-        private const val BUILDING_CLEARANCE = 9.0
+        /** Chevron animation: the bright head moves CHEV_RATE chevrons per second; each fades over CHEV_WAVE chevrons. */
+        private const val CHEV_RATE = 1.6
+        private const val CHEV_WAVE = 5.0
         private const val SRC_DEST = "lw-dest"
         private const val SRC_INC = "lw-incidents"
         private const val SRC_FEAT = "lw-features"

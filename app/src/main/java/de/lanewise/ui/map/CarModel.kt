@@ -53,6 +53,14 @@ object CarModel {
         Block(b.part, local.map { (x, y) -> place(centre, bearing, x * scale, y * scale) }, b.base * scale, b.top * scale)
     }
 
+    /** One block in car coordinates (m): x right, y forward; [ring] closed; base / top heights. */
+    data class LocalBlock(val part: Part, val ring: List<Pair<Double, Double>>, val base: Double, val top: Double)
+
+    /** The car in its own coordinates, [scale] × life size — for drawing it as a screen sprite ([CarSprite]). */
+    fun localBlocks(scale: Double = DEFAULT_EXAGGERATION): List<LocalBlock> = boxes.map { b ->
+        LocalBlock(b.part, ring(b).map { (x, y) -> x * scale to y * scale }, b.base * scale, b.top * scale)
+    }
+
     /** Footprint corners (x, y), counter-clockwise, closed; corners cut by [Box.chamfer]. */
     private fun ring(b: Box): List<Pair<Double, Double>> {
         val c = b.chamfer.coerceAtMost(minOf(b.x1 - b.x0, b.y1 - b.y0) / 2 - 0.01)

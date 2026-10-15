@@ -15,7 +15,7 @@ val localProps = Properties().apply {
 }
 
 // App version: bump APP_VERSION with docs/ROADMAP.md. CI adds the run number (0.4.1.57), local builds say "-local".
-val appVersion = "0.4.2"
+val appVersion = "0.4.3"
 val runNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
 val fullVersion = appVersion + (runNumber?.let { ".$it" } ?: "-local")
 val gitSha: String = System.getenv("GITHUB_SHA")?.take(7) ?: runCatching {

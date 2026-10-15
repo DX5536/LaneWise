@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -367,7 +368,9 @@ fun EtaBar(
     progress: Float? = null,
 ) {
     val c = LocalLaneColors.current
-    Column(modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp)).background(c.chip)) {
+    // The panel's colour runs down behind the system navigation bar, so it sits on the screen edge instead of hovering.
+    Column(modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp)).background(c.chip)
+        .navigationBarsPadding()) {
     if (progress != null) {
         val p by androidx.compose.animation.core.animateFloatAsState(progress.coerceIn(0f, 1f), label = "journey")
         Canvas(Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 8.dp).height(10.dp)) {

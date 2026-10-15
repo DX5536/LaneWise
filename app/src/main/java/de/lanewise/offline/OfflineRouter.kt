@@ -274,7 +274,7 @@ class OfflineRouter(
             if (p.lat !in minLat..maxLat || p.lon !in minLon..maxLon) continue
             val proj = line.project(p) ?: continue
             if (abs(proj.signedOffset) > 15) continue
-            hits += RoadFeature.decode(g.featKind[i].toInt(), p, proj.distanceAlong)
+            hits += RoadFeature.decode(g.featKind[i].toInt() and 0xFF, p, proj.distanceAlong)
         }
         hits.sortBy { it.distanceAlong }
         val out = ArrayList<RoadFeature>()
