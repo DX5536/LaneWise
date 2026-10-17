@@ -49,7 +49,14 @@ object Http {
      * route searches (about 20 traffic requests each) filled the shared IO pool, and Settings could not save for
      * minutes after a demo run.
      */
-    suspend fun fetch(req: Request, c: OkHttpClient = client): Reply = suspendCancellableCoroutine { cont ->
+    suspend fun fetch(req: Request, c: OkHttpClient = client): Reply =
+        call(req, c) { Reply(it.code, it.header("Content-Type").orEmpty(), it.body?.string().orEmpty()) }
+
+    /** Like [fetch], but the body as bytes (gzip files, binary feeds). */
+    suspend fun fetchBytes(req: Request, c: OkHttpClient = client): Pair<Int, ByteArray> =
+        call(req, c) { it.code to (it.body?.bytes() ?: ByteArray(0)) }
+
+    private suspend fun <T> call(req: Request, c: OkHttpClient, read: (Response) -> T): T = suspendCancellableCoroutine { cont ->
         val call = c.newCall(req)
         cont.invokeOnCancellation { call.cancel() }
         call.enqueue(object : Callback {
@@ -59,7 +66,7 @@ object Http {
 
             override fun onResponse(call: Call, response: Response) {
                 val reply = try {
-                    response.use { Reply(it.code, it.header("Content-Type").orEmpty(), it.body?.string().orEmpty()) }
+                    response.use(read)
                 } catch (e: IOException) {
                     if (cont.isActive) cont.resumeWithException(e)
                     return

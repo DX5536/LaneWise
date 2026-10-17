@@ -12,8 +12,12 @@ Read this first when resuming work in a new chat.
 > three languages (DE/EN/VI) in sync when adding UI text. **Accuracy is the top priority: a wrong lane hint can cause
 > an accident.** The app is for drivers unfamiliar with Niedersachsen, to plan lanes ahead with as few lane changes as
 > possible. Never present a guessed lane as certain; check lane-logic changes against real junctions (junction audit
-> on the aerial photos, my screenshots). AMAP / Petal Maps may only be used as screenshot references, never as data
-> (see `docs/DATA_SOURCES.md`). Never write my real addresses. When done, update `docs/ROADMAP.md`. My next request is:
+> on the aerial photos, my screenshots). For street-level checks use open imagery in this order: Mapillary (primary,
+> `MAPILLARY_TOKEN`), then Panoramax / KartaView (`tools/streetview/streetview_audit.py`); fixes go into OSM or
+> `app/src/main/assets/lane_overrides.json` with the photo as source, never imported automatically. Precedence of lane
+> data: `lane_overrides.json` > OSM `turn:lanes` > `aerial_lanes.json` > heuristics. AMAP / Petal Maps may only be used
+> as screenshot references; as a last resort, where OSM / photos / DOP20 are unclear, the lanes read from an AMAP
+> screenshot may go into `lane_overrides.json` as text (never the screenshot itself, never OSM; see `docs/DATA_SOURCES.md`). Never write my real addresses. When done, update `docs/ROADMAP.md`. My next request is:
 
 ## Project
 Android (Kotlin/Compose/MapLibre) driving app for Germany, focus Region Hannover, centred on
@@ -30,8 +34,10 @@ no lane hint is better than a wrong one. Personal project: not sold, not release
 - Light-red screen border for over/under speed; configurable offsets in Settings.
 - UI inspired by Petal Maps + AMAP but its own style; good contrast. Palette: violet `#6C4CF5` + lime `#B8F33A` on graphite.
 - Offline routing with satellites (GNSS) when no internet.
-- Petal/AMAP lane data in Germany: mostly correct, some lanes outdated. Never used as data; screenshots of the running
-  apps are allowed as a reference to spot our mistakes (owner's decision, 2026-10-15; details in `docs/DATA_SOURCES.md`).
+- Petal/AMAP lane data in Germany: mostly correct (big junctions especially), some lanes outdated. Screenshots of the
+  running apps are allowed as a reference to spot our mistakes (owner's decision, 2026-10-15); since 2026-10-17 AMAP's
+  lanes may be used as a last resort where OSM / street-level photos / DOP20 are unclear - written as text into
+  `lane_overrides.json`; AMAP screenshots are never committed / uploaded, nothing goes into OSM (`docs/DATA_SOURCES.md`).
   The most up-to-date source is the official aerial photos (DOP20).
 - App icon: option **P** (violet tile, extruded converging road slab, N-style lime lane surface shifting lanes) — `app/src/main/res/drawable/ic_launcher_foreground.xml`, preview `docs/icon.svg`.
 - Owner mentioned a lane drawing ("coMap") that was never attached — ask for it.
@@ -48,8 +54,9 @@ See `docs/ARCHITECTURE.md`. Core lane logic: `app/src/main/java/de/lanewise/lane
 - Versions: AGP 8.13.2, Gradle 8.14.3, Kotlin 2.2.21, Compose BOM 2026.02.01, MapLibre 11.13.5, compileSdk 36, minSdk 26.
 
 ## Tools
-- Python tools: `tools/aerial_lanes` (DOP20 + U-Net, venv `.venv` with torch cu124) and `tools/voice_pack`
-  (OmniVoice, venv `.venv` with torch 2.8 cu128); see their READMEs. GPU: RTX 3070 Ti 8 GB.
+- Python tools: `tools/aerial_lanes` (DOP20 + U-Net, venv `.venv` with torch cu124), `tools/voice_pack`
+  (OmniVoice, venv `.venv` with torch 2.8 cu128) and `tools/streetview` (Mapillary / Panoramax / KartaView photos per
+  junction, standard library only); see their READMEs. GPU: RTX 3070 Ti 8 GB.
 - REA MCP server is installed (reverse engineering). JADX provider is NOT configured (needs `REA_JADX_MCP_JAR`).
 - Local build: `.\build-local.ps1` (JDK 21 at `C:\Program Files\Java\jdk-21`, SDK at `%LOCALAPPDATA%\Android\Sdk`,
   isolated `GRADLE_USER_HOME=%LOCALAPPDATA%\LaneWise\gradle-home` because the shared `~/.gradle` 8.14.5 cache is

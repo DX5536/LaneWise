@@ -103,6 +103,31 @@ object OsmTags {
         }
     }
 
+    /**
+     * Per lane in travel direction (left → right): may a car use it? From `access:lanes`, `vehicle:lanes`,
+     * `motor_vehicle:lanes`, `motorcar:lanes` (no / psv / bus / designated / private …) and `bus:lanes` / `psv:lanes`
+     * = designated (a bus lane, unless a car tag opens it). Null when no lane access is tagged. Hollerithallee:
+     * `access:lanes:forward=psv|yes|yes|yes` - the unmarked left lane is a bus lane.
+     */
+    fun carLanes(tags: Map<String, String>, forward: Boolean, oneway: Boolean): List<Boolean>? {
+        val dir = if (forward) "forward" else "backward"
+        fun v(key: String) = (tags["$key:$dir"] ?: if (oneway && forward) tags[key] else null)?.split('|')?.map { it.trim() }
+        val car = listOf("access:lanes", "vehicle:lanes", "motor_vehicle:lanes", "motorcar:lanes").mapNotNull(::v)
+        val designated = listOf("bus:lanes", "psv:lanes").mapNotNull(::v)
+        if (car.isEmpty() && designated.isEmpty()) return null
+        val n = (car + designated).maxOf { it.size }
+        if ((car + designated).any { it.size != n }) return null   // inconsistent tagging: not used
+        val closed = setOf("no", "psv", "bus", "designated", "private", "delivery", "agricultural", "forestry", "emergency")
+        return List(n) { i ->
+            val carValue = car.lastOrNull { it[i].isNotEmpty() }?.get(i)   // the most specific car tag wins
+            when {
+                carValue != null -> carValue !in closed
+                designated.any { it[i] == "designated" } -> false
+                else -> true
+            }
+        }
+    }
+
     /** Lane-change permissions in travel direction (`change:lanes*`), or null if unrestricted / not tagged. */
     fun changeLanes(tags: Map<String, String>, forward: Boolean, oneway: Boolean): List<Int>? {
         val v = tags[if (forward) "change:lanes:forward" else "change:lanes:backward"]

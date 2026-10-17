@@ -158,7 +158,7 @@ class OsrmRoutingProvider(
             ))),
             roadSpans = spans,
             osmNodes = osmNodes,
-        )
+        ).let { route -> route.copy(laneSites = de.lanewise.lane.dropRoundaboutInterior(route.laneSites, route.roundabouts())) }
     }
 
     /**

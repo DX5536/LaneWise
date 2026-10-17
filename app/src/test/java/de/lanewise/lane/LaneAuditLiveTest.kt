@@ -60,7 +60,7 @@ class LaneAuditLiveTest {
             }
             if (c == null) { println("route ${routesDone + 1}: corridor unavailable, skipped"); continue }
             route = route.copy(laneChanges = c.laneChanges, bikeLanes = c.bikeLanes, sideRoads = c.sideRoads, features = c.features)
-                .withOsmTurnLanes(c.turnLanes.map { it.distanceAlong to it.lanes }).withLaneCounts(c.laneCounts)
+                .withOsmTurnLanes(c.turnLanes.map { it.distanceAlong to it.lanes }).withLaneAccess(c.laneAccess.map { it.distanceAlong to it.carLanes }).withLaneCounts(c.laneCounts)
             routesDone++
             val findings = audit(route)
             total += findings.size

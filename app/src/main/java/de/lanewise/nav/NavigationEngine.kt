@@ -65,6 +65,8 @@ class NavigationEngine(
 ) {
     /** Roadworks closures along the route: the lane advice must not lead into a closed lane. */
     private val closures = de.lanewise.lane.LaneClosure.along(route, route.incidents)
+    /** Lane restrictions whose lanes are not known (DATEX II): no lane advice along them, like `lanes_unknown`. */
+    private val unknownSpans = de.lanewise.lane.LaneClosure.unknownAlong(route, route.incidents)
     /** Solid lines plus "no change into a closed lane". */
     private val changeSpans = route.laneChanges + closures.mapNotNull { it.toChangeSpan() }
     /** Junctions plus a checkpoint before each closure (only open lanes usable there). */
@@ -131,11 +133,19 @@ class NavigationEngine(
         overActive = status == SpeedStatus.OVER
 
         val kind = route.roadSpanAt(along)?.kind ?: RoadKind.URBAN
-        val planned = laneGuidance.update(guidanceSites, along, settings.avoidLaneChanges, settings.keepRight, changeSpans,
+        // A junction ahead whose lanes are known to be unknown (lane_overrides.json) or a lane restriction of unknown
+        // lanes (DATEX II): nothing after it is planned until it is passed - a plan across it could lead into a lane
+        // that ends, turns off or is closed there.
+        val inUnknownSpan = unknownSpans.any { along in it }
+        val nextUnknown = (route.unknownLanesAt.filter { it > along - 5 } + unknownSpans.filter { it.start > along }.map { it.start })
+            .minOrNull()
+        val sites = if (nextUnknown == null) guidanceSites else guidanceSites.filter { it.distanceAlong < nextUnknown - 40 }
+        val planned = laneGuidance.update(sites, along, settings.avoidLaneChanges, settings.keepRight, changeSpans,
             route::laneCountAt.takeIf { route.laneCounts.isNotEmpty() }, { d -> route.roadSpanAt(d)?.kind })
         // Safety: a turn ahead without lane data → no recommended lane (the plan would only know later junctions and
         // could send the driver into a lane that cannot make this turn).
-        val unknownTurn = unknownTurnAhead(along)
+        val unknownTurn = unknownTurnAhead(along) || inUnknownSpan || nextUnknown != null && nextUnknown - along < 400 &&
+            (route.laneCountAt(nextUnknown - 30) ?: 2) > 1
         val lanes = if (unknownTurn) LaneState.EMPTY.copy(assumedLateral = planned.assumedLateral, assumedSince = planned.assumedSince)
         else planned
         val arrived = remaining < 25
@@ -178,8 +188,14 @@ class NavigationEngine(
      */
     private fun unknownTurnAhead(along: Double): Boolean {
         val step = route.steps.firstOrNull { it.distanceAlong > along - 5 && it.distanceAlong - along < 400 &&
-            it.maneuver.type in UNKNOWN_CHECK && it.maneuver.modifier != de.lanewise.core.model.Modifier.STRAIGHT } ?: return false
-        if (guidanceSites.any { kotlin.math.abs(it.distanceAlong - step.distanceAlong) < 40 }) return false
+            (it.maneuver.type in UNKNOWN_CHECK || it.maneuver.modifier == de.lanewise.core.model.Modifier.UTURN) &&
+            it.maneuver.modifier != de.lanewise.core.model.Modifier.STRAIGHT } ?: return false
+        // Lane data counts only if some lane there can make this turn: otherwise the plan would fall back to the
+        // provider's flags or "all lanes" - a guess (U-turn from the through lane, Hildesheimer Straße).
+        val bit = de.lanewise.routing.laneDirOf(step.maneuver.modifier)
+        val near = guidanceSites.filter { kotlin.math.abs(it.distanceAlong - step.distanceAlong) < 40 }
+        if (near.any { s -> s.lanes.any { LaneDir.permits(it, bit) } }) return false
+        if (near.isNotEmpty()) return true
         val lanesThere = route.laneCountAt(step.distanceAlong - 30) ?: return false
         return lanesThere > 1
     }

@@ -172,7 +172,9 @@ fun MainScreen(
             settings.streetsWhileDriving) {
             if (ui.mode == Mode.NAVIGATING && !settings.streetsWhileDriving) return@LaunchedEffect
             if (!settings.laneRibbonsOnMap) { controller.clearLanes(); return@LaunchedEffect }
-            val streets = if (settings.aerialLanes) vm.aerialLanes().let { a -> ui.nearbyStreets.map(a::apply) } else ui.nearbyStreets
+            // Precedence: hand-checked patches > OSM > aerial counts (the patch is applied last, so it wins).
+            val aerial = if (settings.aerialLanes) vm.aerialLanes().let { a -> ui.nearbyStreets.map(a::apply) } else ui.nearbyStreets
+            val streets = vm.laneOverrides().let { o -> aerial.map(o::apply) }
             val shapes = de.lanewise.osm.StreetLanes.build(streets)
                 .filter { settings.showBikeLanes || it.kind != de.lanewise.lane.LaneRibbonBuilder.Kind.BIKE }
             controller.setLaneShapes(shapes)

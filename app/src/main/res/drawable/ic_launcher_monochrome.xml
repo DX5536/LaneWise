@@ -1,21 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- LaneWise icon (option P): extruded, converging 3D road slab with a lime lane surface
-     shifting from the right lane into the middle lane. Scaled into the adaptive-icon safe zone. -->
+<!-- LaneWise icon (owner's design, docs/icon.svg, updated 2026-10-17): extruded, converging 3D road slab with a lime
+     lane surface shifting lanes and the car puck. The SVG's 1800 x 1800 tile is mapped onto the visible 72 dp of the
+     adaptive icon (18 dp inset); the violet tile itself is the background colour. Dashes are drawn as segments
+     (vector drawables have no stroke-dasharray). Regenerate from docs/icon.svg when the design changes. Monochrome: themed icons use only the alpha. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <group android:pivotX="54" android:pivotY="57" android:scaleX="0.74" android:scaleY="0.74"
-        android:translateX="-1.5" android:translateY="-5.5">
-        <path android:fillColor="#994A33B8" android:pathData="M18,86 L98,86 L98,96 L18,96 Z" />
-        <path android:fillColor="#FF0B0C10" android:pathData="M14,80 L94,80 L94,91 L14,91 Z" />
-        <path android:fillColor="#FF15171D" android:pathData="M94,80 L66,24 L66,30 L94,91 Z" />
-        <path android:fillColor="#FF2B2F38" android:pathData="M42,24 L66,24 L94,80 L14,80 Z" />
-        <path android:fillColor="#FFFFFFFF" android:pathData="M67.3,80 L94,80 C88,64 64,54 60.7,40 L58,24 L50,24 L47.3,40 C50,54 70,62 67.3,80 Z" />
-        <path android:strokeColor="#FFFFFFFF" android:strokeWidth="1.4" android:pathData="M50.00,24.00 L49.34,27.95 M48.77,31.40 L48.12,35.34 M47.54,38.80 L46.89,42.74 M46.31,46.20 L45.66,50.14 M45.09,53.59 L44.43,57.54 M43.86,60.99 L43.20,64.94 M42.63,68.39 L41.97,72.34 M41.40,75.79 L40.74,79.74 M58.00,24.00 L58.66,27.95 M59.23,31.40 L59.88,35.34 M60.46,38.80 L61.11,42.74 M61.69,46.20 L62.34,50.14 M62.91,53.59 L63.57,57.54 M64.14,60.99 L64.80,64.94 M65.37,68.39 L66.03,72.34 M66.60,75.79 L67.26,79.74" />
-        <path android:strokeColor="#FFFFFFFF" android:strokeWidth="1.8" android:pathData="M42,24 L14,80 M66,24 L94,80" />
-        <path android:fillColor="#FFFFFFFF" android:pathData="M75.2,74 a5.5,5.5 0 1,0 11,0 a5.5,5.5 0 1,0 -11,0 Z" />
-        <path android:fillColor="#FF6C4CF5" android:pathData="M77.7,74 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0 Z" />
+    <group android:scaleX="0.04" android:scaleY="0.04" android:translateX="18" android:translateY="18">
+        <path android:fillColor="#994A33B8" android:pathData="M275.18,1341.379 h1372.448 v171.556 h-1372.448 Z" />
+        <path android:fillColor="#FF0B0C10" android:pathData="M189.295,1238.445 h1407.023 v188.712 h-1407.023 Z" />
+        <path android:fillColor="#FF15171D" android:pathData="M1596.318,1238.445 l-492.458,-960.714 l0,102.934 l492.458,1046.492 l0,-188.712 Z" />
+        <path android:fillColor="#FF2B2F38" android:pathData="M686.914,277.732 l411.735,0 l480.357,960.714 l-1372.448,0 l480.357,-960.714 Z" />
+        <path android:fillColor="#FFFFFFFF" android:pathData="M1120.93,1238.445 l458.216,0 c-87.505,-314.242 -542.465,-420.648 -571.483,-686.224 l-46.336,-274.49 l-137.293,0 l-40.533,243.985 c-38.719,316.37 307.548,399.095 337.43,716.729 Z" />
+        <path android:strokeColor="#FFFFFFFF" android:strokeWidth="24.02" android:pathData="M824.16,277.73 L812.92,345.43 M803.08,404.66 L791.84,472.36 M782.00,531.59 L770.76,599.28 M760.92,658.52 L749.68,726.21 M739.84,785.45 L728.60,853.14 M718.76,912.37 L707.52,980.07 M697.68,1039.30 L686.44,1107.00 M676.60,1166.23 L665.36,1233.93 M961.40,277.73 L972.65,345.43 M982.48,404.66 L993.73,472.36 M1003.56,531.59 L1014.80,599.28 M1024.64,658.52 L1035.88,726.21 M1045.72,785.45 L1056.96,853.14 M1066.80,912.37 L1078.04,980.07 M1087.88,1039.30 L1099.12,1107.00 M1108.96,1166.23 L1120.20,1233.93" />
+        <path android:fillColor="#FFFFFFFF" android:pathData="M189.295,1238.445 l480.357,-960.714 l34.525,0 l-480.357,960.714 l-34.525,0 Z M1115.911,277.731 l480.357,960.714 l-34.525,0 l-480.357,-960.714 l34.525,0 Z" />
+        <path android:strokeColor="#FF2B2F38" android:strokeWidth="20.83" android:strokeLineJoin="round" android:pathData="M1202.786,1109.494 a115.916,82.732 0 1,0 231.832,0 a115.916,82.732 0 1,0 -231.832,0 Z" />
+        <path android:fillColor="#FFFFFFFF" android:pathData="M1202.786,1109.494 a115.916,82.732 0 1,0 231.832,0 a115.916,82.732 0 1,0 -231.832,0 Z" />
+        <path android:fillColor="#FF6C4CF5" android:pathData="M1318.702,989.427 l130.406,210.449 l-130.406,-51.911 l-130.406,51.911 l130.406,-210.449 Z" />
     </group>
 </vector>

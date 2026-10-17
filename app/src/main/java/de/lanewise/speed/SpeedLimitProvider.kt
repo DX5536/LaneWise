@@ -14,6 +14,8 @@ import de.lanewise.core.net.arr
 import de.lanewise.core.net.dbl
 import de.lanewise.core.net.get
 import de.lanewise.core.net.str
+import de.lanewise.osm.LaneOverrides
+import de.lanewise.osm.OsmConnectivity
 import de.lanewise.osm.OsmTags
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -32,10 +34,19 @@ data class CorridorData(
     val sideRoads: List<de.lanewise.core.model.SideRoad> = emptyList(),
     /** OSM `turn:lanes` at the end of ways the route drives on (for junctions OSRM gives no lanes for). */
     val turnLanes: List<TurnLanesAt> = emptyList(),
+    /** Lanes closed to cars (bus lanes …) at the end of ways the route drives on. */
+    val laneAccess: List<LaneAccessAt> = emptyList(),
+    /** Hand-checked lane patches on this stretch (`lane_overrides.json`): they replace every other lane source there. */
+    val laneOverrides: List<LaneOverrides.At> = emptyList(),
+    /** Explicit lane connectivity at junctions on this stretch: patches (`lane_overrides.json`) and OSM relations. */
+    val connectivity: List<de.lanewise.lane.ConnectivityAt> = emptyList(),
 )
 
 /** `turn:lanes` value (travel direction) of a way the route drives on, at the route distance where that way ends. */
 data class TurnLanesAt(val distanceAlong: Double, val lanes: String)
+
+/** Lanes cars may use (OSM lane access, see [OsmTags.carLanes]) of a way the route drives on, at the way's end. */
+data class LaneAccessAt(val distanceAlong: Double, val carLanes: List<Boolean>)
 
 /**
  * Fetches OSM data for a corridor along the route in one Overpass request (route line as `around`
@@ -44,7 +55,10 @@ data class TurnLanesAt(val distanceAlong: Double, val lanes: String)
  */
 class SpeedLimitProvider {
 
-    private class OsmWay(val geom: List<LatLon>, val tags: Map<String, String>, val nodes: List<Long> = emptyList()) {
+    /** Hand-checked lane patches, applied to the OSM tags of every corridor way before anything reads them. */
+    @Volatile var overrides: LaneOverrides = LaneOverrides.EMPTY
+
+    private class OsmWay(val geom: List<LatLon>, val tags: Map<String, String>, val nodes: List<Long> = emptyList(), val id: Long = 0) {
         /** Shares a segment (two consecutive nodes) with the route: the route really drives on this way. */
         var onRoute = false
         val line = Polyline(geom)
@@ -64,20 +78,28 @@ class SpeedLimitProvider {
         val sample = line.slice(fromDist, toDist, step = 120.0)
         if (sample.size < 2) return@withContext CorridorData(emptyList(), emptyList(), emptyList())
         val c = sample.joinToString(",") { String.format(Locale.US, "%.5f,%.5f", it.lat, it.lon) }
+        val ov = overrides
+        // Patched ways are fetched even when they carry none of the tags below (e.g. a lane-less way with `from_way`).
+        val patchedIds = (ov.entries.mapNotNull { it.wayId } + ov.entries.mapNotNull { it.fromWay } +
+            ov.entries.mapNotNull { it.toWay }).distinct()
+        // Set .a = the corridor ways and nodes (tags + geometry); then the `type=connectivity` relations of those ways
+        // and their member ways as bare node lists + geometry (no tags: they only serve to check from / via / to).
         val q = "[out:json][timeout:90];(" +
+            (if (patchedIds.isNotEmpty()) "way(id:${patchedIds.joinToString(",")})(around:25,$c)[\"highway\"];" else "") +
             "way(around:25,$c)[\"highway\"][~\"^maxspeed\"~\".\"];" +
             "way(around:25,$c)[\"highway\"][~\"^cycleway\"~\"lane\"];" +
             "way(around:25,$c)[\"highway\"][~\"^(lanes|turn:lanes)\"~\".\"];" +
             OsmTags.featureNodeQuery("(around:20,$c)") +
-            ");out body geom;"
+            ")->.a;.a out body geom;rel(bw.a)[\"type\"=\"connectivity\"]->.c;.c out body;way(r.c);out skel geom;"
         val elements = Overpass.json(q)["elements"].arr.orEmpty()
-        val ways = elements.filter { it["type"].str == "way" }.mapNotNull { el ->
+        val ways = elements.filter { it["type"].str == "way" && it["tags"] != null }.mapNotNull { el ->
             val geom = el["geometry"].arr.orEmpty().mapNotNull { p ->
                 val la = p["lat"].dbl; val lo = p["lon"].dbl
                 if (la != null && lo != null) LatLon(la, lo) else null
             }
             val ids = el["nodes"].arr.orEmpty().mapNotNull { it.dbl?.toLong() }
-            if (geom.size < 2) null else OsmWay(geom, tagsOf(el), ids)
+            val id = el["id"].dbl?.toLong() ?: 0L
+            if (geom.size < 2) null else OsmWay(geom, ov.apply(id, tagsOf(el)), ids, id)
         }
         markOnRoute(ways, routeNodes)
         val nodes = elements.filter { it["type"].str == "node" }.mapNotNull { el ->
@@ -86,8 +108,43 @@ class SpeedLimitProvider {
             OsmTags.feature(tagsOf(el), LatLon(la, lo), 0.0)
         }
         val m = matchWays(line, fromDist, toDist, ways)
+        // Connectivity: every way seen (tagged corridor ways and the relations' bare member ways) for the from / to check.
+        val wayRefs = ways.map { LaneOverrides.WayRef(it.id, it.nodes, it.geom) } +
+            elements.filter { it["type"].str == "way" && it["tags"] == null }.mapNotNull { el ->
+                val geom = el["geometry"].arr.orEmpty().mapNotNull { p ->
+                    val la = p["lat"].dbl; val lo = p["lon"].dbl
+                    if (la != null && lo != null) LatLon(la, lo) else null
+                }
+                val ids = el["nodes"].arr.orEmpty().mapNotNull { it.dbl?.toLong() }
+                val id = el["id"].dbl?.toLong() ?: return@mapNotNull null
+                if (ids.size < 2 || geom.size != ids.size) null else LaneOverrides.WayRef(id, ids, geom)
+            }
+        val onLine = { p: LatLon -> line.project(p)?.takeIf { abs(it.signedOffset) <= 8 && it.distanceAlong in fromDist..toDist }?.distanceAlong }
+        val connectivity = ov.connectivityOnRoute(routeNodes, wayRefs, onLine) +
+            OsmConnectivity.onRoute(elements.mapNotNull(::connectivityRelation), routeNodes, wayRefs, onLine, override = false)
+        val patched = overridesOnRoute(line, fromDist, toDist, ways) + ov.junctionsOnRoute(routeNodes,
+            ways.map { LaneOverrides.WayRef(it.id, it.nodes, it.geom) }, onLine)
         CorridorData(m.limits, matchFeatures(line, fromDist, toDist, nodes), m.bikes, m.lanes, m.changes,
-            sideRoads(line, fromDist, toDist, ways.map { it.geom to it.tags }), turnLanesOnRoute(line, fromDist, toDist, ways))
+            sideRoads(line, fromDist, toDist, ways.map { it.geom to it.tags }), turnLanesOnRoute(line, fromDist, toDist, ways),
+            laneAccess = laneAccessOnRoute(line, fromDist, toDist, ways),
+            laneOverrides = patched.sortedBy { it.distanceAlong }, connectivity = connectivity.sortedBy { it.distanceAlong })
+    }
+
+    /** An Overpass `type=connectivity` relation with one from way, one via *node* and one to way; else null (unused). */
+    private fun connectivityRelation(el: JsonElement): OsmConnectivity.Relation? {
+        if (el["type"].str != "relation") return null
+        val tags = tagsOf(el)
+        if (tags["type"] != "connectivity") return null
+        val value = tags["connectivity"]?.takeIf { it.isNotBlank() } ?: return null
+        val members = el["members"].arr.orEmpty()
+        fun one(type: String, role: String) = members.filter { it["type"].str == type && it["role"].str == role }
+            .singleOrNull()?.get("ref")?.dbl?.toLong()
+        // A via way (several nodes) is not supported: the relation is skipped, the heuristics decide there.
+        if (members.any { it["role"].str == "via" && it["type"].str != "node" }) return null
+        val from = one("way", "from") ?: return null
+        val via = one("node", "via") ?: return null
+        val to = one("way", "to") ?: return null
+        return OsmConnectivity.Relation("osm:r${el["id"].dbl?.toLong()}", from, via, to, value)
     }
 
     /**
@@ -106,6 +163,17 @@ class SpeedLimitProvider {
      * the arrows apply). OSRM drops lane data at many complex junctions (Aegidientorplatz: 5 lanes
      * `reverse;left|left|right|right|right` in OSM, nothing from OSRM); these fill the gap.
      */
+    /** Lane access ([OsmTags.carLanes]) of the ways the route drives on, at the way's end in travel direction. */
+    private fun laneAccessOnRoute(line: Polyline, fromDist: Double, toDist: Double, ways: List<OsmWay>): List<LaneAccessAt> =
+        ways.filter { it.onRoute }.mapNotNull { w ->
+            val a = line.project(w.geom.first()) ?: return@mapNotNull null
+            val b = line.project(w.geom.last()) ?: return@mapNotNull null
+            val forward = b.distanceAlong > a.distanceAlong
+            val end = if (forward) b else a
+            if (abs(end.signedOffset) > 8 || end.distanceAlong < fromDist || end.distanceAlong > toDist) return@mapNotNull null
+            OsmTags.carLanes(w.tags, forward, w.oneway)?.takeIf { l -> l.any { !it } }?.let { LaneAccessAt(end.distanceAlong, it) }
+        }.sortedBy { it.distanceAlong }
+
     private fun turnLanesOnRoute(line: Polyline, fromDist: Double, toDist: Double, ways: List<OsmWay>): List<TurnLanesAt> =
         ways.filter { it.onRoute }.mapNotNull { w ->
             val a = line.project(w.geom.first()) ?: return@mapNotNull null
@@ -118,6 +186,23 @@ class SpeedLimitProvider {
             else t["turn:lanes:backward"] ?: t["turn:lanes"]?.takeIf { w.reverse }
             value?.takeIf { it.contains('|') }?.let { TurnLanesAt(end.distanceAlong, it) }
         }.sortedBy { it.distanceAlong }
+
+    /**
+     * Way patches ([LaneOverrides.MARK] / [LaneOverrides.UNKNOWN_MARK] in the travel direction) of the ways the route
+     * drives on, at the route distance where the way ends - where its `turn:lanes` apply.
+     */
+    private fun overridesOnRoute(line: Polyline, fromDist: Double, toDist: Double, ways: List<OsmWay>): List<LaneOverrides.At> =
+        ways.filter { it.onRoute }.mapNotNull { w ->
+            val a = line.project(w.geom.first()) ?: return@mapNotNull null
+            val b = line.project(w.geom.last()) ?: return@mapNotNull null
+            val forward = b.distanceAlong > a.distanceAlong
+            val end = if (forward) b else a
+            if (abs(end.signedOffset) > 8 || end.distanceAlong < fromDist || end.distanceAlong > toDist) return@mapNotNull null
+            val dir = if (forward) "forward" else "backward"
+            w.tags["${LaneOverrides.UNKNOWN_MARK}:$dir"]?.let { return@mapNotNull LaneOverrides.At(end.distanceAlong, null, it) }
+            val id = w.tags["${LaneOverrides.MARK}:$dir"] ?: return@mapNotNull null
+            w.tags["turn:lanes:$dir"]?.let { LaneOverrides.At(end.distanceAlong, it, id) }
+        }
 
     /** Marks the ways that share a segment with the route's OSM nodes (either direction). */
     private fun markOnRoute(ways: List<OsmWay>, routeNodes: List<Long>) {

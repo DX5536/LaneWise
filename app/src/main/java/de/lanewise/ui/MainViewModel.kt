@@ -37,6 +37,7 @@ import de.lanewise.settings.SavedPlace
 import de.lanewise.ui.i18n.Strings
 import de.lanewise.core.geo.Geo
 import de.lanewise.osm.AerialLanes
+import de.lanewise.osm.LaneOverrides
 import de.lanewise.osm.OsmTags
 import de.lanewise.settings.RoutingSource
 import de.lanewise.settings.SettingsRepository
@@ -44,7 +45,7 @@ import de.lanewise.speed.SpeedLimitProvider
 import de.lanewise.traffic.AutobahnApiSource
 import de.lanewise.traffic.BBox
 import de.lanewise.traffic.HereTrafficSource
-import de.lanewise.traffic.MobilithekDatexSource
+import de.lanewise.traffic.MobilithekClient
 import de.lanewise.traffic.TomTomTrafficSource
 import de.lanewise.traffic.TrafficService
 import de.lanewise.traffic.TrafficSource
@@ -212,6 +213,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             ctx.assets.open("aerial_lanes.json").bufferedReader().use { AerialLanes.parse(it.readText()) }
         }.getOrDefault(AerialLanes.EMPTY)
     }.also { aerial = it }
+
+    /**
+     * Hand-checked lane patches: `assets/lane_overrides.json` with `lane_overrides.json` next to `lane_reports.geojson`
+     * on top (patch a junction on the phone right away: `adb push`, then restart). Rejected entries go to logcat.
+     */
+    suspend fun laneOverrides(): LaneOverrides = overrides ?: withContext(Dispatchers.IO) {
+        fun load(text: () -> String, name: String) = runCatching { LaneOverrides.parse(text()) }
+            .onFailure { if (it !is java.io.FileNotFoundException) android.util.Log.w("LaneWise", "$name: $it") }
+            .getOrDefault(LaneOverrides.EMPTY)
+        val asset = load({ ctx.assets.open("lane_overrides.json").bufferedReader().use { it.readText() } }, "assets/lane_overrides.json")
+        val local = laneOverrideFile().let { f -> if (f.exists()) load({ f.readText() }, f.path) else LaneOverrides.EMPTY }
+        LaneOverrides.merge(asset, local).also { o ->
+            o.rejected.forEach { android.util.Log.w("LaneWise", "lane override rejected: $it") }
+            speedLimits.overrides = o
+        }
+    }.also { overrides = it }
+    private var overrides: LaneOverrides? = null
+
+    fun laneOverrideFile() = File(ctx.getExternalFilesDir(null) ?: ctx.filesDir, "lane_overrides.json")
 
     /** Lane-level street data around the car (refetched after moving 250 m), for the map when no route is active. */
     private fun updateNearbyStreets(p: LatLon) {
@@ -489,7 +509,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (s.useAutobahnApi) add(AutobahnApiSource())
         if (s.tomtomKey.isNotBlank()) add(TomTomTrafficSource(s.tomtomKey))
         if (s.hereKey.isNotBlank()) add(HereTrafficSource(s.hereKey))
-        if (s.mobilithekUrl.isNotBlank()) add(MobilithekDatexSource(s.mobilithekUrl, mobilithekCert(), s.mobilithekCertPassword))
+        if (s.mobilithekUrl.isNotBlank()) add(MobilithekClient(s.mobilithekUrl, mobilithekCert(), s.mobilithekCertPassword))
     }
 
     fun mobilithekCert(): File = File(ctx.filesDir, "mobilithek.p12")
@@ -564,6 +584,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         speedFetchedUntil = to
         corridorJob?.cancel()
         corridorJob = viewModelScope.launch {
+            laneOverrides()
             val data = runCatching { speedLimits.corridor(route.geometry, from, to, route.osmNodes) }.getOrNull()
             if (data == null) {
                 // Try again later (from where the car is then), not on the next fix.
@@ -580,8 +601,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 laneChanges = de.lanewise.lane.ChangeSpan.merge(
                     (base.laneChanges.filter { it.to <= from && it !in base.tomtomLaneLines } + data.laneChanges).sortedBy { it.from }, base.tomtomLaneLines),
                 sideRoads = base.sideRoads + data.sideRoads,
-            ).withOsmTurnLanes(data.turnLanes.map { it.distanceAlong to it.lanes })
-                .withLaneCounts((base.laneCounts.filter { it.to <= from } + data.laneCounts).sortedBy { it.from })
+            ).withLaneOverrides(data.laneOverrides).withOsmTurnLanes(data.turnLanes.map { it.distanceAlong to it.lanes })
+                .withLaneAccess(data.laneAccess.map { it.distanceAlong to it.carLanes })
+                .withLaneCounts((base.laneCounts.filter { it.to <= from } + data.laneCounts).sortedBy { it.from }).withConnectivity(data.connectivity)
             if (_ui.value.mode == Mode.NAVIGATING) {
                 engine = NavigationEngine(updated, laneGuidance).also { it.rehydrate(engine) }
                 currentRoute = updated
@@ -592,6 +614,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun previewCorridor(route: Route) {
         viewModelScope.launch {
+            laneOverrides()
             val data = runCatching { speedLimits.corridor(route.geometry, 0.0, minOf(route.distance, 15_000.0), route.osmNodes) }.getOrNull()
                 ?: return@launch
             val updated = route.copy(
@@ -599,7 +622,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 features = data.features, bikeLanes = data.bikeLanes,
                 laneChanges = de.lanewise.lane.ChangeSpan.merge(data.laneChanges, route.tomtomLaneLines),
                 sideRoads = data.sideRoads,
-            ).withOsmTurnLanes(data.turnLanes.map { it.distanceAlong to it.lanes }).withLaneCounts(data.laneCounts)
+            ).withLaneOverrides(data.laneOverrides).withOsmTurnLanes(data.turnLanes.map { it.distanceAlong to it.lanes })
+                .withLaneAccess(data.laneAccess.map { it.distanceAlong to it.carLanes }).withLaneCounts(data.laneCounts)
+                .withConnectivity(data.connectivity)
             _ui.update { st -> st.copy(routes = st.routes.map { if (it === route) updated else it }) }
         }
     }
@@ -837,7 +862,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val st = strings
                 _ui.update { it.copy(offlineProgress = st.dlStart) }
-                graph = OfflineGraphBuilder().build(region, graphFile(region.id), st) { msg -> _ui.update { it.copy(offlineProgress = msg) } }
+                graph = OfflineGraphBuilder(laneOverrides()).build(region, graphFile(region.id), st) { msg -> _ui.update { it.copy(offlineProgress = msg) } }
                 _ui.update { it.copy(offlineGraphReady = true, offlineProgress = st.dlTiles + " …") }
                 for (dark in listOf(false, true)) {
                     OfflineTiles(ctx).download(region, dark) { pct ->

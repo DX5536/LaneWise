@@ -28,7 +28,27 @@ LaneWise tells you at A to take the left through lane, so you never change.
   lateral coordinate.
 * **Through a turn** (`LanePlanner.entryLateral`): the German "turn into the corresponding lane"
   rule — the k-th left-turn lane from the left enters the k-th lane from the left of the new road
-  (mirrored for right turns).
+  (mirrored for right turns). With explicit connectivity the connected lanes decide instead (the leftmost of them
+  for a left turn, the rightmost for a right turn, the nearest going straight on), and the planner may enter any of
+  them at no cost — but no other lane.
+
+* **Explicit lane connectivity** (`LaneSite.connectivity`, `lane/LaneConnectivity.kt`), like HERE's lane model: per lane
+  (left → right) the lanes of the road the route leaves on that it leads into, or "does not continue" (it turns off
+  elsewhere / ends at the stop line). Sources by precedence: `lane_overrides.json` (`connectivity`, see
+  `docs/LANE_OVERRIDES.md`) > OSM `type=connectivity` relations (from way / via node / to way, `connectivity=1:1|2:2,3`,
+  fetched with the corridor Overpass query and matched by the route's OSM nodes, `osm/OsmConnectivity.kt`) > the
+  heuristics below as fallback. Where it is known, it decides which lanes are usable (`LaneSite.allowed`, beats
+  OSRM's flags), which lanes can be entered after the junction (`LanePlanner.connectedLaterals`: only the connected
+  lanes, counted from the new road's left edge past its left turn pockets), how many lanes carry on (ribbon
+  `carriedLanes`, `markFullLengthLanes`) and which lanes end at the stop line (ribbon funnel). Lanes in parentheses
+  (`3:(3)`) are used only when a lane has no other target; `bw` lanes and via ways are not supported (relation skipped).
+* **Safety check** (`LaneConnectivity.contradiction`, `Route.withConnectivity`): a connectivity is not used if it names a
+  lane the junction does not have, leads into more lanes than OSM counts after the junction, no lane continues, lanes
+  cross, or it disagrees with the arrows (a lane whose arrows make the route's turn does not continue, or a continuing
+  lane's arrows cannot make it; unmarked lanes are not checked). Two OSM relations that differ count as unreadable.
+  Then the junction's lane site is dropped and it goes into `Route.unknownLanesAt`: "No lane data – follow the road
+  markings" from 400 m before it, never a guess which source is right. A site re-targeted to a later turn
+  (`attachTurnsToLaneSites`) loses its connectivity (it described the road after the first node).
 
 ## Optimisation
 
@@ -57,7 +77,9 @@ With the setting **off**, the horizon is just the next site (classic behaviour).
 ## Timing of instructions
 
 `LaneGuidance.leadDistance`: 600 m (+250 m per extra lane) on motorways, 400 m trunk, 250 m rural,
-150 m urban (+80 m). Inspired by AMAP's 300 m `arrowInSurfaceDisplayDist`, lengthened for German
+150 m urban (+80 m). In town (free lane choice, § 7 (3) StVO) a needed change starts early instead: 30 m after the
+previous junction, at most 600 m before the turn (`earlyStart`), only across lanes that already exist there; a turn
+pocket is entered as it opens. Inspired by AMAP's 300 m `arrowInSurfaceDisplayDist`, lengthened for German
 Autobahn exit signage (1000 m / 500 m). The instruction never starts before the previous site, and it is timed from
 where the assumed lane was established (the last junction passed, or where the driver tapped a lane), never from the
 car — a start measured from the car would slide along with it.
@@ -85,6 +107,14 @@ there is free lane choice (§ 7 (3) StVO): the car keeps the lane the junction l
 * `turnsHiddenAsStraight`: "straight" with only turn-arrow lanes usable is treated as that turn.
 * `trimToRoadLanes` (motorways): a lane picture wider than the OSM carriageway is trimmed to the usable lanes.
 * `markFullLengthLanes`: turn-only edge lanes that run the whole way are ordinary lanes, not pockets.
+
+## Hand-checked patches (lane_overrides.json)
+
+Lane connectivity patches (`connectivity`) are applied after the lane counts (`Route.withConnectivity`), see Model.
+Before planning, `Route.withLaneOverrides` replaces the lane sites at patched junctions (precedence: patch > OSM
+`turn:lanes` > aerial counts > heuristics). A patch whose lanes cannot make the route's turn, or one that says
+`lanes_unknown`, leaves the junction without lanes (`Route.unknownLanesAt`): no advice from 400 m before it, and nothing
+after it is planned until it is passed. Details: `docs/LANE_OVERRIDES.md`.
 
 ## Lanes that open are not lane changes
 

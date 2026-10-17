@@ -265,10 +265,16 @@ class LanePlannerTest {
         val g = LaneGuidance()
         g.update(listOf(a, b), 120.0, true, true)
         g.overrideCurrentLane(b, 1) // driver says: I'm in the right (straight) lane
-        val starts = listOf(130.0, 300.0, 330.0, 370.0).map { car ->
+        val starts = listOf(130.0, 150.0, 170.0).map { car ->
             g.update(listOf(a, b), car, true, true).pendingChange!!.startAt
         }
         assertEquals(1, starts.distinct().size)
+        // Driven through (60 m per lane in town): the change counts as made - no "move left" any more, and the plan
+        // starts from the left lane (it no longer flips to "change after the junction" near it; audit, Bornumer Straße).
+        val done = g.update(listOf(a, b), starts[0] + 70.0, true, true)
+        assertNull(done.pendingChange)
+        assertEquals(b.lateral(0), done.assumedLateral)
+        for (car in listOf(330.0, 370.0, 395.0)) assertEquals(0, g.update(listOf(a, b), car, true, true).plan.last().recommended)
     }
 
     /** Lanes OSRM put on the intersection 50 m before a left turn whose junction has none: they are the turn lanes. */
@@ -440,5 +446,165 @@ class LanePlannerTest {
         val p = LanePlanner()
         org.junit.Assert.assertEquals(1, p.entryLateral(approach, 0, allowed, arm))
         org.junit.Assert.assertEquals(0, p.entryLateral(approach, 1, allowed, arm))
+    }
+
+    /**
+     * Owner's demo (Hildesheimer Straße): a U-turn at a junction with `left | through | through;right`, OSRM's lanes
+     * sitting on the U-turn's own node as "straight" with the through lane flagged valid - the lane bar recommended the
+     * straight lane. A U-turn (Wenden) is made from the left-turn lane.
+     */
+    @Test
+    fun uTurnUsesTheLeftTurnLaneNotTheThroughLane() {
+        val osrm = LaneSite(950.0, listOf(L, S, S or R), listOf(false, true, false), S, false, RoadKind.URBAN)
+        val site = attachTurnsToLaneSites(listOf(osrm), listOf(956.0 to LaneDir.UTURN)).single()
+        assertEquals(LaneDir.UTURN, site.turn)
+        assertTrue(site.isManeuver)
+        assertArrayEquals(booleanArrayOf(true, false, false), site.allowed())
+        assertEquals(0, LanePlanner().plan(listOf(site), LanePlanner.Options())[0].recommended)
+        // No lane can make the U-turn (no left-turn lane): no lane is usable for it.
+        assertTrue(listOf(S, S or R).none { LaneDir.permits(it, LaneDir.UTURN) })
+    }
+
+    /**
+     * Owner's drawing (2026-10-17): two through lanes, widening to `left | through | through | right` before a left
+     * turn 500 m ahead, car in the right lane. In town the move into the left lane is advised right away (free lane
+     * choice, § 7 (3) StVO) - not 150 m before the junction - and only across the lane that is already there; the
+     * left-turn pocket is entered as it opens. Mirrored for a right turn. On the Autobahn it stays late (keep right).
+     */
+    @Test
+    fun inTownGetIntoTheTurnLaneEarly() {
+        val counts: (Double) -> Int? = { d -> if (d < 560) 2 else 4 }
+        fun change(turn: Int, startLane: Int, kind: RoadKind): LaneChangeInstruction? {
+            val b = LaneSite(600.0, listOf(L, S, S, R), null, turn, true, kind)
+            val g = LaneGuidance()
+            g.overrideCurrentLane(b, startLane)
+            return g.update(listOf(b), 100.0, avoidLaneChanges = true, keepRight = true, laneCountAt = counts).pendingChange
+        }
+        val left = change(L, 2, RoadKind.URBAN)!!                // right through lane → left
+        assertTrue("starts at ${left.startAt}", left.startAt <= 140.0)
+        assertEquals(1, left.lanes)                             // one lane now; the pocket opens later
+        assertEquals(0, left.targetLane)
+        val right = change(R, 1, RoadKind.URBAN)!!               // left through lane → right
+        assertTrue("starts at ${right.startAt}", right.startAt <= 140.0)
+        assertEquals(-1, right.lanes)
+        // Autobahn, exit 1.5 km ahead, two lanes to cross: not right away, but in the lead distance (850 m).
+        val exit = LaneSite(1600.0, listOf(S, S, R), null, R, true, RoadKind.MOTORWAY)
+        val gm = LaneGuidance(); gm.overrideCurrentLane(exit, 0)
+        val mw = gm.update(listOf(exit), 100.0, avoidLaneChanges = true, keepRight = true).pendingChange!!
+        assertEquals(1600.0 - 10 - 850, mw.startAt, 1.0)
+        // The strip moves too: 150 m after the car it is already in the left through lane.
+        val b = LaneSite(600.0, listOf(L, S, S, R), null, L, true, RoadKind.URBAN)
+        val g = LaneGuidance(); g.overrideCurrentLane(b, 2)
+        val st = g.update(listOf(b), 100.0, avoidLaneChanges = true, keepRight = true, laneCountAt = counts)
+        val r = de.lanewise.core.model.Route("t", de.lanewise.core.geo.Polyline(listOf(de.lanewise.core.geo.LatLon(52.38, 9.74),
+            de.lanewise.core.geo.Geo.destination(de.lanewise.core.geo.LatLon(52.38, 9.74), 0.0, 1000.0))), 1000.0, 60.0, emptyList(), listOf(b),
+            laneCounts = listOf(de.lanewise.core.model.LaneCountSpan(0.0, 560.0, 2), de.lanewise.core.model.LaneCountSpan(560.0, 1000.0, 4)))
+        val lat = LaneRibbonBuilder.stripLateralAt(r, st, 100.0, 250.0)!!
+        assertTrue("strip at lateral $lat 150 m on", lat >= 0.9)
+    }
+
+    /**
+     * Lane audit (Langenforther Straße, on-ramp approach): `left | through | through`, then `through | slight_right`
+     * three times within 120 m, two lanes all the way. The first repeat counted as "full length", the next two had a
+     * right pocket: the same lane got two lateral numbers, the plan asked "move right" and the strip went 0 → 1 → 0.
+     */
+    @Test
+    fun repeatedLanePictureIsReadTheSameWay() {
+        val sr = LaneDir.SLIGHT_RIGHT
+        val sites = markFullLengthLanes(listOf(
+            site(3555.0, listOf(L, S, S), S),
+            site(3598.0, listOf(S, sr), S),
+            site(3655.0, listOf(S, sr), S),
+            site(3721.0, listOf(S, sr), S),
+        )) { d -> if (d < 3480) 2 else if (d < 3560) 3 else 2 }
+        assertEquals(listOf(false, true, true, true), sites.map { it.fullLength })
+        assertEquals(1, sites.drop(1).map { it.lateral(0) }.distinct().single())
+        val plan = LanePlanner().plan(sites, LanePlanner.Options(currentLateral = 1))
+        assertTrue(plan.all { it.changeFromPrevious == 0 })
+    }
+
+    /**
+     * Lane audit (Nenndorfer Landstraße → left into Gehrdener Damm): OSRM had lanes only at the turn's node; OSM
+     * `turn:lanes` added `left | through` 43 m before it, after the junction clean-up had run - the plan took the
+     * straight lane there and asked "move left" in the last 43 m. Sites added from OSM are merged like OSRM's.
+     */
+    @Test
+    fun siteAddedFromOsmBeforeATurnIsPartOfTheJunction() {
+        val a = de.lanewise.core.geo.LatLon(52.33, 9.63)
+        val line = de.lanewise.core.geo.Polyline(listOf(a, de.lanewise.core.geo.Geo.destination(a, 270.0, 1000.0)))
+        val turn = LaneSite(897.0, listOf(L, S), listOf(true, true), L, true, RoadKind.URBAN)
+        val r = de.lanewise.core.model.Route("osrm", line, 1000.0, 60.0, emptyList(), listOf(turn))
+            .withOsmTurnLanes(listOf(854.0 to "left|through"))
+        assertEquals(2, r.laneSites.size)
+        assertTrue(r.laneSites.first().allowed()[0])            // the left lane is usable at the first node
+        val plan = LanePlanner().plan(r.laneSites, LanePlanner.Options(currentLateral = 0))
+        assertEquals(0, plan[0].recommended)
+        assertEquals(0, plan[1].changeFromPrevious)
+    }
+
+    /**
+     * Lane audit (Bückeburger Allee): an on-ramp lane joins on the right (`none | none | merge_to_left`). It is not a
+     * through lane: the car's right lane keeps lateral 0, and the ending lane is never recommended.
+     */
+    @Test
+    fun accelerationLaneIsNotAThroughLane() {
+        val n = LaneDir.NONE
+        val join = site(33458.0, listOf(n, n, LaneDir.MERGE_TO_LEFT), S, RoadKind.TRUNK)
+        assertEquals(1, join.rightPockets())
+        assertEquals(listOf(1, 0, -1), (0..2).map { join.lateral(it) })
+        assertArrayEquals(booleanArrayOf(true, true, false), join.allowed())
+        val plan = LanePlanner().plan(listOf(join), LanePlanner.Options(currentLateral = 0))
+        assertEquals(1, plan[0].recommended)
+    }
+
+    /** Lane audit (Bückeburger Allee roundabout): two nodes 2 m apart with as many lanes are read the same way. */
+    @Test
+    fun twoNodesOfOneJunctionAreReadTheSameWay() {
+        val sites = markFullLengthLanes(listOf(
+            site(5015.0, listOf(L, S, S), S),
+            site(5599.0, listOf(S or R, R), S),
+            site(5663.0, listOf(S or R, R), S),
+            site(5665.0, listOf(L or S or R, R), S),
+        )) { 2 }
+        assertEquals(listOf(false, true, true, true), sites.map { it.fullLength })
+        val plan = LanePlanner().plan(sites, LanePlanner.Options(currentLateral = 1))
+        assertTrue(plan.all { it.changeFromPrevious == 0 })
+    }
+
+    /** Lane audit (Friedrich-Ebert-Straße roundabout): only the entry's lanes are planned, not the circulating nodes. */
+    @Test
+    fun lanesInsideARoundaboutAreDropped() {
+        val sites = listOf(site(6884.0, listOf(L, S, S, S or R), S), site(6982.0, listOf(S, S or R, R), S),
+            site(6990.0, listOf(L, S or R), S), site(7047.0, listOf(S, S or R), LaneDir.SLIGHT_LEFT),
+            site(7099.0, listOf(L or S, S), S), site(7300.0, listOf(L, S), S))
+        val kept = dropRoundaboutInterior(sites, listOf(6982.0..7099.0)).map { it.distanceAlong }
+        assertEquals(listOf(6884.0, 6982.0, 7300.0), kept)
+    }
+
+    /** Lane audit (Blumenauer Straße → left into Fössestraße): an equal change goes into the longer stretch. */
+    @Test
+    fun changeGoesIntoTheLongerStretch() {
+        val a = LaneSite(12166.0, listOf(L, S or R), null, S, false, RoadKind.URBAN)
+        val b = LaneSite(12259.0, listOf(L, S, R), listOf(true, true, true), S, false, RoadKind.URBAN)
+        val c = LaneSite(12299.0, listOf(L, L, S), listOf(true, true, false), L, true, RoadKind.URBAN)
+        val plan = LanePlanner().plan(listOf(a, b, c), LanePlanner.Options(currentLateral = 0, carDistance = 12000.0))
+        assertEquals(0, plan[1].recommended)        // already in the left lane at the first node
+        assertEquals(0, plan[2].changeFromPrevious)  // nothing left for the 40 m between the nodes
+    }
+
+    /**
+     * AMAP survey + DOP20 (Hollerithallee): `turn:lanes:forward=none|left|through|right` with
+     * `access:lanes:forward=psv|yes|yes|yes` - the unmarked left lane is a bus lane and is never recommended.
+     */
+    @Test
+    fun busLaneIsNeverRecommended() {
+        val tags = mapOf("highway" to "tertiary", "lanes" to "5", "lanes:forward" to "4", "turn:lanes:forward" to "none|left|through|right",
+            "access:lanes:forward" to "psv|yes|yes|yes", "bus:lanes:forward" to "designated|yes|yes|yes")
+        val car = de.lanewise.osm.OsmTags.carLanes(tags, forward = true, oneway = false)!!
+        assertEquals(listOf(false, true, true, true), car)
+        assertEquals(listOf(false, true), de.lanewise.osm.OsmTags.carLanes(mapOf("oneway" to "yes", "bus:lanes" to "designated|"), true, true))
+        val site = LaneSite(500.0, listOf(LaneDir.NONE, L, S, R), null, S, false, RoadKind.URBAN, carLanes = car)
+        assertArrayEquals(booleanArrayOf(false, false, true, false), site.allowed())
+        assertEquals(2, LanePlanner().plan(listOf(site), LanePlanner.Options(currentLateral = 3)).single().recommended)
     }
 }

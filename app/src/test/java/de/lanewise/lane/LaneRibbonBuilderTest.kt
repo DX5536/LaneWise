@@ -70,6 +70,23 @@ class LaneRibbonBuilderTest {
     }
 
     /**
+     * Owner's screenshot (Celler Straße straight on at Herschelstraße, `left | through | through`, two lanes after):
+     * the left-turn lane narrowed across the junction into the through lanes. A turn pocket ends at the stop line;
+     * right behind it only the through lanes are drawn. A through lane that ends after the junction still narrows.
+     */
+    @Test
+    fun turnPocketIsCutAtTheStopLine() {
+        val celler = route(listOf(LaneSite(400.0, listOf(L, S, S), null, S, false, RoadKind.URBAN)), null)
+            .copy(laneCounts = listOf(LaneCountSpan(0.0, 400.0, 3), LaneCountSpan(400.0, 1200.0, 2)))
+        assertEquals(3.0, LaneRibbonBuilder.drawnLaneWidth(celler, 396.0)!!, 0.01)
+        for (d in listOf(406.0, 412.0, 418.0)) assertEquals("at $d m", 2.0, LaneRibbonBuilder.drawnLaneWidth(celler, d)!!, 0.01)
+        // Three through lanes, two after the junction: the ending through lane narrows (no pocket to cut).
+        val merge = route(listOf(LaneSite(400.0, listOf(S, S, S), null, S, false, RoadKind.URBAN)), null)
+            .copy(laneCounts = listOf(LaneCountSpan(0.0, 400.0, 3), LaneCountSpan(400.0, 1200.0, 2)))
+        assertTrue(LaneRibbonBuilder.drawnLaneWidth(merge, 406.0)!! > 2.2)
+    }
+
+    /**
      * Owner's video (Celler Straße → left into Herschelstraße): one lane widening to left | straight | straight+right
      * 84 m before the turn. With the car already on the wide stretch, the highlight must be in the left-turn lane —
      * not in the middle straight-only lane — and must stay put as the car moves on.

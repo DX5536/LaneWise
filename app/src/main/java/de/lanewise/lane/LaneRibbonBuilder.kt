@@ -554,6 +554,7 @@ object LaneRibbonBuilder {
     private fun carriedLanes(sites: List<LaneSite>, d: Double): Int? {
         val prev = sites.lastOrNull { it.distanceAlong < d - 1 } ?: return null
         if (d - prev.distanceAlong > 1500) return null
+        prev.connectedToLanes()?.let { return it }   // explicit connectivity: the lanes the route's next road has
         val turned = prev.isManeuver && prev.turn != LaneDir.STRAIGHT
         val n = if (turned) prev.allowed().count { it }
         else prev.lanes.count { LaneDir.permits(it, LaneDir.STRAIGHT) }
@@ -602,16 +603,24 @@ object LaneRibbonBuilder {
         // Lanes that end *at* a junction (turn lanes leaving there) stop at the stop line instead of tapering
         // into the next lane after the junction.
         val endsAtJunction = BooleanArray(samples.size) { i -> sites.any { abs(it.distanceAlong - samples[i].d) < 8 } }
-        // Going straight through, the ending lanes narrow in a short funnel across the junction box; at a turn the
-        // connector already joins the new road, so there they stop at the stop line (a funnel there bulged the new
-        // road to 4 lanes right behind the corner - Berliner Allee → Schiffgraben).
+        // Going straight through, turn pockets end at the stop line (owner's screenshot, Celler Straße at
+        // Herschelstraße: the left-turn lane narrowed into the two through lanes across the junction - it looked like a
+        // lane merging into the next street). Only through lanes that end after the junction narrow in a short funnel
+        // across it. At a turn the connector joins the new road, so there every ending lane stops at the stop line (a
+        // funnel there bulged the new road to 4 lanes right behind the corner - Berliner Allee → Schiffgraben).
         val turnAt = BooleanArray(samples.size) { i ->
             sites.any { abs(it.distanceAlong - samples[i].d) < 8 && it.isManeuver && it.turn != LaneDir.STRAIGHT && !flowing(route, it) }
         }
         val funnel = BooleanArray(samples.size) { endsAtJunction[it] && !turnAt[it] }
-        val f = taper(samples, { it.nominal }, len, endsAtJunction, funnel)
-        val rp = taper(samples, { it.rightPockets }, len, endsAtJunction, funnel)
-        val lp = taper(samples, { it.leftPockets }, len, endsAtJunction, funnel)
+        // Explicit connectivity says which lanes end at the stop line (they do not lead onto the route's next road); the
+        // others continue, and only lanes merging after the junction narrow in the funnel. Else: the turn pockets.
+        val connAt = { i: Int -> sites.firstOrNull { abs(it.distanceAlong - samples[i].d) < 8 && it.connectivity != null }?.connectivity }
+        val pocketsBefore = { i: Int ->
+            connAt(i)?.count { it == null } ?: (samples[i - 1].leftPockets + samples[i - 1].rightPockets)
+        }
+        val f = taper(samples, { it.nominal }, len, endsAtJunction, funnel, pocketsBefore)
+        val rp = taper(samples, { it.rightPockets }, len, endsAtJunction, funnel) { Int.MAX_VALUE }
+        val lp = taper(samples, { it.leftPockets }, len, endsAtJunction, funnel) { Int.MAX_VALUE }
         for (i in samples.indices) {
             val s = samples[i]
             s.lanes = f[i]
@@ -677,7 +686,9 @@ object LaneRibbonBuilder {
     }
 
     /** Integer series → smooth series: increases ramp up *before* the change point, decreases ramp down after it. */
-    private fun taper(samples: List<S>, value: (S) -> Int, len: DoubleArray, stepDown: BooleanArray, funnel: BooleanArray): DoubleArray {
+    /** [cutAt]: how many of the lanes ending at a funnel point [i] end right at the stop line (turn pockets). */
+    private fun taper(samples: List<S>, value: (S) -> Int, len: DoubleArray, stepDown: BooleanArray, funnel: BooleanArray,
+                      cutAt: (Int) -> Int): DoubleArray {
         val f = DoubleArray(samples.size) { value(samples[it]).toDouble() }
         for (i in 1 until samples.size) {
             val a = value(samples[i - 1]); val b = value(samples[i])
@@ -691,14 +702,16 @@ object LaneRibbonBuilder {
                     f[j] = max(f[j], a + (b - a) * smooth(t)); j--
                 }
             } else if (!stepDown[i] || funnel[i]) {
-                // Lanes ending at a stop line narrow across the junction box (a short funnel) instead of in one grid
-                // step: the 6 m step left a rectangular notch and 76° kinks in the edges (render audit).
-                val ll = if (funnel[i]) max(18.0, 9.0 * (a - b)) else l
+                // Through lanes ending at a stop line narrow across the junction box (a short funnel) instead of in one
+                // grid step (render audit: notch, 76° kinks); turn pockets among them end at the stop line.
+                val top = if (funnel[i]) a - minOf(a - b, cutAt(i)) else a
+                if (top <= b) continue
+                val ll = if (funnel[i]) max(18.0, 9.0 * (top - b)) else l
                 val d0 = if (funnel[i]) samples[i - 1].d else di
                 var j = i
                 while (j < samples.size && samples[j].d - d0 < ll) {
                     val t = 1 - (samples[j].d - d0) / ll
-                    f[j] = max(f[j], b + (a - b) * smooth(t)); j++
+                    f[j] = max(f[j], b + (top - b) * smooth(t)); j++
                 }
             }
         }
@@ -786,7 +799,10 @@ object LaneRibbonBuilder {
                     RoadKind.MOTORWAY -> 2.5; RoadKind.TRUNK -> 2.0; RoadKind.RURAL -> 1.5; RoadKind.URBAN -> 1.0
                 }
                 val lead = guidance.leadDistance(a.site.roadKind, changes.roundToInt().coerceAtLeast(1))
-                val start = max(prevD + 5, a.site.distanceAlong - lead)
+                // In town the strip moves early, like the instruction (LaneGuidance.earlyStart; a pocket that is not
+                // there yet is reached as it opens - the strip is clamped to the drawn road).
+                val start = if (a.site.roadKind == RoadKind.URBAN) max(prevD + 5, guidance.earlyStart(prevD, a.site.distanceAlong))
+                else max(prevD + 5, a.site.distanceAlong - lead)
                 val end = min(a.site.distanceAlong - 10, start + trans)
                 keys += start to cur
                 keys += max(end, start + 1) to target

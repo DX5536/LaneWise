@@ -33,13 +33,19 @@ class JunctionAuditLiveTest {
         val to = ll(System.getenv("LANEWISE_TO")!!)
         val via = System.getenv("LANEWISE_VIA")?.split(';')?.filter { it.contains(',') }?.map(::ll).orEmpty()
         var route: Route = OsrmRoutingProvider().route(RouteRequest(from, to, alternatives = false, via = via)).first()
+        // LANEWISE_OVERRIDES=path/to/lane_overrides.json: check hand-checked lane patches on the real route.
+        val overrides = System.getenv("LANEWISE_OVERRIDES")?.let { de.lanewise.osm.LaneOverrides.parse(java.io.File(it).readText()) }
+        overrides?.let { o -> println("lane overrides: ${o.size} (rejected: ${o.rejected})") }
+        val provider = SpeedLimitProvider().also { p -> overrides?.let { p.overrides = it } }
         val c = (1..3).firstNotNullOfOrNull {
-            runCatching { SpeedLimitProvider().corridor(route.geometry, 0.0, route.distance, route.osmNodes) }.getOrNull()
+            runCatching { provider.corridor(route.geometry, 0.0, route.distance, route.osmNodes) }.getOrNull()
                 ?: run { delay(5000); null }
         }
         if (c != null) {
             route = route.copy(laneChanges = c.laneChanges, bikeLanes = c.bikeLanes, sideRoads = c.sideRoads, features = c.features)
-                .withOsmTurnLanes(c.turnLanes.map { it.distanceAlong to it.lanes }).withLaneCounts(c.laneCounts)
+                .withLaneOverrides(c.laneOverrides).withOsmTurnLanes(c.turnLanes.map { it.distanceAlong to it.lanes }).withLaneAccess(c.laneAccess.map { it.distanceAlong to it.carLanes }).withLaneCounts(c.laneCounts).withConnectivity(c.connectivity)
+            if (c.laneOverrides.isNotEmpty()) println("patched junctions: ${c.laneOverrides}, lanes unknown at ${route.unknownLanesAt}")
+            if (c.connectivity.isNotEmpty()) println("lane connectivity: ${c.connectivity}, lanes unknown at ${route.unknownLanesAt}")
         } else println("corridor unavailable - OSRM lanes only")
         println("route ${route.distance.toInt()} m, ${route.laneSites.size} lane sites, " +
             "${route.features.count { it.kind == FeatureKind.TRAFFIC_SIGNALS }} signals")

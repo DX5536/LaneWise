@@ -48,7 +48,21 @@ data class LaneClosure(val from: Double, val to: Double, val open: List<Boolean>
          */
         fun along(route: Route, incidents: List<TrafficIncident>): List<LaneClosure> = incidents.mapNotNull { i ->
             val open = i.laneOpen ?: return@mapNotNull null
-            if (!i.active || i.geometry.size < 2) return@mapNotNull null
+            if (!i.active) return@mapNotNull null
+            span(route, i)?.let { (a, b) -> LaneClosure(a, b, open) }
+        }.sortedBy { it.from }
+
+        /**
+         * Stretches (route distance from → to) of active incidents that restrict lanes without saying which
+         * ([TrafficIncident.laneRestrictionUnknown], e.g. DATEX II `lane2`): no lane advice there.
+         */
+        fun unknownAlong(route: Route, incidents: List<TrafficIncident>): List<ClosedRange<Double>> = incidents.mapNotNull { i ->
+            if (!i.active || !i.laneRestrictionUnknown) null else span(route, i)?.let { (a, b) -> a..b }
+        }.sortedBy { it.start }
+
+        /** Where [i]'s line runs along the route in its direction, or null. */
+        private fun span(route: Route, i: TrafficIncident): Pair<Double, Double>? {
+            if (i.geometry.size < 2) return null
             val hits = ArrayList<Double>()
             for (k in 0 until i.geometry.size - 1) {
                 val a = i.geometry[k]; val b = i.geometry[k + 1]
@@ -65,7 +79,7 @@ data class LaneClosure(val from: Double, val to: Double, val open: List<Boolean>
                     hits += pr.distanceAlong
                 }
             }
-            if (hits.size < 3 || hits.max() - hits.min() < 30.0) null else LaneClosure(hits.min(), hits.max(), open)
-        }.sortedBy { it.from }
+            return if (hits.size < 3 || hits.max() - hits.min() < 30.0) null else hits.min() to hits.max()
+        }
     }
 }

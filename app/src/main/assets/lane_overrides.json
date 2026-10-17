@@ -1,0 +1,18 @@
+{
+  "type": "FeatureCollection",
+  "lanewise_overrides": 1,
+  "description": "Hand-checked lane patches (schema: docs/LANE_OVERRIDES.md). Each entry needs a source (DOP20 / own drive / street-level photo) and should be fixed in OSM too.",
+  "features": [
+    {"type": "Feature", "geometry": {"type": "Point", "coordinates": [9.73495, 52.38020]},
+     "properties": {
+       "id": "celler-strasse-nb-herschelstrasse",
+       "osm_way": 166391411,
+       "turn:lanes": "left|through",
+       "lanes": 2,
+       "osm_was": {"turn:lanes": "left|through|through"},
+       "source": "Owner (local driver), 2026-10-17: two lanes, left-turn + straight only; OSM lanes=2 agrees",
+       "checked": "2026-10-17",
+       "note": "Celler Strasse northbound at Herschelstrasse. OSM turn:lanes (3 lanes) and AMAP are outdated. Fix turn:lanes in OSM, then delete this patch."
+     }}
+  ]
+}

@@ -110,6 +110,11 @@ data class Route(
      * (owner: Berliner Allee under the Raschplatzhochstraße).
      */
     val osmNodes: List<Long> = emptyList(),
+    /**
+     * Route distances of junctions whose lanes are known to be unknown: a hand-checked patch (`lane_overrides.json`,
+     * `lanes_unknown`) says OSM is wrong there, or a patch's lanes cannot make the route's turn. No lane advice there.
+     */
+    val unknownLanesAt: List<Double> = emptyList(),
 ) {
     fun laneChangeAt(d: Double): de.lanewise.lane.ChangeSpan? = laneChanges.firstOrNull { d >= it.from && d < it.to }
     fun laneCountAt(d: Double): Int? = laneCounts.firstOrNull { d >= it.from && d < it.to }?.count
@@ -128,25 +133,125 @@ data class Route(
      * work at junctions OSRM drops lanes at (Aegidientorplatz, left into Hildesheimer Straße).
      */
     fun withOsmTurnLanes(at: List<Pair<Double, String>>): Route {
-        val added = at.filter { (d, _) -> laneSites.none { kotlin.math.abs(it.distanceAlong - d) < 40 } }.mapNotNull { (d, v) ->
+        val added = at.filter { (d, _) -> laneSites.none { kotlin.math.abs(it.distanceAlong - d) < 40 } &&
+            unknownLanesAt.none { kotlin.math.abs(it - d) < 40 } }.mapNotNull { (d, v) ->
             val masks = de.lanewise.lane.LaneDir.parseTurnLanes(v)
             if (masks.size < 2) return@mapNotNull null
-            val step = steps.firstOrNull { kotlin.math.abs(it.distanceAlong - d) < 25 &&
-                it.maneuver.type != ManeuverType.DEPART && it.maneuver.type != ManeuverType.ARRIVE && it.maneuver.type != ManeuverType.WAYPOINT }
-            val turn = step?.let { de.lanewise.routing.laneDirOf(it.maneuver.modifier) }
-                ?: de.lanewise.lane.LaneDir.fromTurnAngle(de.lanewise.core.geo.Geo.bearingDelta(
-                    geometry.bearingAt((d - 20).coerceAtLeast(0.0)), geometry.bearingAt((d + 20).coerceAtMost(geometry.length))))
+            val turn = turnAt(d)
             val kind = roadSpanAt(d - 5)?.kind ?: de.lanewise.lane.RoadKind.URBAN
             de.lanewise.lane.LaneSite(d, masks, null, turn, turn != de.lanewise.lane.LaneDir.STRAIGHT, kind)
         }
         if (added.isEmpty()) return this
-        return copy(laneSites = (laneSites + added).sortedBy { it.distanceAlong })
+        // The added sites take part in the junction clean-up like OSRM's own (it ran when the route was built): a
+        // `left | through` node 43 m before the left turn's node is one junction (audit, Nenndorfer Landstraße →
+        // Gehrdener Damm: straight lane at the first node, then "move left" in the last 43 m).
+        return copy(laneSites = de.lanewise.lane.dropRoundaboutInterior(
+            de.lanewise.lane.mergeDoubleNodeJunctions((laneSites + added).sortedBy { it.distanceAlong }), roundabouts()))
+    }
+
+    /**
+     * Lane access from OSM ([at]: route distance of a way's end, cars allowed per lane): set on the nearest lane site
+     * within 40 m that has as many lanes, so a bus lane is never recommended (Hollerithallee).
+     */
+    fun withLaneAccess(at: List<Pair<Double, List<Boolean>>>): Route {
+        if (at.isEmpty()) return this
+        val sites = laneSites.toMutableList()
+        for ((d, car) in at) {
+            val k = sites.indices.filter { kotlin.math.abs(sites[it].distanceAlong - d) < 40 && sites[it].laneCount == car.size }
+                .minByOrNull { kotlin.math.abs(sites[it].distanceAlong - d) } ?: continue
+            sites[k] = sites[k].copy(carLanes = car)
+        }
+        return copy(laneSites = sites)
+    }
+
+    /** Route distances from each roundabout entry step to its exit step. */
+    fun roundabouts(): List<ClosedFloatingPointRange<Double>> = steps.withIndex()
+        .filter { it.value.maneuver.type == ManeuverType.ROUNDABOUT }
+        .mapNotNull { (i, st) ->
+            steps.drop(i + 1).firstOrNull { it.maneuver.type == ManeuverType.EXIT_ROUNDABOUT }?.let { st.distanceAlong..it.distanceAlong }
+        }
+
+    /** Direction the route takes at [d]: its step there, else the bend of the route line. */
+    private fun turnAt(d: Double): Int {
+        val step = steps.firstOrNull { kotlin.math.abs(it.distanceAlong - d) < 25 &&
+            it.maneuver.type != ManeuverType.DEPART && it.maneuver.type != ManeuverType.ARRIVE && it.maneuver.type != ManeuverType.WAYPOINT }
+        return step?.let { de.lanewise.routing.laneDirOf(it.maneuver.modifier) }
+            ?: de.lanewise.lane.LaneDir.fromTurnAngle(de.lanewise.core.geo.Geo.bearingDelta(
+                geometry.bearingAt((d - 20).coerceAtLeast(0.0)), geometry.bearingAt((d + 20).coerceAtMost(geometry.length))))
+    }
+
+    /**
+     * Applies hand-checked lane patches (`lane_overrides.json`, highest precedence): every lane site within
+     * [OVERRIDE_RADIUS] of a patched junction (OSRM's or one added from OSM) is replaced by the patch's lanes, keeping
+     * the route's turn there. Provider "valid" flags are dropped (they belonged to the wrong lanes). A patch that says
+     * `lanes_unknown`, or whose lanes cannot make the route's turn (a patch for another direction, or out of date),
+     * leaves no site and marks the junction in [unknownLanesAt]. Call before [withOsmTurnLanes] and [withLaneCounts].
+     */
+    fun withLaneOverrides(at: List<de.lanewise.osm.LaneOverrides.At>): Route {
+        if (at.isEmpty()) return this
+        val sites = laneSites.toMutableList()
+        val unknown = unknownLanesAt.toMutableList()
+        for (o in at) {
+            val near = sites.filter { kotlin.math.abs(it.distanceAlong - o.distanceAlong) < OVERRIDE_RADIUS }
+            val nearest = near.minByOrNull { kotlin.math.abs(it.distanceAlong - o.distanceAlong) }
+            sites.removeAll(near)
+            val d = nearest?.distanceAlong ?: o.distanceAlong
+            val turn = nearest?.turn ?: turnAt(d)
+            val masks = o.lanes?.let { de.lanewise.lane.LaneDir.parseTurnLanes(it) }
+            if (masks == null || masks.none { de.lanewise.lane.LaneDir.permits(it, turn) }) {
+                if (unknown.none { kotlin.math.abs(it - d) < 1 }) unknown += d
+                continue
+            }
+            sites += de.lanewise.lane.LaneSite(d, masks, null, turn, nearest?.isManeuver ?: (turn != de.lanewise.lane.LaneDir.STRAIGHT),
+                nearest?.roadKind ?: roadSpanAt(d - 5)?.kind ?: de.lanewise.lane.RoadKind.URBAN)
+        }
+        return copy(laneSites = sites.sortedBy { it.distanceAlong }, unknownLanesAt = unknown.sorted())
+    }
+
+    /**
+     * Sets explicit lane connectivity ([de.lanewise.lane.LaneConnectivity]) on the lane site nearest to each junction
+     * in [at] (within [OVERRIDE_RADIUS]). A hand-checked patch wins over an OSM relation at the same junction. A value
+     * that contradicts the site's lanes or arrows ([de.lanewise.lane.LaneConnectivity.contradiction]) removes the
+     * site and marks the junction in [unknownLanesAt] - no lane advice there, never a guess between the two sources.
+     * Junctions without a lane site are left alone. Call after [withLaneCounts] (the lanes are final then).
+     */
+    fun withConnectivity(at: List<de.lanewise.lane.ConnectivityAt>): Route {
+        if (at.isEmpty()) return this
+        val sites = laneSites.toMutableList()
+        val unknown = unknownLanesAt.toMutableList()
+        val bySite = at.groupBy { c ->
+            sites.indices.filter { kotlin.math.abs(sites[it].distanceAlong - c.distanceAlong) < OVERRIDE_RADIUS }
+                .minByOrNull { kotlin.math.abs(sites[it].distanceAlong - c.distanceAlong) }
+        }
+        val drop = HashSet<Int>()
+        for ((k, list) in bySite) {
+            if (k == null) continue
+            val s = sites[k]
+            // The patch if there is one, else the OSM relation(s); two values of the same rank that differ are not used.
+            val values = list.filter { it.override }.ifEmpty { list }.map { it.value.trim() }.distinct()
+            val parsed = values.singleOrNull()?.let { de.lanewise.lane.LaneConnectivity.parse(it) }
+            val toLanes = listOfNotNull(laneCountAt(s.distanceAlong + 40), laneCountAt(s.distanceAlong + 80)).maxOrNull()
+            val bad = parsed == null || de.lanewise.lane.LaneConnectivity.contradiction(s, parsed, toLanes) != null
+            if (bad) {
+                drop += k
+                if (unknown.none { kotlin.math.abs(it - s.distanceAlong) < 1 }) unknown += s.distanceAlong
+                continue
+            }
+            sites[k] = s.copy(connectivity = de.lanewise.lane.LaneConnectivity.forLanes(parsed!!, s.laneCount))
+        }
+        val kept = sites.filterIndexed { i, _ -> i !in drop }
+        return copy(laneSites = de.lanewise.lane.markFullLengthLanes(kept, this::laneCountAt), unknownLanesAt = unknown.sorted())
     }
 
     fun bikeLaneAt(d: Double): BikeLaneSpan? = bikeLanes.firstOrNull { d >= it.from && d < it.to }
     fun speedLimitAt(d: Double): SpeedLimitSpan? = speedLimits.firstOrNull { d >= it.from && d < it.to }
     fun roadSpanAt(d: Double): RoadSpan? = roadSpans.firstOrNull { d >= it.from && d < it.to }
     val effectiveDuration get() = duration + trafficPenalty
+
+    companion object {
+        /** Lane sites this close to a patched junction (m) are replaced by the patch (one junction, up to two nodes). */
+        const val OVERRIDE_RADIUS = 30.0
+    }
 }
 
 enum class IncidentKind { CLOSURE, ROADWORKS, JAM, ACCIDENT, HAZARD, WEATHER, OTHER }
@@ -170,6 +275,11 @@ data class TrafficIncident(
     val laneOpen: List<Boolean>? = null,
     /** False for announced roadworks that have not started yet (Autobahn GmbH `future`). */
     val active: Boolean = true,
+    /**
+     * Lanes are restricted here, but which ones is not known (e.g. DATEX II `lane2` - the numbering direction is not
+     * reliable - or only `numberOfLanesRestricted`): no lane advice along it, never a guess.
+     */
+    val laneRestrictionUnknown: Boolean = false,
 )
 
 /**

@@ -75,7 +75,8 @@ object LaneDir {
             LEFT -> m and (SLIGHT_LEFT or SHARP_LEFT) != 0
             SHARP_RIGHT -> m and RIGHT != 0
             SHARP_LEFT -> m and LEFT != 0
-            UTURN -> m and SHARP_LEFT != 0
+            // Wenden: from the left-turn lane (a `reverse` arrow is rarely painted / tagged), never from a through lane.
+            UTURN -> m and (SHARP_LEFT or LEFT) != 0
             else -> false
         }
     }
@@ -108,10 +109,25 @@ data class LaneSite(
      * turn-only lanes at the edges are then ordinary lanes, not pockets that open before the junction.
      */
     val fullLength: Boolean = false,
+    /** Per lane: may cars use it (OSM lane access; false = bus lane …)? Null if not tagged. Never recommended if false. */
+    val carLanes: List<Boolean>? = null,
+    /**
+     * Explicit lane connectivity ([LaneConnectivity]): per lane (left → right) the lanes of the road the route leaves
+     * on that it leads into (0-based, left → right), null = it does not lead onto the route's next road. Null if not
+     * known (then the heuristics decide). Checked against the arrows before it is set ([Route.withConnectivity]).
+     */
+    val connectivity: List<IntRange?>? = null,
 ) {
     val laneCount get() = lanes.size
 
+    /** Lanes the route's next road has at least, by [connectivity] (null if not known). */
+    fun connectedToLanes(): Int? = connectivity?.filterNotNull()?.maxOfOrNull { it.last + 1 }
+
     fun allowed(): BooleanArray {
+        // Explicit connectivity says which lanes lead onto the route's next road: it beats the provider's flags.
+        connectivity?.takeIf { c -> c.size == lanes.size && c.any { it != null } }?.let { c ->
+            return BooleanArray(lanes.size) { c[it] != null }
+        }
         val pv = providerValid
         // At a real turn the painted arrows decide: provider flags that call a lane usable although its arrows cannot make
         // the turn are wrong (OSRM at Schiffgraben → Berliner Allee: left|left|through|through;right, valid = lanes 2–4).
@@ -123,9 +139,23 @@ data class LaneSite(
         } else {
             BooleanArray(lanes.size) { LaneDir.permits(lanes[it], turn) }
         }
+        // A lane that ends by merging (acceleration lane, `merge_to_left` on the right edge) is never the lane to be in
+        // while another lane works (audit, Bückeburger Allee: the joining on-ramp lane was recommended).
+        val merging = BooleanArray(lanes.size) { isMergeOnly(it) }
+        if (arr.indices.any { arr[it] && !merging[it] }) for (i in arr.indices) if (merging[i]) arr[i] = false
+        // A lane closed to cars (bus lane, OSM `access:lanes` / `bus:lanes`) is never usable (Hollerithallee).
+        carLanes?.takeIf { it.size == lanes.size }?.let { car ->
+            if (arr.indices.any { arr[it] && car[it] }) for (i in arr.indices) if (!car[i]) arr[i] = false
+        }
         // Never return an empty set: if nothing matches, the data is inconsistent — allow all.
         if (arr.none { it }) arr.fill(true)
         return arr
+    }
+
+    /** Lane [i] only merges into its neighbour (OSM `merge_to_left` / `merge_to_right`): it ends. */
+    fun isMergeOnly(i: Int): Boolean {
+        val m = lanes[i]
+        return m != LaneDir.NONE && m and (LaneDir.MERGE_TO_LEFT or LaneDir.MERGE_TO_RIGHT).inv() == 0
     }
 
     /** Number of turn-pocket lanes on the left edge that only serve left turns / U-turns. */
@@ -137,7 +167,8 @@ data class LaneSite(
         var n = 0
         while (n < lanes.size - 1) {
             val m = lanes[n]
-            if (m != LaneDir.NONE && m and LaneDir.ANY_LEFT.inv() == 0) n++ else break
+            // A lane merging in from the left edge is not a through lane either.
+            if ((m != LaneDir.NONE && m and LaneDir.ANY_LEFT.inv() == 0) || m == LaneDir.MERGE_TO_RIGHT) n++ else break
         }
         return n
     }
@@ -149,7 +180,9 @@ data class LaneSite(
         var n = 0
         while (n < lanes.size - 1 - leftPockets()) {
             val m = lanes[lanes.size - 1 - n]
-            if (m != LaneDir.NONE && m and LaneDir.ANY_RIGHT.inv() == 0) n++ else break
+            // An acceleration lane joining on the right (`merge_to_left`) is not a through lane: the car's lane keeps its
+            // number when it appears (audit, Bückeburger Allee: the right lane became "lane 1" and the strip zig-zagged).
+            if ((m != LaneDir.NONE && m and LaneDir.ANY_RIGHT.inv() == 0) || m == LaneDir.MERGE_TO_LEFT) n++ else break
         }
         return n
     }
@@ -268,12 +301,15 @@ data class ChangeSpan(val from: Double, val to: Double, val perms: List<Int>) {
 fun attachTurnsToLaneSites(sites: List<LaneSite>, turns: List<Pair<Double, Int>>): List<LaneSite> {
     val out = sites.toMutableList()
     for ((d, bit) in turns) {
-        if (bit == LaneDir.STRAIGHT || out.any { kotlin.math.abs(it.distanceAlong - d) < 15 }) continue
-        val i = out.indexOfLast { it.distanceAlong < d && d - it.distanceAlong <= 80 && !it.isManeuver }
+        if (bit == LaneDir.STRAIGHT || out.any { kotlin.math.abs(it.distanceAlong - d) < 15 && it.isManeuver }) continue
+        // Also a site at the turn itself that OSRM treats as "straight" (a later intersection of the previous step):
+        // the U-turn at the end of Hildesheimer Straße was planned straight on, in the through lane (owner's demo).
+        val i = out.indexOfLast { it.distanceAlong < d + 15 && d - it.distanceAlong <= 80 && !it.isManeuver }
         if (i < 0) continue
         val s = out[i]
         if (s.lanes.none { LaneDir.permits(it, bit) }) continue
-        out[i] = s.copy(turn = bit, isManeuver = true, providerValid = null)
+        // The site now stands for another junction's turn: its connectivity (to the road after *this* node) no longer fits.
+        out[i] = s.copy(turn = bit, isManeuver = true, providerValid = null, connectivity = null)
     }
     return out
 }
@@ -289,20 +325,43 @@ fun attachTurnsToLaneSites(sites: List<LaneSite>, turns: List<Pair<Double, Int>>
  */
 fun markFullLengthLanes(sites: List<LaneSite>, laneCountAt: (Double) -> Int?): List<LaneSite> {
     val sorted = sites.sortedBy { it.distanceAlong }
-    return sorted.mapIndexed { k, raw ->
+    val out = ArrayList<LaneSite>(sorted.size)
+    fun countedAll(from: Double, to: Double, n: Int): Boolean {
+        var d = from + 15
+        while (d < to - 5) { if ((laneCountAt(d) ?: return false) < n) return false; d += 10 }
+        return true
+    }
+    for ((k, raw) in sorted.withIndex()) out += markOne(k, raw, sorted, out, ::countedAll)
+    return out
+}
+
+private fun markOne(k: Int, raw: LaneSite, sorted: List<LaneSite>, done: List<LaneSite>,
+                    countedAll: (Double, Double, Int) -> Boolean): LaneSite {
+    run {
         val s = if (raw.fullLength) raw.copy(fullLength = false) else raw
-        if (k == 0 || (s.leftPockets() == 0 && s.rightPockets() == 0)) return@mapIndexed s
-        val prev = sorted[k - 1]
-        if (prev.isManeuver && prev.turn != LaneDir.STRAIGHT) return@mapIndexed s
-        if (prev.lanes.count { LaneDir.permits(it, LaneDir.STRAIGHT) } != s.laneCount) return@mapIndexed s
-        var d = prev.distanceAlong + 15
-        if (d >= s.distanceAlong - 5) return@mapIndexed s
-        while (d < s.distanceAlong - 5) {
-            val n = laneCountAt(d) ?: return@mapIndexed s
-            if (n < s.laneCount) return@mapIndexed s
-            d += 10
+        if (k == 0) return s
+        val prevMarked = done[k - 1]
+        // The same lane picture again, the route straight on and the lanes counted all the way (several nodes of one
+        // approach - audit, Langenforther Straße: `through | slight_right` three times within 120 m): the same lanes,
+        // so they are read the same way. Before, the first was "full length" and the next two had a right pocket - one
+        // lane with two lateral numbers, a phantom "move right" and the strip zig-zagging 0 → 1 → 0.
+        // Also two nodes of one junction (≤ 30 m) with as many lanes, whatever their arrows (audit, Bückeburger Allee
+        // roundabout: `through;right | right`, 2 m later `left;through;right | right` - read differently, the plan moved
+        // the car "right" between the two nodes).
+        val gap = s.distanceAlong - prevMarked.distanceAlong
+        if (prevMarked.laneCount == s.laneCount && !(prevMarked.isManeuver && prevMarked.turn != LaneDir.STRAIGHT) &&
+            (gap <= 30 || prevMarked.lanes == s.lanes && countedAll(prevMarked.distanceAlong, s.distanceAlong, s.laneCount))) {
+            return s.copy(fullLength = prevMarked.fullLength)
         }
-        s.copy(fullLength = true)
+        if (s.leftPockets() == 0 && s.rightPockets() == 0) return s
+        val prev = sorted[k - 1]
+        if (prev.isManeuver && prev.turn != LaneDir.STRAIGHT) return s
+        // Lanes that carry on: by the previous junction's explicit connectivity if known, else its straight lanes.
+        val carried = prev.connectedToLanes() ?: prev.lanes.count { LaneDir.permits(it, LaneDir.STRAIGHT) }
+        if (carried != s.laneCount) return s
+        if (prev.distanceAlong + 15 >= s.distanceAlong - 5) return s
+        if (!countedAll(prev.distanceAlong, s.distanceAlong, s.laneCount)) return s
+        return s.copy(fullLength = true)
     }
 }
 
@@ -314,7 +373,8 @@ fun markFullLengthLanes(sites: List<LaneSite>, laneCountAt: (Double) -> Int?): L
  * Hamburg / Kassel, "move left" again. [fast] tells whether the road before a distance is a motorway / expressway.
  */
 fun trimToRoadLanes(sites: List<LaneSite>, laneCountAt: (Double) -> Int?, fast: (Double) -> Boolean): List<LaneSite> = sites.map { s ->
-    if (s.laneCount < 2 || !fast(s.distanceAlong - 60)) return@map s
+    // Explicit connectivity was checked against these lanes: it is not trimmed by a guess.
+    if (s.laneCount < 2 || s.connectivity != null || !fast(s.distanceAlong - 60)) return@map s
     // 400 m: an exit lane that opens before the junction (pocket) shows up in OSM within that stretch and keeps the picture.
     val counts = generateSequence(s.distanceAlong - 400) { it + 20 }.takeWhile { it < s.distanceAlong - 10 }.map(laneCountAt).toList()
     if (counts.isEmpty() || counts.any { it == null }) return@map s
@@ -344,7 +404,7 @@ fun mergeDoubleNodeJunctions(sites: List<LaneSite>): List<LaneSite> {
         if (prev != null && prev.isManeuver && prev.turn != LaneDir.STRAIGHT && !s.isManeuver &&
             s.distanceAlong - prev.distanceAlong <= 30 && s.lanes == prev.lanes) continue
         val next = sorted.getOrNull(i + 1)
-        if (!s.isManeuver && next != null && next.isManeuver && next.turn != LaneDir.STRAIGHT &&
+        if (!s.isManeuver && s.connectivity == null && next != null && next.isManeuver && next.turn != LaneDir.STRAIGHT &&
             next.distanceAlong - s.distanceAlong <= 50) {
             val allowed = s.allowed()
             val extra = s.lanes.map { it != LaneDir.NONE && LaneDir.permits(it, next.turn) && it and LaneDir.STRAIGHT == 0 }
@@ -357,6 +417,14 @@ fun mergeDoubleNodeJunctions(sites: List<LaneSite>): List<LaneSite> {
     }
     return out
 }
+
+/**
+ * Lane sites inside a roundabout ([spans]: from the entry step to the exit step, route distances) are dropped; the
+ * entry's lanes stay. Nodes on the circulating carriageway were planned as "straight" (going round is not straight),
+ * and the plan moved the car out of the inner lane and back within 60 m (audit, Friedrich-Ebert-Straße roundabout).
+ */
+fun dropRoundaboutInterior(sites: List<LaneSite>, spans: List<ClosedFloatingPointRange<Double>>): List<LaneSite> =
+    if (spans.isEmpty()) sites else sites.filter { s -> spans.none { s.distanceAlong > it.start + 3 && s.distanceAlong <= it.endInclusive + 3 } }
 
 /**
  * "Straight on" for the route, but the only usable lanes have turn arrows only (e.g. `left | left | slight_right |

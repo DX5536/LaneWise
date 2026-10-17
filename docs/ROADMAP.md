@@ -565,6 +565,119 @@ Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which
       falls back to OSRM lane sites only. A self-hosted Overpass (or caching corridor data per way id) would make lanes
       reliable.
 
+## Done (v0.4.4, part 5, 2026-10-15) — hand-checked lane overrides (no paid HD maps)
+- [x] **`lane_overrides.json`** (`osm/LaneOverrides.kt`, `docs/LANE_OVERRIDES.md`): GeoJSON like `lane_reports.geojson`
+      (opens in JOSM / iD, property names are OSM tags), shipped in `assets/` plus the same file on the phone (wins on the
+      same `id`, `adb push` + restart). Way patches per direction (`turn:lanes`, `lanes` / `effective_lanes`,
+      `change:lanes`), junction patches by node (+ `from_way`), `lanes_unknown`, `osm_was`; `source` (evidence) required.
+      Precedence: patch > OSM `turn:lanes` > aerial counts > heuristics.
+- [x] Applied where OSM tags are read: corridor ways (`SpeedLimitProvider`, patched ways fetched by id), browse map
+      (after the aerial counts), offline graph (baked in at download). `Route.withLaneOverrides` replaces OSRM's / OSM's
+      lane sites within 30 m of a patched junction (OSRM's valid flags dropped, the route's turn kept).
+- [x] Safety: invalid entries are dropped whole (logcat); a two-way way without `direction` is not patched; a patch
+      whose lanes cannot make the route's turn, `lanes_unknown`, or OSM changed since `osm_was` → no lanes there
+      (`Route.unknownLanesAt`): "No lane data – follow the road markings" from 400 m before, and nothing after it is
+      planned until it is passed.
+- [x] `LaneOverridesTest` (9 tests): validation, asymmetric 1 + 3 lanes on a `lanes=4` street, outdated patch, junction
+      patch only on its arriving way, local file wins, a mis-tagged 4-lane junction (`left|left|through|right` in OSM,
+      re-marked `left|through|through|right`: the old data advised the straight-only 2nd lane; patched: left lane, no
+      zig-zag driving up to it), `lanes_unknown` in `NavigationEngine`, patch that cannot make the turn, missing junction.
+- [ ] Fill the asset with real, checked patches (none yet: owner to pick junctions from lane reports / junction audit,
+      e.g. Herschelstraße / Celler Straße — DOP20 + drive as evidence).
+- [ ] Phone check: push a test patch, demo a route through it (lanes replaced; `lanes_unknown` shows the hint).
+- [ ] Settings: show "N lane patches (M rejected)" next to the lane reports; share / edit on the phone.
+- [x] Phone check (2026-10-17, test-only patch `lanes_unknown` on Aegidientorplatz way 4699114, demo ×0.5 from Schiffgraben):
+      "No lane data here – follow the road markings" from ~850 m before the left turn into Hildesheimer Straße, no strip,
+      lane bar back after the junction. Test patch removed from the phone. The OSM lanes there
+      (`reverse;left|left|right|right|right`) were not changed: DOP20 shows ~5 lanes, but the arrows cannot be read at
+      20 cm - real patches need the owner's evidence. `JunctionAuditLiveTest` takes `LANEWISE_OVERRIDES=<file>`.
+- [x] **New app icon** (owner's `docs/icon.svg`, 2026-10-15): `ic_launcher_foreground` / `_monochrome` regenerated from
+      the SVG (tile mapped onto the visible 72 dp, dashes as segments).
+
+## Done (v0.4.4, part 6, 2026-10-17)
+- [x] **U-turn from the through lane** (owner's demo, end of Hildesheimer Straße): OSRM reports the junction as two nodes
+      21 m apart - lanes `left | through | through;right` with the *through* lane flagged at the first, the U-turn at the
+      second. `LaneDir.permits` never let a `left` lane make a U-turn, so the first node kept only the through lane and
+      the plan asked "move one lane left" 20 m before the U-turn. Now a U-turn (Wenden) is made from the left-turn lane;
+      a "straight" site at the turn's own node is re-targeted to the turn (`attachTurnsToLaneSites`); and a turn whose
+      nearby lane data has no lane that can make it shows "No lane data" instead of falling back to the provider's flags
+      (`NavigationEngine.unknownTurnAhead`, now also for U-turns of any step type). Trace: left lane from 400 m before,
+      no change. Tests `uTurnUsesTheLeftTurnLaneNotTheThroughLane`, `uTurnWithoutAUsableLaneIsUnknown`.
+- [x] **Mobilithek DATEX II client** (`traffic/MobilithekClient.kt`, replaces `MobilithekDatexSource`, which used
+      Android's XML parser and a blocking `execute()` on the IO pool): client certificate (PKCS#12, cached client),
+      `Http.fetchBytes` (OkHttp's threads, cancellable), SAX parser without DTDs, v2 / v3 / SOAP / gzip, validity,
+      TPEG from → to or GML `posList` as the line. Per-lane closures only from unambiguous lane names
+      (`TrafficIncident.laneOpen` → `LaneClosure`, like Autobahn GmbH roadworks); numbered lanes or a restricted-lane
+      count only → `TrafficIncident.laneRestrictionUnknown` → "No lane data" from 400 m before and along it
+      (`LaneClosure.unknownAlong`). `MobilithekClientTest` (8 tests, hand-written samples).
+- [ ] Mobilithek with the owner's real subscription: check a real payload (namespaces, location types, lane names used
+      by VMZ NI / Stadt Hannover) and adjust; if the feed documents its lane numbering, map `lane1…` too.
+- [x] **Turn pockets cut at the stop line** (owner's screenshot, Celler Straße straight on at Herschelstraße,
+      `left | through | through`, 2 lanes after): going straight, the left-turn lane narrowed across the junction into the
+      through lanes (the v0.4.4 funnel). Now turn pockets end at the stop line; only through lanes that end after the
+      junction still narrow in the short funnel (`LaneRibbonBuilder.taper`, `cutAt`). Test `turnPocketIsCutAtTheStopLine`;
+      checked on the phone (demo ×0.25). OSM there: way 166391411 has `lanes=2` but 3 `turn:lanes`, and 143948254 after
+      the junction `lanes=1` - check against DOP20 / reality (owner's screenshot shows 2 lanes after).
+- [x] **In town: into the turn lane early** (owner's drawing: two straight-only lanes, the next turn 500 m ahead, the app
+      kept the car in the straight lane on the wrong side until ~200 m before): a change was always advised "as late as
+      comfortable" (150 m + 80 m per lane in town). In town (free lane choice, § 7 (3) StVO) it now starts right after
+      the previous junction (30 m), at most 600 m before the turn, in the first dashed stretch, and only across lanes
+      that already exist there - a turn pocket is entered as it opens (`LaneGuidance.earlyStart`, `firstChange`; the strip
+      moves at the same point in `LaneRibbonBuilder.keyframes`). Autobahn, expressways and rural roads keep the lead
+      distance (keep right, § 2 StVO). Test `inTownGetIntoTheTurnLaneEarly`. Lane audit: see below.
+- [x] **Street-level imagery for the junction audit** (owner's strategy, 2026-10-17): Mapillary primary, Panoramax /
+      KartaView secondary, with `lane_overrides.json` and DOP20 (`docs/DATA_SOURCES.md`). `tools/streetview/streetview_audit.py`
+      (stdlib only) takes the junction audit's `j_*.json` (or `--point`), finds photos ≤ 45 m around a point 30 m before
+      each stop line looking the driving direction (or 360°), newest first, plus Mapillary's detected arrows / lane signs
+      as hints, and writes `tools/streetview/work/streetview.html` next to the DOP20 crops. Photos are evidence, never
+      app data. First run (Schiffgraben → Hildesheimer Straße): Panoramax photos at 5 of 7 junctions, but from a bike /
+      sidewalk (arrows not visible); Mapillary needs the owner's token.
+- [ ] Owner: create a Mapillary client token (mapillary.com/dashboard/developers), run the street-level audit on the
+      test routes, and write the first real `lane_overrides.json` entries / OSM fixes from it.
+- [x] **Audit fixes (seed 1)**: (1) Langenforther Straße STRIP_ZIGZAG - three OSRM sites with the same
+      `through | slight_right` within 120 m were read differently (first "full length", then a right pocket): a
+      repeated lane picture with the lanes counted all the way now keeps the previous reading (`markFullLengthLanes`,
+      test `repeatedLanePictureIsReadTheSameWay`). (2) Nenndorfer Landstraße LATE - a `left | through` site added from
+      OSM 43 m before the left turn's node missed the two-node-junction clean-up (it ran before OSM sites were added):
+      `Route.withOsmTurnLanes` now merges again (test `siteAddedFromOsmBeforeATurnIsPartOfTheJunction`); and a change
+      before a solid line uses the last dashed stretch of ≥ 50 m, not a 20 m one right before it
+      (`LaneGuidance.MIN_WINDOW`). (3) Bornumer Straße STRIP_ZIGZAG - with the early change in town the assumed lane
+      stayed the old one until the next junction; close to it the plan flipped to "change after the junction" (right,
+      left, right). An advised change now counts as made once driven through (60 m per lane in town, 100 rural, 150
+      trunk, 200 motorway; `LaneGuidance.changeDistance`). (4) Bückeburger Allee STRIP_ZIGZAG - a joining on-ramp lane
+      (`merge_to_left`) counted as a through lane: merge-only edge lanes are pockets now and never recommended while
+      another lane works (test `accelerationLaneIsNotAThroughLane`). Route 6 re-audit: 0 findings.
+- [x] **First real lane patch**: Celler Straße northbound at Herschelstraße is `left | through` (owner, local driver;
+      OSM `lanes=2` agrees), OSM `turn:lanes` had 3 lanes and AMAP shows 3 too - `assets/lane_overrides.json`
+      (`osm_was` set), test `shippedOverridesAreValid`. Owner to fix `turn:lanes` on way 166391411 in OSM.
+- [x] **Large-junction survey** (`tools/streetview/big_junctions.py`): Region Hannover + Celle, 2712 ways with
+      `turn:lanes` → 64 junctions / 104 approaches with 5+ lanes (or 4 with left, straight and right); flags LANES_MISMATCH
+      4, UNMARKED 5, SHORT_WAY 16, OLD_PHOTOS 14, NO_PHOTOS 3, DETECTION_HINT 1; HTML + GeoJSON work list.
+- [x] **AMAP as last resort** (owner, 2026-10-17): screenshots may be studied; where OSM / photos / DOP20 are unclear the
+      lanes read from them go into `lane_overrides.json` as text ("AMAP screenshot <date> (unconfirmed)"); screenshots
+      are never committed, nothing goes into OSM. AMAP can be searched by name over adb (not by coordinates).
+- [x] **App icon updated again** from the owner's new `docs/icon.svg` (larger road slab).
+- [ ] Owner's screenshot: ETA "2 h 27 min" for 20 km while the demo was paused - check how the ETA is computed at 0 km/h.
+- [x] **Lane topology like HERE's lane model** (owner's link, docs.here.com "model-lane"): HERE stores explicit lane
+      connectivity (lane inputs → outputs at "accessors"), a transition status per lane (forming / ending) and boundary
+      traversal (= our `change:lanes`). Now `LaneSite.connectivity` (`lane/LaneConnectivity.kt`): per lane the lanes it
+      leads into after the junction, or "does not continue". Sources: `lane_overrides.json` `connectivity` (junction
+      patch with `osm_node` + `from_way` + `to_way`) > OSM `type=connectivity` relations (corridor Overpass query:
+      `rel(bw.a)[type=connectivity]` + member ways as node lists, matched from / via node / to by the route's OSM nodes,
+      `osm/OsmConnectivity.kt`) > heuristics. Used by `LaneSite.allowed`, `LanePlanner.entryLateral` / `transition`
+      (only connected lanes can be entered), `markFullLengthLanes`, and the ribbon (`carriedLanes`; lanes that do not
+      continue end at the stop line, merging lanes narrow in the funnel). A value that contradicts the arrows / lane
+      counts, or two OSM relations that differ → the junction's lanes are dropped (`Route.unknownLanesAt`, "No lane
+      data"). Tests `LaneConnectivityTest` (9). Not yet: offline graph (`OfflineGraphBuilder`) and HERE's per-lane
+      forming status; `bw` lanes and via ways are skipped.
+- [ ] Lane connectivity on real junctions: run the junction audit on a route through junctions with
+      `type=connectivity` relations in Hannover (few are mapped) and check the printed connectivity against DOP20;
+      the owner may add relations / `connectivity` patches where the heuristics were wrong (Celler Straße at
+      Herschelstraße: `left|through|through` → 2 lanes, `2:1|3:2`, once the lane count after it is checked).
+- [ ] TomTom Navigation SDK for Android (owner's link, API reference 0.3.1236): proprietary SDK with lane guidance
+      (needs a key and its licence terms); evaluate as a lane *reference* like `ProviderCompareLiveTest`, not as data
+      to copy. Earlier finding: TomTom's lanes were simpler than OSM's on the test route.
+
 ## Video review — still open
 - [ ] Owner: check the 3D car (size, colours, behaviour in tunnels / under bridges) and the automatic theme on the phone.
 - [ ] Owner: check the car overlay (size vs. road at different zooms, tilt changes, pan away and recenter) and the

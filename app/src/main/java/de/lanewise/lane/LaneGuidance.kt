@@ -55,6 +55,8 @@ class LaneGuidance(private val planner: LanePlanner = LanePlanner()) {
     private var lastPlan: List<LaneAdvice> = emptyList()
     private var keepRightFrom: Double? = null
     private var keepRightFromLateral: Int? = null
+    /** The change instruction given last and the lane it started from: once driven through, it counts as done. */
+    private var lastInstruction: Pair<LaneChangeInstruction, Int>? = null
 
     fun reset() {
         keepRightFrom = null
@@ -64,6 +66,7 @@ class LaneGuidance(private val planner: LanePlanner = LanePlanner()) {
         overridePending = false
         lastPassedSite = null
         lastPlan = emptyList()
+        lastInstruction = null
     }
 
     /** Driver tells us which lane (index at [site]) they are in. */
@@ -129,19 +132,37 @@ class LaneGuidance(private val planner: LanePlanner = LanePlanner()) {
                 }
             }
         }
-        if (overridePending) { assumedSince = carDistance; overridePending = false; keepRightFrom = null; keepRightFromLateral = null }
+        if (overridePending) {
+            assumedSince = carDistance; overridePending = false; keepRightFrom = null; keepRightFromLateral = null; lastInstruction = null
+        }
+        // An advised change counts as made once the car has had the distance to make it (LaneWise assumes the advice is
+        // followed, like at junctions). Otherwise the plan kept the old lane until the next junction and, close to it,
+        // switched to "change after the junction" - the strip went right, back left, right again (audit, Bornumer Straße).
+        lastInstruction?.let { (ins, from) ->
+            when {
+                passed != null && passed.distanceAlong >= ins.site.distanceAlong -> lastInstruction = null
+                assumedLateral == from && carDistance >= min(ins.startAt + changeDistance(ins.site.roadKind) * abs(ins.lanes), ins.deadline - 5.0) -> {
+                    assumedLateral = from + ins.lanes
+                    assumedSince = carDistance
+                    keepRightFrom = null; keepRightFromLateral = null
+                    lastInstruction = null
+                }
+            }
+        }
 
         val plan = planner.plan(
             sites,
             LanePlanner.Options(avoidLaneChanges, keepRight, assumedLateral, carDistance, changeSpans = changeSpans, laneCountAt = laneCountAt,
-                assumedSince = assumedSince),
+                assumedSince = assumedSince,
+                changeStartedAt = lastInstruction?.takeIf { (ins, from) -> from == assumedLateral && carDistance >= ins.startAt }?.first?.startAt),
         )
         lastPlan = plan
         if (plan.isEmpty()) return LaneState(null, emptyList(), null, true, assumedLateral, assumedSince, keepRightFrom, keepRightFromLateral)
 
         // The first change is timed from where the assumed lane was established, not from the car: otherwise its start
         // slides along with the car inside the lead distance.
-        val change = firstChange(plan, min(carDistance, assumedSince ?: carDistance), changeSpans)
+        val change = firstChange(plan, min(carDistance, assumedSince ?: carDistance), changeSpans, laneCountAt, assumedLateral)
+        assumedLateral?.let { from -> if (change != null && lastInstruction?.first?.site != change.site) lastInstruction = change to from }
         return LaneState(
             nextAdvice = plan.first(),
             plan = plan,
@@ -160,20 +181,48 @@ class LaneGuidance(private val planner: LanePlanner = LanePlanner()) {
     companion object {
         /** Metres the strip takes per lane when it moves back to the right lane (gentle, like a real lane change). */
         const val KEEP_RIGHT_PER_LANE = 150.0
+        /** In town a change is advised at most this far (m) before the junction that needs it. */
+        const val EARLY_MAX = 600.0
+        /** … and not before this far (m) after the previous junction (clear of its box). */
+        const val EARLY_SETTLE = 30.0
+        /** A dashed stretch this long (m) is enough for a calm lane change. */
+        const val MIN_WINDOW = 50.0
     }
 
-    private fun firstChange(plan: List<LaneAdvice>, since: Double, spans: List<ChangeSpan>): LaneChangeInstruction? {
+    private fun firstChange(plan: List<LaneAdvice>, since: Double, spans: List<ChangeSpan>,
+                            laneCountAt: ((Double) -> Int?)? = null, startLateral: Int? = null): LaneChangeInstruction? {
         var prevDist = since
+        var prevLat = startLateral
         for (a in plan) {
+            val fromLat = a.entryLateral ?: prevLat
             if (a.changeFromPrevious != 0) {
                 val gap = a.site.distanceAlong - prevDist
                 val lead = leadDistance(a.site.roadKind, abs(a.changeFromPrevious))
                 val target = a.site.lateral(a.recommended)
                 // Change where the line is dashed: the last legal stretch before the site (solid lines from OSM).
                 val windows = legalWindows(spans, target - a.changeFromPrevious, target, prevDist + 10.0, a.site.distanceAlong - 10.0)
+                // In town (free lane choice, § 7 (3) StVO): get into the lane for the next turn early - right after the
+                // previous junction, at most EARLY_MAX before the turn - not in the last 150 m (owner: "keeps me in the
+                // left straight lane although the next turn in 500 m is right"). Only across lanes that already exist
+                // there; a turn pocket that opens later is entered as it opens. In the first dashed stretch.
+                if (a.site.roadKind == RoadKind.URBAN && fromLat != null) {
+                    val from = fromLat
+                    val earliest = earlyStart(prevDist, a.site.distanceAlong)
+                    val n = laneCountAt?.invoke(earliest)
+                    // Lanes there: the through lanes 0 … n-1 in lateral coordinates (pockets open outside them).
+                    val reach = if (n == null) target else target.coerceIn(min(0, from), max(n - 1, from))
+                    val w = legalWindows(spans, from, reach, prevDist + 10.0, a.site.distanceAlong - 10.0)
+                        .firstOrNull { it.endInclusive - max(it.start, earliest) >= 30.0 }
+                    if (reach != from && w != null) {
+                        return LaneChangeInstruction(max(w.start, earliest), a.site, reach - from, a.recommended, deadline = w.endInclusive)
+                    }
+                }
                 // The last legal stretch; a short one right before the site still beats changing before a closure and
                 // driving through it in the closed lane.
-                val window = windows.lastOrNull { it.endInclusive - it.start >= 5.0 }
+                // But a longer dashed stretch before a short last one (audit, Nenndorfer Landstraße: the change came 22 m
+                // before the solid line) is the better place: the last one of at least MIN_WINDOW, else the last one.
+                val window = windows.lastOrNull { it.endInclusive - it.start >= MIN_WINDOW }
+                    ?: windows.lastOrNull { it.endInclusive - it.start >= 5.0 }
                 if (window != null) {
                     val start = max(window.start, window.endInclusive - lead)
                     return LaneChangeInstruction(start, a.site, a.changeFromPrevious, a.recommended, deadline = window.endInclusive)
@@ -184,6 +233,7 @@ class LaneGuidance(private val planner: LanePlanner = LanePlanner()) {
                 return LaneChangeInstruction(start, a.site, a.changeFromPrevious, a.recommended)
             }
             prevDist = a.site.distanceAlong
+            prevLat = a.site.lateral(a.recommended)
         }
         return null
     }
@@ -203,6 +253,17 @@ class LaneGuidance(private val planner: LanePlanner = LanePlanner()) {
         }
         if (cur < d1) out += cur..d1
         return out
+    }
+
+    /**
+     * Where a change for a junction at [site] starts in town: [EARLY_SETTLE] after the previous junction / where the lane
+     * was established ([prev]), but at most [EARLY_MAX] before the junction.
+     */
+    fun earlyStart(prev: Double, site: Double): Double = min(max(prev + EARLY_SETTLE, site - EARLY_MAX), site - 40.0)
+
+    /** Distance (m) a driver takes for one lane change after the advice starts. */
+    fun changeDistance(kind: RoadKind): Double = when (kind) {
+        RoadKind.MOTORWAY -> 200.0; RoadKind.TRUNK -> 150.0; RoadKind.RURAL -> 100.0; RoadKind.URBAN -> 60.0
     }
 
     /** How far before the site we advise the change (AMAP uses ~300 m on expressways). */
