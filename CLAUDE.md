@@ -73,7 +73,7 @@ See `docs/ARCHITECTURE.md`. Core lane logic: `app/src/main/java/de/lanewise/lane
 ## Tools
 - Marking plans: `tools/marking_plans` (PyMuPDF; city Neumarkierungspläne → draft `lane_overrides.json` v2 entries,
   `docs/MARKING_PLANS.md`). Google Maps / satellite is never used as a source, not even screenshots (ToS).
-- AMAP over adb: search, leave with the upper-left back button, zoom in by hand to the 5 m scale or closer (arrows
+- AMAP over adb (skill `phoneapp-survey`, helpers `tools/phoneapp_survey/`: shot / zoom / pan): search, leave with the upper-left back button, zoom in by hand to the 5 m scale or closer (arrows
   often only at 2 m / 1 m); "no arrows" only after maximum zoom.
 - Python tools: `tools/aerial_lanes` (DOP20 + U-Net, venv `.venv` with torch cu124), `tools/voice_pack`
   (OmniVoice, venv `.venv` with torch 2.8 cu128) and `tools/streetview` (Mapillary / Panoramax / KartaView photos per

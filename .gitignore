@@ -64,3 +64,6 @@ tools/voice_pack/work/
 tools/streetview/work/
 tools/marking_plans/work/
 tools/marking_plans/.venv/
+
+# Phone-app survey screenshots (never commit)
+tools/phoneapp_survey/work/
