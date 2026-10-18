@@ -21,6 +21,21 @@ Read this first when resuming work in a new chat.
 > as screenshot references; as a last resort, where OSM / photos / DOP20 are unclear, the lanes read from an AMAP
 > screenshot may go into `lane_overrides.json` as text (never the screenshot itself, never OSM; see `docs/DATA_SOURCES.md`). Never write my real addresses. When done, update `docs/ROADMAP.md`. My next request is:
 
+## AMAP survey (copy-paste prompt to continue)
+
+> Continue the AMAP cross-check of big junctions. Read `docs/DATA_SOURCES.md` (AMAP rules) and `docs/ROADMAP.md`
+> (v0.4.4 parts 6-7). Plan: `tools/streetview/work/amap_plan.json` (64 junctions, OSM ways + arrows), results so far:
+> `tools/streetview/work/amap_check.json` (`amap`, `amap_lanes` = this direction | opposite, `osm_lanes` = forward +
+> backward, `verdict`), OSM lane tags per way in `osm_lanes.json`. AMAP is open on my phone (adb). Way of working:
+> search a nearby place, open it, leave with the upper-left back button (not the system back) until the home map,
+> then pan / zoom by hand (double-tap on empty map; double-tap + drag down zooms out) to the 5 m scale bar or closer -
+> arrows often only show at 2 m / 1 m, a street label can hide one; "no arrows" only after maximum zoom along the whole
+> approach. AMAP search may ask for a login: never sign in, pan the map instead. Note the lane count per direction
+> (AMAP's "4 lanes" can be 3 + 1) and use logic (3 straight lanes before a light → 3 lanes after it until a merge).
+> Never write AMAP screenshots anywhere or my own location; only text readings. Differences go to DOP20 / Mapillary
+> first; AMAP only as last resort into `lane_overrides.json`. Update `docs/ROADMAP.md` when done. Next after that: the
+> merging-lanes check (ROADMAP "Next").
+
 ## Project
 Android (Kotlin/Compose/MapLibre) driving app for Germany, focus Region Hannover, centred on
 **3D lane assist that minimises lane changes**. Owner: Hai Lam Dang (GitHub DX5536). UI and voice are German-first.

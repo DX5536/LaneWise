@@ -37,6 +37,15 @@ object Http {
 
     val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
+    /**
+     * The network changed (Wi-Fi gone, mobile data on): pooled connections belong to the old network and would only
+     * fail or hang on the next request. Drop them, and cancel calls still waiting on the old network.
+     */
+    fun onNetworkChanged() {
+        client.connectionPool.evictAll()
+        client.dispatcher.runningCalls().forEach { it.cancel() }
+    }
+
     /** Status, content type and body of a finished request. */
     data class Reply(val code: Int, val contentType: String, val body: String) {
         val ok get() = code in 200..299

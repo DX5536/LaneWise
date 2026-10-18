@@ -147,6 +147,8 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, ui: UiState, onBack: () ->
             Toggle(str.keepRight, str.keepRightSub, s.keepRight) { v -> set { it.copy(keepRight = v) } }
             Toggle(str.immersiveView, str.immersiveViewSub, s.immersiveView) { v -> set { it.copy(immersiveView = v) } }
             Toggle(str.streetsWhileDriving, str.streetsWhileDrivingSub, s.streetsWhileDriving) { v -> set { it.copy(streetsWhileDriving = v) } }
+            Toggle(str.laneBoxCountdown, str.laneBoxCountdownSub, s.laneBoxCountdown) { v -> set { it.copy(laneBoxCountdown = v) } }
+            Toggle(str.driveTimer, str.driveTimerSub, s.showDriveTimer) { v -> set { it.copy(showDriveTimer = v) } }
             if (!s.immersiveView) {
                 Toggle(str.laneScene, str.laneSceneSub, s.showLaneScene) { v -> set { it.copy(showLaneScene = v) } }
                 Toggle(str.junctionZoom, null, s.junctionZoom) { v -> set { it.copy(junctionZoom = v) } }

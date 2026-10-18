@@ -66,8 +66,13 @@ fun LaneBar(
     onLongPress: (() -> Unit)? = null,
     /** Small distance tag on the left (lanes of a junction before the manoeuvre shown in the banner). */
     distanceLabel: String? = null,
+    /** Docked only: share of the approach still ahead (1 → 0 at the junction), drawn as a fill like the banner's. */
+    countdown: Float? = null,
 ) {
     val c = LocalLaneColors.current
+    val fill by androidx.compose.animation.core.animateFloatAsState(
+        countdown?.coerceIn(0f, 1f) ?: 0f, tween(900, easing = LinearEasing), label = "laneBoxCountdown",
+    )
     val site = advice.site
     // Docked: full width under the manoeuvre banner, lanes share the width, same colour as the banner.
     Row(
@@ -75,6 +80,10 @@ fun LaneBar(
             .then(if (docked) Modifier.fillMaxWidth() else Modifier)
             .clip(if (docked) RoundedCornerShape(6.dp, 6.dp, 18.dp, 18.dp) else RoundedCornerShape(16.dp))
             .background(if (docked) c.banner else Color(0xF0101216))
+            .drawBehind {
+                if (docked && countdown != null) drawRect(c.bannerAccent.copy(alpha = 0.38f),
+                    size = androidx.compose.ui.geometry.Size(size.width * fill, size.height))
+            }
             .padding(horizontal = 8.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
         verticalAlignment = Alignment.CenterVertically,

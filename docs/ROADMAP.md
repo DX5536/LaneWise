@@ -699,7 +699,34 @@ Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which
     `through|slight_right`, OSM `left|left|through;right|none` with lanes=2 - arm identity not yet sure).
   - AMAP without arrows even at maximum zoom: Willmerstraße W-bound (only a centre line), Hannoversche Heerstraße
     NE-bound at Mondhagen (Celle).
-  - Still open: Fuhrberger Straße (Celle), then the remaining ~50 junctions of `amap_plan.json`.
+  - Round 2 (owner: also note how many lanes each direction has - AMAP's "4 lanes" can be 3 + 1): `amap_check.json`
+    now has `amap_lanes` (this direction | opposite) and `osm_lanes` (forward + backward). Match: Hamelner Chaussee
+    N / S (3 + slip lane = OSM 4), Karl-Wiechert-Allee N (3 + slip), Berliner Allee SE, Vahrenwalder Straße N / S,
+    Lavesallee, Langenhagener Straße W, Fuhrberger Straße (count only). Differs: Berenbosteler Straße, Garbsen (AMAP
+    `left|left|through`, 3 SW + 1 NE; OSM 4 + 1 with a right lane), Ritter-Brüning-Straße (AMAP 3 lanes without the
+    left lane OSM has; deduction: Lavesallee feeds 4 straight-on lanes into it, so a lane must end in between),
+    Karl-Wiechert-Allee S (AMAP 2 + slip at the stop line, OSM 4). No arrows at max zoom: Rudolf-von-Bennigsen-Ufer,
+    Fuhrberger Straße. Lavesallee / Friederikenplatz: layout differs in shape, needs DOP20. Burgdorfer Straße (Lehrte)
+    not found in AMAP. AMAP search now asks for a login (guest limit) - not signed in; the rest of the survey pans
+    the map by hand. Round 3 (Vahrenwalder Straße, both carriageways at junctions 37, 49, 51, 52, 53): all match OSM
+    (AMAP draws `left`/`right` where OSM has `sharp_left`/`sharp_right`; at 37 S the 5th OSM lane is the slip road)
+    except junction 52 N-bound (Büttnerstraße): AMAP `left|through|through|through|right` (5 lanes), OSM 4 with
+    `through;sharp_right` - check DOP20. AMAP draws 3 lanes north of that crossing, matching its 3 through lanes.
+    Still open: junctions 23 - 36, 38 - 44, 46 - 48, 50, 54 - 64 (prompt: `CLAUDE.md`, "AMAP survey").
+- **Drive timer** (owner's request 2026-10-18): stopwatch of the time driven since navigation started, next to the
+  remaining time in the bottom bar (kept across re-routes; Settings → Lane assist → "Driving time stopwatch", on by
+  default).
+- **Lane box countdown** (owner's request): the lane box under the manoeuvre banner fills like the banner and empties
+  towards the junction (last 400 m in town, 1 / 1.5 km on trunk roads / motorways). Settings → "Countdown in the lane
+  box", on by default.
+- **Reroute after losing the internet** (owner's test drive 2026-10-18: started on Wi-Fi, no internet while driving,
+  missed turn - no new route, not even after switching mobile data on; only ending the route and searching again
+  helped): `MainViewModel.reroute` now runs one attempt at a time with a 20 s limit per provider (a hung request no
+  longer blocks), asks again without the GPS heading if a provider fails with it, tells the driver once ("no new route
+  yet - trying again when there is a connection", DE / EN / VI) instead of saying "recalculating" every 10 s, and logs
+  failures (`adb logcat -s LaneWise`). A network callback drops the HTTP connection pool on every network change (its
+  connections belonged to the Wi-Fi) and reroutes at once when a validated network comes back while off the route.
+  Not yet checked on a real drive.
 
 ## Video review — still open
 - [ ] Owner: check the 3D car (size, colours, behaviour in tunnels / under bridges) and the automatic theme on the phone.
@@ -739,6 +766,10 @@ Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which
       GitHub release not done.
 
 ## Next
+- **Merging lanes (owner's next task)**: cross-reference with AMAP / DOP20 the places where lanes end without a junction
+  (3 → 2, 2 → 1: merge arrows Z 297.1, lane-end tapers). Find them from OSM (`lanes` dropping between consecutive ways
+  of the same road without a junction node, `turn:lanes` with `merge_to_left` / `merge_to_right`), read AMAP at max
+  zoom, and check that LaneWise moves the driver out of the ending lane early (planner `laneCountAt`, ribbon taper).
 0. **Marking plans**: fill the three sample drafts by hand (arrows from the plan, `built_confirmed` from a dated
    photo / DOP20 - the DOP20 crop looks re-marked already), then more plans from the council papers; draw
    `stop_line:lanes` per lane in the ribbon; bake v2 spans into the offline graph.

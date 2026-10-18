@@ -810,6 +810,22 @@ private fun countdownFraction(nav: NavSnapshot): Float {
     return (nav.distanceToNextStep / start).toFloat().coerceIn(0f, 1f)
 }
 
+/**
+ * Lane box countdown: share of the way from the previous lane site (or manoeuvre) to [site] still ahead, capped like
+ * the banner's countdown so it starts moving only on the last stretch (400 m in town, 1 / 1.5 km on fast roads).
+ */
+private fun laneCountdown(nav: NavSnapshot, site: de.lanewise.lane.LaneSite): Float {
+    val dist = site.distanceAlong - nav.distanceAlong
+    val prev = nav.route.laneSites.lastOrNull { it.distanceAlong < site.distanceAlong - 1 }?.distanceAlong ?: 0.0
+    val cap = when (site.roadKind) {
+        de.lanewise.lane.RoadKind.MOTORWAY -> 1500.0
+        de.lanewise.lane.RoadKind.TRUNK -> 1000.0
+        else -> 400.0
+    }
+    val start = (site.distanceAlong - prev).coerceIn(50.0, cap)
+    return (dist / start).toFloat().coerceIn(0f, 1f)
+}
+
 @Composable
 private fun NavigationOverlay(
     vm: MainViewModel, ui: UiState, nav: NavSnapshot, settings: AppSettings, phrases: Phrases, following: Boolean,
@@ -864,7 +880,8 @@ private fun NavigationOverlay(
                         LaneBar(advice, bikeColor = nav.bikeLane.takeIf { settings.showBikeLanes }?.let { bikeColor },
                             onLaneTap = vm::overrideLane, onLongPress = vm::reportLanes, docked = true,
                             // Lanes of a junction before the banner's manoeuvre get their own distance.
-                            distanceLabel = if (passThrough) phrases.distance(distToSite) else null)
+                            distanceLabel = if (passThrough) phrases.distance(distToSite) else null,
+                            countdown = if (settings.laneBoxCountdown) laneCountdown(nav, advice.site) else null)
                     }
                 }
             }
@@ -936,8 +953,13 @@ private fun NavigationOverlay(
                 }
             }
         }
+        // Drive timer: ticks once a second on its own (fixes may pause in a tunnel).
+        val now by androidx.compose.runtime.produceState(System.currentTimeMillis(), settings.showDriveTimer) {
+            while (settings.showDriveTimer) { value = System.currentTimeMillis(); kotlinx.coroutines.delay(1000) }
+        }
         EtaBar(
             remainingText = formatDuration(nav.remainingSeconds),
+            elapsedText = if (settings.showDriveTimer && ui.navStartedAt > 0) formatElapsed((now - ui.navStartedAt) / 1000) else null,
             distanceText = phrases.distance(nav.remainingDistance),
             etaText = SimpleDateFormat("HH:mm", Locale.GERMANY).format(Date(System.currentTimeMillis() + (nav.remainingSeconds * 1000).toLong())),
             onClose = vm::stopNavigation, onOverview = onOverview,
@@ -950,6 +972,12 @@ private fun NavigationOverlay(
             modifier = Modifier.align(Alignment.BottomCenter),
         )
     }
+}
+
+/** Stopwatch text: "12:34" or "1:02:03". */
+fun formatElapsed(seconds: Long): String {
+    val s = seconds.coerceAtLeast(0)
+    return if (s >= 3600) "%d:%02d:%02d".format(s / 3600, s / 60 % 60, s % 60) else "%d:%02d".format(s / 60, s % 60)
 }
 
 fun formatDuration(seconds: Double): String {

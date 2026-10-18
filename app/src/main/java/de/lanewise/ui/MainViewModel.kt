@@ -23,6 +23,7 @@ import de.lanewise.offline.OfflineGraph
 import de.lanewise.offline.OfflineGraphBuilder
 import de.lanewise.offline.OfflineRouter
 import de.lanewise.offline.OfflineTiles
+import de.lanewise.core.net.Http
 import de.lanewise.routing.OsrmRoutingProvider
 import de.lanewise.routing.RouteRequest
 import de.lanewise.routing.RouteScorer
@@ -93,6 +94,8 @@ data class UiState(
     val laneHint: String? = null,
     /** Countdown of the lane-change hint: 1 when it appears, 0 at the last point the change can be made. */
     val laneHintCountdown: Float? = null,
+    /** Wall-clock start of the current navigation (ms), kept across re-routes: the drive timer counts from here. */
+    val navStartedAt: Long = 0L,
     /** Speed limit of the current road while not navigating (km/h, 0 = no limit, null = unknown). */
     val browseLimit: Int? = null,
     val places: List<SavedPlace> = emptyList(),
@@ -144,6 +147,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var trafficJob: Job? = null
     private var engine: NavigationEngine? = null
     private var lastReroute = 0L
+    private var rerouteJob: Job? = null
+    /** "Recalculating" was spoken for the current off-route episode (not again every 10 s while offline). */
+    private var rerouteAnnounced = false
     private var speedFetchedUntil = 0.0
     private var browseLimitJob: Job? = null
     private var browseLimitAt: Fix? = null
@@ -160,6 +166,41 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             while (isActive) { _ui.update { it.copy(online = isOnline()) }; delay(10_000) }
         }
+        watchNetwork()
+    }
+
+    /**
+     * Drive started on Wi-Fi, then no internet, then mobile data (owner's test drive 2026-10-18): the reroute never came
+     * back. On every network change the HTTP pool is dropped (its connections belonged to the Wi-Fi) and, while off the
+     * route, a reroute starts at once instead of waiting for the next fix and the 10 s throttle.
+     */
+    private fun watchNetwork() {
+        val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            private var validated: android.net.Network? = null
+            override fun onCapabilitiesChanged(network: android.net.Network, caps: NetworkCapabilities) {
+                val ok = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                    caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                if (!ok || network == validated) return
+                validated = network
+                main.post { onNetworkBack() }
+            }
+            override fun onLost(network: android.net.Network) {
+                if (network == validated) validated = null
+                main.post { Http.onNetworkChanged(); _ui.update { it.copy(online = isOnline()) } }
+            }
+        }
+        runCatching { cm.registerDefaultNetworkCallback(cb) }
+        addCloseable { runCatching { cm.unregisterNetworkCallback(cb) } }
+    }
+
+    private fun onNetworkBack() {
+        Http.onNetworkChanged()
+        _ui.update { it.copy(online = true) }
+        val st = _ui.value
+        val fix = st.fix ?: return
+        if (st.mode == Mode.NAVIGATING && !st.simulating && st.nav?.offRoute == true) reroute(fix, force = true)
     }
 
     // --- settings -------------------------------------------------------------------------------
@@ -637,7 +678,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         currentRoute = route
         engine = NavigationEngine(route, laneGuidance)
         speedFetchedUntil = 0.0
-        _ui.update { it.copy(mode = Mode.NAVIGATING, simulating = simulate, routes = listOf(route), selected = 0, journeyDriven = 0.0) }
+        _ui.update { it.copy(mode = Mode.NAVIGATING, simulating = simulate, routes = listOf(route), selected = 0, journeyDriven = 0.0,
+            navStartedAt = System.currentTimeMillis()) }
         notifText = ""
         de.lanewise.nav.NavigationService.start(ctx, "LaneWise", route.steps.firstOrNull()?.name.orEmpty(),
             Strings.of(settings.value.language).navChannel)
@@ -760,12 +802,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         laneGuidance.overrideCurrentLane(advice.site, index)
     }
 
-    private fun reroute(fix: Fix) {
+    /**
+     * New route from [fix] after leaving the route. One attempt at a time (a newer one replaces a hung one), each
+     * provider limited to [REROUTE_TIMEOUT_MS]; a provider is asked again without the GPS heading if it failed with it.
+     * If nothing answers (offline without an offline map, server down) the old route stays, the driver is told once, and
+     * the next attempt follows 10 s later or right when the network is back ([onNetworkBack]).
+     */
+    private fun reroute(fix: Fix, force: Boolean = false) {
         val now = System.currentTimeMillis()
-        if (now - lastReroute < 10_000) return
+        if (!force && (now - lastReroute < 10_000 || (rerouteJob?.isActive == true && now - lastReroute < 30_000))) return
         lastReroute = now
         val s = settings.value
-        if (s.voice) voice.speak(de.lanewise.nav.Announcement("reroute-$now", Phrases(s.language).rerouting(), 2))
+        if (s.voice && !rerouteAnnounced) voice.speak(de.lanewise.nav.Announcement("reroute-$now", Phrases(s.language).rerouting(), 2))
+        rerouteAnnounced = true
         val dest = _ui.value.destination ?: return
         // Stops still ahead: the ones whose "stop reached" point on the current route is not passed yet.
         val along = _ui.value.nav?.distanceAlong ?: 0.0
@@ -773,28 +822,50 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             .count { it.distanceAlong <= along + 30 }
         val ahead = _ui.value.stops.drop(reached)
         _ui.update { it.copy(stops = ahead) }
-        viewModelScope.launch {
+        rerouteJob?.cancel()
+        rerouteJob = viewModelScope.launch {
             val online = isOnline()
             val req = RouteRequest(fix.position, dest.position, fix.bearing?.toDouble(), alternatives = false,
                 avoidTolls = s.avoidTolls, avoidMotorways = s.avoidMotorways, via = ahead.map { it.position })
+            var route: Route? = null
             for (p in providers(s, online)) {
                 if (p.requiresNetwork && !online) continue
                 if (ahead.isNotEmpty() && !p.supportsVia) continue
-                val r = runCatching { p.route(req) }.getOrNull()?.firstOrNull()
-                    ?.let { withTrafficFromTomTom(listOf(it), s, online).first() } ?: continue
-                laneGuidance.reset()
-                // Keep the journey progress: what was driven on the old route stays driven.
-                val drivenOnOld = _ui.value.nav?.distanceAlong ?: 0.0
-                _ui.update { it.copy(journeyDriven = it.journeyDriven + drivenOnOld) }
-                currentRoute = r
-                engine = NavigationEngine(r, laneGuidance)
-                speedFetchedUntil = 0.0
-                if (r.provider != "offline" && online) fetchCorridor(r, 0.0)
-                _ui.update { it.copy(routes = listOf(r), selected = 0) }
-                break
+                route = attempt(p, req) ?: req.heading?.let { attempt(p, req.copy(heading = null)) }
+                if (route != null) break
             }
+            val r = route ?: run {
+                android.util.Log.w("LaneWise", "reroute failed (online=$online)")
+                _ui.update { it.copy(message = strings.rerouteWaiting) }
+                return@launch
+            }
+            val withTraffic = runCatching { withTrafficFromTomTom(listOf(r), s, online).first() }.getOrDefault(r)
+            if (_ui.value.mode != Mode.NAVIGATING) return@launch
+            laneGuidance.reset()
+            // Keep the journey progress: what was driven on the old route stays driven.
+            val drivenOnOld = _ui.value.nav?.distanceAlong ?: 0.0
+            _ui.update { it.copy(journeyDriven = it.journeyDriven + drivenOnOld) }
+            currentRoute = withTraffic
+            engine = NavigationEngine(withTraffic, laneGuidance)
+            rerouteAnnounced = false
+            speedFetchedUntil = 0.0
+            corridorJob?.cancel()
+            if (withTraffic.provider != "offline" && online) fetchCorridor(withTraffic, 0.0)
+            _ui.update { it.copy(routes = listOf(withTraffic), selected = 0, message = null) }
         }
     }
+
+    private suspend fun attempt(p: RoutingProvider, req: RouteRequest): Route? =
+        kotlinx.coroutines.withTimeoutOrNull(REROUTE_TIMEOUT_MS) {
+            try {
+                p.route(req).firstOrNull()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.w("LaneWise", "reroute ${p.javaClass.simpleName}: ${e.message}")
+                null
+            }
+        }
 
     // --- offline data ---------------------------------------------------------------------------
     private fun graphFile(region: String) = File(ctx.filesDir, "graph_$region.lwg")
@@ -892,6 +963,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     companion object {
         /** Demo playback speeds (× real driving time). */
         val DEMO_SPEEDS = listOf(0.25, 0.5, 1.0, 2.0, 4.0, 8.0)
+        /** Longest wait for one routing provider while off the route. */
+        const val REROUTE_TIMEOUT_MS = 20_000L
     }
 }
 

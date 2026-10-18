@@ -373,6 +373,8 @@ fun ManeuverIcon(step: RouteStep, color: Color, modifier: Modifier = Modifier) {
 fun EtaBar(
     remainingText: String, distanceText: String, etaText: String,
     onClose: () -> Unit, onOverview: () -> Unit, modifier: Modifier = Modifier,
+    /** Driving time so far (stopwatch), shown next to the remaining time; null = off. */
+    elapsedText: String? = null,
     /** Share of the journey driven (0..1): violet bar along the top of the panel with a lime marker at the car. */
     progress: Float? = null,
     /**
@@ -421,7 +423,12 @@ fun EtaBar(
     ) {
         RoundAction(RoundIcon.CLOSE, onClose)
         Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(remainingText, color = c.onChip, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(remainingText, color = c.onChip, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+                if (elapsedText != null) {
+                    Text("  ⏱ $elapsedText", color = c.onChip.copy(alpha = 0.85f), fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                }
+            }
             Text("$distanceText · $etaText", color = c.onChip.copy(alpha = 0.7f), fontSize = 15.sp)
         }
         RoundAction(RoundIcon.OVERVIEW, onOverview)
