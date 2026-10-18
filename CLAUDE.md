@@ -14,7 +14,9 @@ Read this first when resuming work in a new chat.
 > possible. Never present a guessed lane as certain; check lane-logic changes against real junctions (junction audit
 > on the aerial photos, my screenshots). For street-level checks use open imagery in this order: Mapillary (primary,
 > `MAPILLARY_TOKEN`), then Panoramax / KartaView (`tools/streetview/streetview_audit.py`); fixes go into OSM or
-> `app/src/main/assets/lane_overrides.json` with the photo as source, never imported automatically. Precedence of lane
+> `app/src/main/assets/lane_overrides.json` with the photo as source, never imported automatically. Official Hannover marking plans
+> (Neumarkierungspläne) are the most precise geometry source once confirmed built; they enter only via
+> `lane_overrides.json` (`docs/MARKING_PLANS.md`). Precedence of lane
 > data: `lane_overrides.json` > OSM `turn:lanes` > `aerial_lanes.json` > heuristics. AMAP / Petal Maps may only be used
 > as screenshot references; as a last resort, where OSM / photos / DOP20 are unclear, the lanes read from an AMAP
 > screenshot may go into `lane_overrides.json` as text (never the screenshot itself, never OSM; see `docs/DATA_SOURCES.md`). Never write my real addresses. When done, update `docs/ROADMAP.md`. My next request is:
@@ -54,6 +56,10 @@ See `docs/ARCHITECTURE.md`. Core lane logic: `app/src/main/java/de/lanewise/lane
 - Versions: AGP 8.13.2, Gradle 8.14.3, Kotlin 2.2.21, Compose BOM 2026.02.01, MapLibre 11.13.5, compileSdk 36, minSdk 26.
 
 ## Tools
+- Marking plans: `tools/marking_plans` (PyMuPDF; city Neumarkierungspläne → draft `lane_overrides.json` v2 entries,
+  `docs/MARKING_PLANS.md`). Google Maps / satellite is never used as a source, not even screenshots (ToS).
+- AMAP over adb: search, leave with the upper-left back button, zoom in by hand to the 5 m scale or closer (arrows
+  often only at 2 m / 1 m); "no arrows" only after maximum zoom.
 - Python tools: `tools/aerial_lanes` (DOP20 + U-Net, venv `.venv` with torch cu124), `tools/voice_pack`
   (OmniVoice, venv `.venv` with torch 2.8 cu128) and `tools/streetview` (Mapillary / Panoramax / KartaView photos per
   junction, standard library only); see their READMEs. GPU: RTX 3070 Ti 8 GB.

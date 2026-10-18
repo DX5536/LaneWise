@@ -117,6 +117,11 @@ data class LaneSite(
      * known (then the heuristics decide). Checked against the arrows before it is set ([Route.withConnectivity]).
      */
     val connectivity: List<IntRange?>? = null,
+    /**
+     * How far before the junction its turn pockets open (m), measured on the ground (`pocket_start_m` of a hand-checked
+     * patch, e.g. from a marking plan). Null = the road-kind default of the lane ribbon.
+     */
+    val pocketLength: Double? = null,
 ) {
     val laneCount get() = lanes.size
 
@@ -248,6 +253,22 @@ data class ChangeSpan(val from: Double, val to: Double, val perms: List<Int>) {
             val a = perms.getOrNull(off + k - 1)
             val b = perms.getOrNull(off + k)
             return (a != null && a and RIGHT == 0) || (b != null && b and LEFT == 0)
+        }
+
+        /**
+         * [top] (hand-checked spans, e.g. from a marking plan) laid over [base]: base spans are cut where a top span
+         * lies, so at every distance exactly one span applies (the list stays free of overlaps, see [Route.laneChangeAt]).
+         */
+        fun overlay(base: List<ChangeSpan>, top: List<ChangeSpan>): List<ChangeSpan> {
+            if (top.isEmpty()) return base
+            var out = base
+            for (t in top.sortedBy { it.from }) {
+                out = out.flatMap { b ->
+                    if (b.to <= t.from || b.from >= t.to) listOf(b)
+                    else listOfNotNull(b.copy(to = t.from).takeIf { it.to - it.from > 0.5 }, b.copy(from = t.to).takeIf { it.to - it.from > 0.5 })
+                } + t
+            }
+            return out.sortedBy { it.from }
         }
 
         /**

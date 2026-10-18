@@ -573,7 +573,7 @@ object LaneRibbonBuilder {
             val prevTurn = sites.lastOrNull { it.distanceAlong < s.d && s.d - it.distanceAlong < 30 && it.isManeuver && it.turn != LaneDir.STRAIGHT }
             val osm = prevTurn?.let { route.laneCountAt(it.distanceAlong + 30) } ?: route.laneCountAt(s.d)
             when {
-                next != null && next.distanceAlong - s.d < pocketLength(kind) -> {
+                next != null && next.distanceAlong - s.d < (next.pocketLength ?: pocketLength(kind)) -> {
                     s.nominal = next.laneCount; s.rightPockets = next.rightPockets(); s.leftPockets = next.leftPockets()
                 }
                 osm != null -> {

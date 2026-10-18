@@ -3,6 +3,7 @@ package de.lanewise.osm
 import de.lanewise.core.geo.LatLon
 import de.lanewise.lane.LaneDir
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -40,6 +41,19 @@ import kotlinx.serialization.json.longOrNull
  *   }}]}
  * ```
  *
+ * Version 2 (`"lanewise_overrides": 2`, `docs/MARKING_PLANS.md`) adds exact geometry, e.g. from a city marking plan,
+ * on entries with `turn:lanes`:
+ * ```
+ *     "stop_line:lanes": "8.5|2",    stop line per lane, m before the junction (way end / osm_node)
+ *     "change_spans": [{"from_stop_m": 0, "to_stop_m": 10, "change:lanes": "not_right|not_left"}],
+ *                                    solid lines over part of the approach, m before the front stop line
+ *     "pocket_start_m": 45,          where the turn pockets begin, m before the front stop line
+ *     "width:lanes": "3.25|3.00",    lane widths (stored only)
+ *     "source_plan": {"drucksache": "15-2330-2024", "anlage": 2, "blatt": 2, "date": "2024-10"},
+ *     "built_confirmed": "Mapillary 2026-05-12",   dated proof the plan is painted; required with source_plan
+ *     "draft": true                  written by tools/marking_plans, not reviewed yet: always rejected
+ * ```
+ *
  * Safety: an entry that does not validate is dropped (see [rejected]), never half-applied; a patch for a two-way way
  * without `direction` is not applied (it would land on the wrong carriageway); when OSM has changed since `osm_was` and
  * now matches neither the old value nor the patch, nobody has checked the new state, so the junction gets no lane advice
@@ -66,10 +80,38 @@ class LaneOverrides(entries: List<Entry>, val rejected: List<String> = emptyList
         val osmWas: Map<String, String> = emptyMap(),
         val source: String,
         val position: LatLon? = null,
-    )
+        // Version 2 (exact geometry, docs/MARKING_PLANS.md).
+        /** Stop line per lane (left → right), m before the junction. */
+        val stopLines: List<Double>? = null,
+        /** Solid-line stretches measured back from the front stop line. */
+        val changeSpans: List<Span> = emptyList(),
+        /** Where the turn pockets begin, m before the front stop line. */
+        val pocketStart: Double? = null,
+        val widths: List<Double>? = null,
+        /** The marking plan this entry was read from (Drucksache, Anlage, Blatt, date), as text. */
+        val sourcePlan: String? = null,
+        /** Dated evidence that [sourcePlan] is built (painted). */
+        val builtConfirmed: String? = null,
+        val draft: Boolean = false,
+        /** File version the entry came from. */
+        val version: Int = 1,
+    ) {
+        /** Metres before the junction of the stop line closest to it (0 if not given). */
+        val frontStop: Double get() = stopLines?.minOrNull() ?: 0.0
+    }
 
-    /** A patched junction on the route: [lanes] in `turn:lanes` notation, or null = lanes unknown there. */
-    data class At(val distanceAlong: Double, val lanes: String?, val id: String)
+    /** `change:lanes` [value] from [fromStop] to [toStop] m before the front stop line ([toStop] > [fromStop]). */
+    data class Span(val fromStop: Double, val toStop: Double, val value: String)
+
+    /**
+     * A patched junction on the route: [lanes] in `turn:lanes` notation, or null = lanes unknown there. Version-2
+     * geometry: [changeSpans] at route distances, [pocketLength] = how far before the junction its pockets open.
+     */
+    data class At(
+        val distanceAlong: Double, val lanes: String?, val id: String,
+        val changeSpans: List<de.lanewise.lane.ChangeSpan> = emptyList(),
+        val pocketLength: Double? = null,
+    )
 
     /** A way of the corridor data, for matching node patches. [geom] is aligned with [nodes]. */
     data class WayRef(val id: Long, val nodes: List<Long>, val geom: List<LatLon>)
@@ -80,6 +122,21 @@ class LaneOverrides(entries: List<Entry>, val rejected: List<String> = emptyList
 
     val size = entries.size
     val entries: List<Entry> = entries
+    private val byId: Map<String, Entry> = entries.associateBy { it.id }
+
+    /**
+     * [at] with the version-2 geometry of its entry at the route: change spans and pocket start, counted back from the
+     * front stop line before the junction at [At.distanceAlong]. Unchanged for "lanes unknown" (nothing is planned there).
+     */
+    fun withGeometry(at: At): At {
+        val e = byId[at.id] ?: return at
+        if (at.lanes == null) return at
+        val stop = at.distanceAlong - e.frontStop
+        val spans = e.changeSpans.mapNotNull { s ->
+            de.lanewise.lane.ChangeSpan.parse(s.value)?.let { de.lanewise.lane.ChangeSpan((stop - s.toStop).coerceAtLeast(0.0), stop - s.fromStop, it) }
+        }
+        return at.copy(changeSpans = spans, pocketLength = e.pocketStart?.let { it + e.frontStop })
+    }
 
     /**
      * OSM tags of way [wayId] with its patches applied (explicit `:forward` / `:backward` keys, so they win over the
@@ -143,7 +200,7 @@ class LaneOverrides(entries: List<Entry>, val rejected: List<String> = emptyList
             val pos = ways.firstNotNullOfOrNull { w -> w.nodes.indexOf(e.nodeId).takeIf { it >= 0 }?.let { w.geom.getOrNull(it) } }
                 ?: continue
             val d = project(pos) ?: continue
-            out += At(d, if (e.lanesUnknown) null else e.turnLanes, e.id)
+            out += withGeometry(At(d, if (e.lanesUnknown) null else e.turnLanes, e.id))
         }
         return out.sortedBy { it.distanceAlong }
     }
@@ -184,10 +241,15 @@ class LaneOverrides(entries: List<Entry>, val rejected: List<String> = emptyList
             if (e.connectivity != null) {
                 if (e.nodeId == null || e.fromWay == null || e.toWay == null) return "connectivity needs osm_node, from_way and to_way"
                 if (e.turnLanes != null || e.lanesUnknown || e.lanes != null || e.changeLanes != null || e.direction != null ||
-                    e.osmWas.isNotEmpty()) return "a connectivity patch takes nothing else (patch turn:lanes in its own entry)"
+                    e.osmWas.isNotEmpty() || e.stopLines != null || e.changeSpans.isNotEmpty() || e.pocketStart != null || e.widths != null) return "a connectivity patch takes nothing else (patch turn:lanes in its own entry)"
                 if (de.lanewise.lane.LaneConnectivity.parse(e.connectivity) == null) return "unreadable connectivity '${e.connectivity}'"
                 return null
             }
+            if (e.draft) return "draft (not reviewed yet)"
+            val v2 = e.stopLines != null || e.changeSpans.isNotEmpty() || e.pocketStart != null || e.widths != null ||
+                e.sourcePlan != null || e.builtConfirmed != null
+            if (v2 && e.version < 2) return "stop_line:lanes / change_spans / pocket_start_m / width:lanes / source_plan need lanewise_overrides 2"
+            if (e.sourcePlan != null && e.builtConfirmed.isNullOrBlank()) return "source_plan without built_confirmed (a plan is no proof the road looks like it)"
             if (e.toWay != null) return "to_way is only for connectivity patches"
             if (e.nodeId != null && (e.lanes != null || e.changeLanes != null || e.direction != null || e.osmWas.isNotEmpty()))
                 return "a junction (osm_node) patch takes only turn:lanes or lanes_unknown"
@@ -210,15 +272,43 @@ class LaneOverrides(entries: List<Entry>, val rejected: List<String> = emptyList
                 val count = e.lanes ?: n
                 if (count != null && parts.size != count) return "change:lanes has ${parts.size} lanes, expected $count"
             }
+            if ((e.stopLines != null || e.changeSpans.isNotEmpty() || e.pocketStart != null || e.widths != null) && e.turnLanes == null)
+                return "stop lines, change spans, pocket start and widths need turn:lanes (the lanes they belong to)"
+            val count = e.lanes ?: n
+            e.stopLines?.let { s ->
+                if (s.size != count) return "stop_line:lanes has ${s.size} lanes, expected $count"
+                if (s.any { it < 0 || it > MAX_STOP }) return "stop_line:lanes outside 0…$MAX_STOP m"
+            }
+            e.widths?.let { w ->
+                if (w.size != count) return "width:lanes has ${w.size} lanes, expected $count"
+                if (w.any { it < 2.0 || it > 6.0 }) return "width:lanes outside 2…6 m"
+            }
+            for (s in e.changeSpans) {
+                if (s.fromStop < 0 || s.toStop <= s.fromStop || s.toStop > MAX_SPAN) return "change span ${s.fromStop}…${s.toStop} m is not 0 ≤ from < to ≤ $MAX_SPAN"
+                val parts = s.value.split('|')
+                if (parts.any { it.trim() !in CHANGE_TOKENS }) return "unknown change:lanes value in change_spans"
+                if (parts.size != count) return "change span has ${parts.size} lanes, expected $count"
+            }
+            e.changeSpans.sortedBy { it.fromStop }.zipWithNext().firstOrNull { (a, b) -> b.fromStop < a.toStop }
+                ?.let { return "change spans overlap" }
+            e.pocketStart?.let { p ->
+                if (p <= 0 || p > MAX_SPAN) return "pocket_start_m outside 0…$MAX_SPAN m"
+                if (e.stopLines != null && e.stopLines.max() - e.frontStop >= p) return "a stop line lies before pocket_start_m"
+            }
             return null
         }
 
         const val MAX_LANES = 8
+        /** Largest stop-line distance before the junction (m). */
+        const val MAX_STOP = 60.0
+        /** Longest change span / pocket counted from the stop line (m). */
+        const val MAX_SPAN = 1000.0
 
         /** Parses the GeoJSON file; invalid or duplicate entries end up in [rejected] with the reason. */
         fun parse(json: String): LaneOverrides {
             val root = Json.parseToJsonElement(json).jsonObject
-            require(root["lanewise_overrides"]?.let { (it as? JsonPrimitive)?.intOrNull } == 1) { "unsupported lane_overrides version" }
+            val version = root["lanewise_overrides"]?.let { (it as? JsonPrimitive)?.intOrNull }
+            require(version == 1 || version == 2) { "unsupported lane_overrides version" }
             val ok = ArrayList<Entry>()
             val rejected = ArrayList<String>()
             val keys = HashSet<String>()
@@ -246,6 +336,22 @@ class LaneOverrides(entries: List<Entry>, val rejected: List<String> = emptyList
                     osmWas = (p["osm_was"] as? JsonObject)?.mapNotNull { (k, v) -> (v as? JsonPrimitive)?.contentOrNull?.let { k to it } }?.toMap().orEmpty(),
                     source = s("source").orEmpty(),
                     position = pos,
+                    // Unreadable numbers become -1 so the checks below reject the entry instead of skipping the value.
+                    stopLines = s("stop_line:lanes")?.let { v -> v.split('|').map { it.trim().toDoubleOrNull() ?: -1.0 } },
+                    changeSpans = (p["change_spans"] as? JsonArray).orEmpty().map { el ->
+                        val o = el as? JsonObject
+                        fun d(k: String) = (o?.get(k) as? JsonPrimitive)?.contentOrNull?.toDoubleOrNull() ?: -1.0
+                        Span(d("from_stop_m"), d("to_stop_m"), (o?.get("change:lanes") as? JsonPrimitive)?.contentOrNull.orEmpty())
+                    },
+                    pocketStart = (p["pocket_start_m"] as? JsonPrimitive)?.let { it.contentOrNull?.toDoubleOrNull() ?: -1.0 },
+                    widths = s("width:lanes")?.let { v -> v.split('|').map { it.trim().toDoubleOrNull() ?: -1.0 } },
+                    sourcePlan = p["source_plan"]?.let { sp ->
+                        (sp as? JsonObject)?.entries?.joinToString(", ") { (k, v) -> "$k ${(v as? JsonPrimitive)?.contentOrNull ?: v}" }
+                            ?: (sp as? JsonPrimitive)?.contentOrNull
+                    },
+                    builtConfirmed = s("built_confirmed"),
+                    draft = (p["draft"] as? JsonPrimitive)?.booleanOrNull == true,
+                    version = version!!,
                 )
                 val why = problem(e)
                 val key = when {

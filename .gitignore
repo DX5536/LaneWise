@@ -62,3 +62,5 @@ tools/voice_pack/work/
 
 # Street-level audit output (photo links, reports)
 tools/streetview/work/
+tools/marking_plans/work/
+tools/marking_plans/.venv/

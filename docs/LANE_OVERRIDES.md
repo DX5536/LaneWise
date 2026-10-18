@@ -57,6 +57,12 @@ copied into OSM unchanged. The point geometry only helps to find the spot; match
 | `source` | evidence (required): DOP20 junction audit, own drive, photo |
 | `checked`, `note` | free text |
 
+### Version 2 (exact geometry, e.g. from a city marking plan)
+With `"lanewise_overrides": 2` an entry with `turn:lanes` may also carry `stop_line:lanes` (m before the junction, per
+lane), `change_spans` (`[{"from_stop_m", "to_stop_m", "change:lanes"}]`, measured back from the front stop line),
+`pocket_start_m`, `width:lanes`, and `source_plan` + `built_confirmed` (a plan without dated proof that it is built is
+rejected). `"draft": true` (written by `tools/marking_plans`) is always rejected. Details: `docs/MARKING_PLANS.md`.
+
 ## Safety rules
 - An entry that does not validate (no source, typo in an arrow, lane counts that do not match, both or neither id,
   `lanes_unknown` together with `turn:lanes`, a second patch for the same way + direction) is dropped as a whole.

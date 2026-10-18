@@ -678,6 +678,29 @@ Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which
       (needs a key and its licence terms); evaluate as a lane *reference* like `ProviderCompareLiveTest`, not as data
       to copy. Earlier finding: TomTom's lanes were simpler than OSM's on the test route.
 
+## Done (v0.4.4, part 7, 2026-10-18) — marking plans, override schema v2, AMAP rechecks
+- **Override schema v2** (`osm/LaneOverrides.kt`, `docs/MARKING_PLANS.md` section 5): `stop_line:lanes`,
+  `change_spans` (solid lines over part of the approach, measured from the stop line), `pocket_start_m`, `width:lanes`,
+  `source_plan` + `built_confirmed` (a plan without dated proof is rejected), `draft` (always rejected). Spans replace
+  OSM's change spans where they lie (`ChangeSpan.overlay`), the pocket start becomes `LaneSite.pocketLength` for the
+  ribbon. 3 new tests (121 pass, 7 skipped).
+- **`tools/marking_plans/`** (README there): inspect / extract / georef / draft / review for city Neumarkierungspläne.
+  Sample 15-2330-2024 Anlage 2 (Hannoversche Straße): legend read, scale 1:254 from the dimension labels, automatic
+  georeference from 139 building corners (RMS 0.44 m, checked on DOP20), 3 draft entries with every judgement left as
+  `CHECK` (arrow meaning, direction, built or not). Nothing shipped from it yet.
+- Google Maps / satellite (also via third-party tile viewers): not used as a source, not even screenshots (ToS).
+- **AMAP rechecks** at maximum zoom (arrows often appear only at the 5 m / 2 m scale; a street label can hide one),
+  `tools/streetview/work/amap_check.json`:
+  - match: Brühlstraße NW-bound at Königsworther Platz `left|through|through|through|right`; Brühlstraße SE-bound at
+    Otto-Brenner-Straße `left|left|through|through|through;right`; Hildesheimer Straße N-bound at Willmerstraße again.
+  - differs (check DOP20 / Mapillary before any patch): Hildesheimer Straße S-bound at Willmerstraße (AMAP 4 lanes +
+    a slip lane, OSM 5); Brühlstraße NW-bound at Otto-Brenner-Straße (AMAP 3 lanes `?|through|through;right`, OSM 4);
+    Erich-Panitz-Straße S-bound, Laatzen (AMAP 2 lanes without arrows, OSM 4); Thaerplatz, Celle (AMAP
+    `through|slight_right`, OSM `left|left|through;right|none` with lanes=2 - arm identity not yet sure).
+  - AMAP without arrows even at maximum zoom: Willmerstraße W-bound (only a centre line), Hannoversche Heerstraße
+    NE-bound at Mondhagen (Celle).
+  - Still open: Fuhrberger Straße (Celle), then the remaining ~50 junctions of `amap_plan.json`.
+
 ## Video review — still open
 - [ ] Owner: check the 3D car (size, colours, behaviour in tunnels / under bridges) and the automatic theme on the phone.
 - [ ] Owner: check the car overlay (size vs. road at different zooms, tilt changes, pan away and recenter) and the
@@ -716,6 +739,9 @@ Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which
       GitHub release not done.
 
 ## Next
+0. **Marking plans**: fill the three sample drafts by hand (arrows from the plan, `built_confirmed` from a dated
+   photo / DOP20 - the DOP20 crop looks re-marked already), then more plans from the council papers; draw
+   `stop_line:lanes` per lane in the ribbon; bake v2 spans into the offline graph.
 1. **Solid lane lines from aerial imagery** (owner's request 2026-10-14): draw solid dividers (and plan with them)
    where OSM has no `change:lanes`, using the DOP20 photos as reference — the aerial pipeline already measures
    solid vs dashed tracks per OSM way (`tools/aerial_lanes`); export them as `change:lanes`-like spans in

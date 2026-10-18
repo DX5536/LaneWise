@@ -203,7 +203,7 @@ data class Route(
                 continue
             }
             sites += de.lanewise.lane.LaneSite(d, masks, null, turn, nearest?.isManeuver ?: (turn != de.lanewise.lane.LaneDir.STRAIGHT),
-                nearest?.roadKind ?: roadSpanAt(d - 5)?.kind ?: de.lanewise.lane.RoadKind.URBAN)
+                nearest?.roadKind ?: roadSpanAt(d - 5)?.kind ?: de.lanewise.lane.RoadKind.URBAN, pocketLength = o.pocketLength)
         }
         return copy(laneSites = sites.sortedBy { it.distanceAlong }, unknownLanesAt = unknown.sorted())
     }

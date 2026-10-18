@@ -124,7 +124,10 @@ class SpeedLimitProvider {
             OsmConnectivity.onRoute(elements.mapNotNull(::connectivityRelation), routeNodes, wayRefs, onLine, override = false)
         val patched = overridesOnRoute(line, fromDist, toDist, ways) + ov.junctionsOnRoute(routeNodes,
             ways.map { LaneOverrides.WayRef(it.id, it.nodes, it.geom) }, onLine)
-        CorridorData(m.limits, matchFeatures(line, fromDist, toDist, nodes), m.bikes, m.lanes, m.changes,
+        // Hand-checked solid-line spans (version-2 patches, e.g. from a marking plan) replace OSM's where they lie.
+        val changes = de.lanewise.lane.ChangeSpan.overlay(m.changes,
+            patched.flatMap { it.changeSpans }.filter { it.to > fromDist && it.from < toDist })
+        CorridorData(m.limits, matchFeatures(line, fromDist, toDist, nodes), m.bikes, m.lanes, changes,
             sideRoads(line, fromDist, toDist, ways.map { it.geom to it.tags }), turnLanesOnRoute(line, fromDist, toDist, ways),
             laneAccess = laneAccessOnRoute(line, fromDist, toDist, ways),
             laneOverrides = patched.sortedBy { it.distanceAlong }, connectivity = connectivity.sortedBy { it.distanceAlong })
@@ -201,7 +204,7 @@ class SpeedLimitProvider {
             val dir = if (forward) "forward" else "backward"
             w.tags["${LaneOverrides.UNKNOWN_MARK}:$dir"]?.let { return@mapNotNull LaneOverrides.At(end.distanceAlong, null, it) }
             val id = w.tags["${LaneOverrides.MARK}:$dir"] ?: return@mapNotNull null
-            w.tags["turn:lanes:$dir"]?.let { LaneOverrides.At(end.distanceAlong, it, id) }
+            w.tags["turn:lanes:$dir"]?.let { overrides.withGeometry(LaneOverrides.At(end.distanceAlong, it, id)) }
         }
 
     /** Marks the ways that share a segment with the route's OSM nodes (either direction). */

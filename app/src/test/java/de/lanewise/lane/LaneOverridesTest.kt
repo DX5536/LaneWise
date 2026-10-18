@@ -251,4 +251,52 @@ class LaneOverridesTest {
         assertEquals(2, OsmTags.lanesInDirection(t, forward = true, oneway = true))
         assertEquals(celler.id, t["${LaneOverrides.MARK}:forward"])
     }
+
+    private fun file2(vararg props: String) = file(*props).replace("\"lanewise_overrides\":1", "\"lanewise_overrides\":2")
+
+    @Test
+    fun version2GeometryIsValidatedAndPlacedAtTheStopLine() {
+        val ok = """"id":"plan","osm_way":1,"direction":"forward","turn:lanes":"through|left","stop_line:lanes":"8.5|2",""" +
+            """"change_spans":[{"from_stop_m":0,"to_stop_m":10,"change:lanes":"not_right|not_left"}],"pocket_start_m":45,""" +
+            """"width:lanes":"3.25|3.00","source":"plan + photo","source_plan":{"drucksache":"15-2330-2024","anlage":2},""" +
+            """"built_confirmed":"Mapillary 2026-05-12""""
+        val o = LaneOverrides.parse(file2(ok,
+            // rejected:
+            """"id":"draft","osm_way":2,"turn:lanes":"left|through","source":"x","draft":true""",
+            """"id":"unbuilt","osm_way":3,"turn:lanes":"left|through","source":"plan","source_plan":"DS 1"""",
+            """"id":"stops","osm_way":4,"turn:lanes":"left|through","stop_line:lanes":"2","source":"x"""",
+            """"id":"far","osm_way":5,"turn:lanes":"left|through","stop_line:lanes":"2|90","source":"x"""",
+            """"id":"span","osm_way":6,"turn:lanes":"left|through","change_spans":[{"from_stop_m":10,"to_stop_m":5,"change:lanes":"no|no"}],"source":"x"""",
+            """"id":"overlap","osm_way":7,"turn:lanes":"left|through","change_spans":[{"from_stop_m":0,"to_stop_m":20,"change:lanes":"no|no"},{"from_stop_m":10,"to_stop_m":30,"change:lanes":"no|no"}],"source":"x"""",
+            """"id":"nolanes","osm_way":8,"lanes":2,"pocket_start_m":30,"source":"x"""",
+            """"id":"width","osm_way":9,"turn:lanes":"left|through","width:lanes":"3|abc","source":"x"""",
+            """"id":"pocket","osm_way":10,"turn:lanes":"left|through","stop_line:lanes":"2|40","pocket_start_m":30,"source":"x"""",
+        ))
+        assertEquals(listOf("plan"), o.entries.map { it.id })
+        assertEquals(9, o.rejected.size)
+        assertTrue(o.rejected.any { it.startsWith("unbuilt:") && "built_confirmed" in it })
+        // Junction (way end) at 500 m: front stop line 2 m before it, the solid line 10 m behind that, pockets open 45 m behind it.
+        val at = o.withGeometry(LaneOverrides.At(500.0, "through|left", "plan"))
+        assertEquals(listOf(ChangeSpan(488.0, 498.0, listOf(ChangeSpan.LEFT, ChangeSpan.RIGHT))), at.changeSpans)
+        assertEquals(47.0, at.pocketLength!!, 1e-9)
+        // Lanes unknown: no geometry.
+        assertTrue(o.withGeometry(LaneOverrides.At(500.0, null, "plan")).changeSpans.isEmpty())
+    }
+
+    @Test
+    fun version2KeysNeedVersion2() {
+        val o = LaneOverrides.parse(file(""""id":"v1","osm_way":1,"turn:lanes":"left|through","stop_line:lanes":"2|2","source":"x""""))
+        assertTrue(o.entries.isEmpty())
+        assertTrue(o.rejected.single().contains("lanewise_overrides 2"))
+    }
+
+    @Test
+    fun overlayCutsTheBaseSpans() {
+        val base = listOf(ChangeSpan(0.0, 100.0, listOf(ChangeSpan.RIGHT, ChangeSpan.LEFT)), ChangeSpan(100.0, 200.0, listOf(0, 0)))
+        val top = ChangeSpan(80.0, 120.0, listOf(ChangeSpan.LEFT or ChangeSpan.RIGHT, 0))
+        val out = ChangeSpan.overlay(base, listOf(top))
+        assertEquals(listOf(0.0 to 80.0, 80.0 to 120.0, 120.0 to 200.0), out.map { it.from to it.to })
+        assertSame(top, out[1])
+        assertEquals(base, ChangeSpan.overlay(base, emptyList()))
+    }
 }
