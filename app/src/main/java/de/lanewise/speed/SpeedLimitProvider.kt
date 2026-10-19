@@ -283,7 +283,8 @@ class SpeedLimitProvider {
         var limStart = fromDist; var limVal: Int? = Int.MIN_VALUE   // sentinel: unknown
         var bikeStart = fromDist; var bikeVal: Boolean? = null       // null = no bike lane
         val laneSpans = ArrayList<LaneCountSpan>()
-        var laneStart = fromDist; var laneVal: Int? = null
+        var laneStart = fromDist; var laneVal: Int? = null; var laneEnded = 0
+        var laneWay: OsmWay? = null; var laneFwd = true
         val changeSpans = ArrayList<ChangeSpan>()
         var changeStart = fromDist; var changeVal: List<Int>? = null
 
@@ -297,6 +298,7 @@ class SpeedLimitProvider {
             var bikeDist = 18.0
             var lanes: Int? = null
             var lanesDist = 18.0
+            var lanesWay: OsmWay? = null; var lanesFwd = true
             var change: List<Int>? = null
             // Ways the route really drives on (shared OSM nodes) win over anything else in reach - a bridge above,
             // a road below or a parallel service road.
@@ -317,16 +319,23 @@ class SpeedLimitProvider {
                 if (v != OsmTags.UNKNOWN && off < limitDist) { limitDist = off; limit = if (v == OsmTags.NO_LIMIT) null else v }
                 if (off < bikeDist) { bikeDist = off; bike = OsmTags.bikeLaneRight(w.tags, forward, w.oneway) }
                 val n = OsmTags.lanesInDirection(w.tags, forward, w.oneway)
-                if (n != null && off < lanesDist) { lanesDist = off; lanes = n; change = OsmTags.changeLanes(w.tags, forward, w.oneway) }
+                if (n != null && off < lanesDist) {
+                    lanesDist = off; lanes = n; change = OsmTags.changeLanes(w.tags, forward, w.oneway); lanesWay = w; lanesFwd = forward
+                }
             }
             if (limit != limVal) {
                 if (limVal != Int.MIN_VALUE) limits += SpeedLimitSpan(limStart, d, limVal)
                 limStart = d; limVal = limit
             }
             if (lanes != laneVal) {
-                laneVal?.let { laneSpans += LaneCountSpan(laneStart, d, it) }
+                laneVal?.let { laneSpans += LaneCountSpan(laneStart, d, it, laneEnded) }
+                // Fewer lanes from here: the way before says by `merge_to_left` whether the right lanes are the ones ending.
+                val prevWay = laneWay; val before = laneVal; val after = lanes
+                laneEnded = if (prevWay != null && before != null && after != null && after < before)
+                    OsmTags.endedOnRight(prevWay.tags, laneFwd, prevWay.oneway, before - after) else 0
                 laneStart = d; laneVal = lanes
             }
+            if (lanesWay != null) { laneWay = lanesWay; laneFwd = lanesFwd }
             if (change != changeVal) {
                 changeVal?.let { changeSpans += ChangeSpan(changeStart, d, it) }
                 changeStart = d; changeVal = change
@@ -339,7 +348,7 @@ class SpeedLimitProvider {
         }
         if (limVal != Int.MIN_VALUE) limits += SpeedLimitSpan(limStart, toDist, limVal)
         bikeVal?.let { bikes += BikeLaneSpan(bikeStart, toDist, it) }
-        laneVal?.let { laneSpans += LaneCountSpan(laneStart, toDist, it) }
+        laneVal?.let { laneSpans += LaneCountSpan(laneStart, toDist, it, laneEnded) }
         changeVal?.let { changeSpans += ChangeSpan(changeStart, toDist, it) }
         return Matched(limits, bikes, laneSpans, changeSpans)
     }

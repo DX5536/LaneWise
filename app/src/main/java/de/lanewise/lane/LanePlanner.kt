@@ -126,7 +126,7 @@ class LanePlanner(private val config: Config = Config()) {
                 allowed = allowed[k],
                 optimal = optimalSets[k],
                 changeFromPrevious = change,
-                entryLateral = if (k > 0 && horizon[k - 1].isManeuver) entry else null,
+                entryLateral = if (k > 0 && (horizon[k - 1].isManeuver || site.endedRight > 0)) entry else null,
             )
         }
     }
@@ -149,7 +149,9 @@ class LanePlanner(private val config: Config = Config()) {
                 else -> lats.minBy { abs(it - prev.lateral(i)) }
             }
         }
-        if (!prev.isManeuver || prev.turn == LaneDir.STRAIGHT) return prev.lateral(i)
+        // Lanes that ended on the right edge on the way (no junction) shift the frame: lane x is then lane x - n there.
+        val shift = next.endedRight
+        if (!prev.isManeuver || prev.turn == LaneDir.STRAIGHT) return prev.lateral(i) - shift
         val core = next.laneCount - next.leftPockets() - next.rightPockets()
         return when {
             prev.turn and LaneDir.ANY_LEFT != 0 -> {
@@ -158,9 +160,10 @@ class LanePlanner(private val config: Config = Config()) {
             }
             prev.turn and LaneDir.ANY_RIGHT != 0 -> {
                 val rank = (i + 1 until prev.laneCount).count { prevAllowed[it] }
-                next.lateral(next.laneCount - 1 - next.rightPockets() - rank.coerceAtMost(core - 1))
+                // Counted from the right edge right after the turn: the lanes that end on the way are still there.
+                next.lateral(next.laneCount - 1 - next.rightPockets() - rank.coerceAtMost(core - 1)) - shift
             }
-            else -> prev.lateral(i)
+            else -> prev.lateral(i) - shift
         }
     }
 
@@ -224,6 +227,9 @@ class LanePlanner(private val config: Config = Config()) {
      * not a lane change — you just follow the road into your lane. Unknown [gapLanes] counts every crossing.
      */
     fun effectiveChanges(site: LaneSite, from: Int, to: Int, gapLanes: Int?): Int {
+        // A lane that ended on the way ([LaneSite.endedRight], lateral below 0) must be left: each lane out of it is a
+        // real lane change, not a lane opening (the merge is forced, and the planner should avoid needing it).
+        if (site.endedRight > 0 && from < 0) return -from + effectiveChanges(site, 0, to, gapLanes)
         if (from == to) return 0
         if (gapLanes == null || gapLanes >= site.laneCount) return abs(to - from)
         // Lanes that existed throughout: the rightmost [gapLanes] through lanes (right pockets open later).

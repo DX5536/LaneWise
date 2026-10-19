@@ -766,8 +766,12 @@ object LaneRibbonBuilder {
         // to the car: anchored at the car they would slide ahead of it and the strip would stay in the old lane until
         // the junction. A lane that opens on the way is entered as it opens (the strip is clamped to the drawn road).
         var prevD = min(carDistance, state.assumedSince ?: carDistance)
-        keys += min(carDistance - behind, prevD) to startLat
-        var cur = startLat
+        // Before a lane that ends on the right (no junction) the road still has it: lateral x of the next site's frame is
+        // x + endedRight there (the strip is drawn on the road as it is).
+        val first = plan.first().site
+        val startShift = if (first.endedRight > 0 && (first.endedRightAt ?: 0.0) > prevD) first.endedRight else 0
+        keys += min(carDistance - behind, prevD) to startLat + startShift
+        var cur = startLat + startShift
         // Keep right after a motorway junction: glide from the lane the junction left the car in to the right lane.
         val krFrom = state.keepRightFrom
         val krLat = state.keepRightFromLateral
@@ -780,9 +784,33 @@ object LaneRibbonBuilder {
             prevD = max(prevD, end)
         }
         val guidance = LaneGuidance()
-        for (a in plan) {
+        var prevManeuver = false
+        for ((k, a) in plan.withIndex()) {
+            val endsAt = a.site.endedRightAt?.takeIf { a.site.endedRight > 0 && it > prevD }
+            val shift = if (endsAt != null) a.site.endedRight.toDouble() else 0.0
             // Through a turn the car goes straight into the chosen lane of the new road.
-            a.entryLateral?.let { e -> keys += prevD + 3 to e.toDouble(); cur = e.toDouble() }
+            if (k > 0 && prevManeuver) a.entryLateral?.let { e -> keys += prevD + 3 to e + shift; cur = e + shift }
+            prevManeuver = a.site.isManeuver
+            if (endsAt != null) {
+                // Lanes end on the right before this site: the change (out of an ending lane, too) is made before they
+                // end, in the frame of the road there; then the frame follows the road down to its new lane count.
+                val target = a.site.lateral(a.recommended).toDouble()
+                val pre = target + shift
+                if (pre != cur) {
+                    val changes = abs(pre - cur)
+                    val lead = guidance.leadDistance(a.site.roadKind, changes.roundToInt().coerceAtLeast(1))
+                    val end = max(prevD + 6, endsAt - 15)
+                    val start = max(prevD + 5, end - max(lead, 40.0 * changes))
+                    keys += start to cur
+                    keys += end to pre
+                }
+                keys += max(prevD + 7, endsAt - 15) to pre
+                keys += endsAt + 15 to target
+                keys += a.site.distanceAlong to target
+                cur = target
+                prevD = a.site.distanceAlong
+                continue
+            }
             val target = a.site.lateral(a.recommended).toDouble()
             // A lane entered for free because the road widens (no lane change in the plan): the strip moves into it
             // where the road widens, not in the lead distance — otherwise it showed the car in a lane it never was in and

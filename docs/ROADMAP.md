@@ -712,7 +712,25 @@ Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which
     (AMAP draws `left`/`right` where OSM has `sharp_left`/`sharp_right`; at 37 S the 5th OSM lane is the slip road)
     except junction 52 N-bound (Büttnerstraße): AMAP `left|through|through|through|right` (5 lanes), OSM 4 with
     `through;sharp_right` - check DOP20. AMAP draws 3 lanes north of that crossing, matching its 3 through lanes.
-    Still open: junctions 23 - 36, 38 - 44, 46 - 48, 50, 54 - 64 (prompt: `CLAUDE.md`, "AMAP survey").
+    Round 4 (2026-10-18/19, the rest of the plan; all 64 junctions now have a reading, 90 rows):
+    - match / equivalent: 24, 25, 26, 27, 30, 31 (both arms), 32 (3 arms), 33 (both), 35 (only the right-lane arrow
+      shown), 36 SE, 38 (both), 39, 42, 43, 47 (3 arms), 54 (no junction; same lanes as 55), 55 (both; SE right lane
+      = slip lane), 56 (right turn via a slip road), 57, 59, 61, 63 (skewed: AMAP `slight_left` = OSM `left`), 64.
+    - differs (check DOP20 / Mapillary before any patch): 60 Bothfelder Straße NW (AMAP 3 lanes
+      `through|through|through;right`, OSM 4 with a left lane); 58 Hannoversche Straße NE, Lahe (AMAP
+      `left|left|through`, OSM 4 `left|through|through|through;right`); 46 Berliner Allee W at Lister Meile (AMAP
+      `left|through|through`, OSM `left|left|through|right`); 36 Hamburger Allee NW (AMAP's 5th arrow
+      `through;right`, OSM `right`).
+    - no arrows at max zoom: 28 Friedrichswall E (count = OSM 5), 29 Hans-Böckler-Allee E at Pferdeturm, 44 Am
+      Pferdeturm W (count = OSM 4), 40 / 41 B 6 Gleidingen (3 + slip lane = OSM 4); with fewer lanes than OSM: 48
+      Karl-Wiechert-Allee SE at Nobelring (AMAP 2, OSM 4), 50 Karl-Wiechert-Allee W (3 vs 4), 62 Bothfelder Straße E
+      (3 vs 4).
+    - no junction in AMAP: 23 Flughafenstraße / Petzelstraße, 34 inner segment of Königsworther Platz.
+    Lane-count disagreements cluster on Karl-Wiechert-Allee (18, 45, 48, 50) and Bothfelder Straße (60, 62): check
+    them on DOP20 first. Nothing was written to `lane_overrides.json`.
+  - **Skill `phoneapp-survey`** (`.claude/skills/phoneapp-survey/`, helpers `tools/phoneapp_survey/`: `shot.sh`,
+    `zoom_in.sh`, `zoom_out.sh`, `pan.sh`, `goto.sh`, `record.py`; screenshots only in the git-ignored `work/`), so
+    the next survey does not rebuild the adb helpers. They send touch input only (`adb shell input`).
 - **Drive timer** (owner's request 2026-10-18): stopwatch of the time driven since navigation started, next to the
   remaining time in the bottom bar (kept across re-routes; Settings → Lane assist → "Driving time stopwatch", on by
   default).

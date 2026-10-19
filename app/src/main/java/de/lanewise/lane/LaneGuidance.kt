@@ -199,8 +199,12 @@ class LaneGuidance(private val planner: LanePlanner = LanePlanner()) {
                 val gap = a.site.distanceAlong - prevDist
                 val lead = leadDistance(a.site.roadKind, abs(a.changeFromPrevious))
                 val target = a.site.lateral(a.recommended)
+                // The car's lane ends on the way (right edge, no junction): the change is due before it ends, not
+                // before the junction.
+                val endsAt = a.site.endedRightAt?.takeIf { a.site.endedRight > 0 && fromLat != null && fromLat < 0 && it > prevDist + 20 }
+                val due = min(a.site.distanceAlong, endsAt ?: a.site.distanceAlong) - 10.0
                 // Change where the line is dashed: the last legal stretch before the site (solid lines from OSM).
-                val windows = legalWindows(spans, target - a.changeFromPrevious, target, prevDist + 10.0, a.site.distanceAlong - 10.0)
+                val windows = legalWindows(spans, target - a.changeFromPrevious, target, prevDist + 10.0, due)
                 // In town (free lane choice, § 7 (3) StVO): get into the lane for the next turn early - right after the
                 // previous junction, at most EARLY_MAX before the turn - not in the last 150 m (owner: "keeps me in the
                 // left straight lane although the next turn in 500 m is right"). Only across lanes that already exist
@@ -211,7 +215,7 @@ class LaneGuidance(private val planner: LanePlanner = LanePlanner()) {
                     val n = laneCountAt?.invoke(earliest)
                     // Lanes there: the through lanes 0 … n-1 in lateral coordinates (pockets open outside them).
                     val reach = if (n == null) target else target.coerceIn(min(0, from), max(n - 1, from))
-                    val w = legalWindows(spans, from, reach, prevDist + 10.0, a.site.distanceAlong - 10.0)
+                    val w = legalWindows(spans, from, reach, prevDist + 10.0, due)
                         .firstOrNull { it.endInclusive - max(it.start, earliest) >= 30.0 }
                     if (reach != from && w != null) {
                         return LaneChangeInstruction(max(w.start, earliest), a.site, reach - from, a.recommended, deadline = w.endInclusive)
@@ -229,8 +233,8 @@ class LaneGuidance(private val planner: LanePlanner = LanePlanner()) {
                 }
                 // Start as late as is comfortable (fewer surprises from traffic), but never before the
                 // previous site and never so late that the change can't be completed.
-                val start = max(prevDist + 10.0, a.site.distanceAlong - min(lead, max(0.0, gap - 10.0)))
-                return LaneChangeInstruction(start, a.site, a.changeFromPrevious, a.recommended)
+                val start = max(prevDist + 10.0, due + 10.0 - min(lead, max(0.0, gap - 10.0)))
+                return LaneChangeInstruction(start, a.site, a.changeFromPrevious, a.recommended, deadline = if (endsAt != null) due else a.site.distanceAlong)
             }
             prevDist = a.site.distanceAlong
             prevLat = a.site.lateral(a.recommended)

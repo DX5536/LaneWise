@@ -125,7 +125,7 @@ data class Route(
             de.lanewise.lane.trimToRoadLanes(r.laneSites, r::laneCountAt) { d ->
                 r.roadSpanAt(d)?.kind.let { it == de.lanewise.lane.RoadKind.MOTORWAY || it == de.lanewise.lane.RoadKind.TRUNK }
             },
-            r::laneCountAt))
+            r::laneCountAt).let { sites -> de.lanewise.lane.markEndedLanes(sites, r.laneCounts.map { it.from to it.endedRight }) })
     }
     /**
      * Adds lane sites from OSM `turn:lanes` ([at]: route distance and value) where OSRM gave none within 40 m: the
@@ -344,7 +344,11 @@ data class SignalCluster(
  * Painted bike lane next to the car lanes on the right in driving direction.
  * [exclusive] = Radfahrstreifen (solid line, Zeichen 237), false = Schutzstreifen / advisory or shared lane.
  */
-data class LaneCountSpan(val from: Double, val to: Double, val count: Int)
+/**
+ * [count] lanes in driving direction (OSM) from [from] to [to]. [endedRight]: of the lanes the road had just before
+ * [from], how many ended on the right edge there (OSM `merge_to_left` on the way before; 0 = none, or side not known).
+ */
+data class LaneCountSpan(val from: Double, val to: Double, val count: Int, val endedRight: Int = 0)
 
 /**
  * A short stretch with fewer lanes than on both sides of it, and no junction inside, is taken as the smaller of its
@@ -362,7 +366,7 @@ fun fillShortLaneDips(spans: List<LaneCountSpan>, siteDistances: List<Double>, m
         val around = minOf(prev.count, next.count)
         if (cur.count >= around) continue
         if (siteDistances.any { it > cur.from + 10 && it < cur.to - 10 }) continue
-        out[i] = cur.copy(count = around)
+        out[i] = cur.copy(count = around, endedRight = cur.endedRight.coerceAtMost((prev.count - around).coerceAtLeast(0)))
     }
     return out
 }

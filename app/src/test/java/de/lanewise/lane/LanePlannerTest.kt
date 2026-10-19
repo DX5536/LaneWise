@@ -607,4 +607,60 @@ class LanePlannerTest {
         assertArrayEquals(booleanArrayOf(false, false, true, false), site.allowed())
         assertEquals(2, LanePlanner().plan(listOf(site), LanePlanner.Options(currentLateral = 3)).single().recommended)
     }
+
+    /**
+     * Merging-lanes check: three lanes, the right one ends 200 m after junction A (OSM `merge_to_left`, no junction),
+     * then a right turn at B on the two lanes left. The lane frame is anchored on the rightmost lane, so before the fix
+     * the planner sent a car in the middle lane over into the ending right lane ("the lane for the turn") and back.
+     */
+    @Test
+    fun rightLaneThatEndsOnTheWayIsNotTheLaneForTheNextTurn() {
+        val a = site(100.0, listOf(S, S, S), S)
+        val b = site(500.0, listOf(S, S or R), R, maneuver = true)
+        val counts: (Double) -> Int? = { d -> if (d < 300) 3 else 2 }
+        val sites = markEndedLanes(listOf(a, b), listOf(0.0 to 0, 300.0 to 1))
+        assertEquals(1, sites[1].endedRight)
+        assertEquals(300.0, sites[1].endedRightAt!!, 0.1)
+        // In the middle lane: it becomes the right lane - stay, no change.
+        val plan = LanePlanner().plan(sites, LanePlanner.Options(currentLateral = 1, laneCountAt = counts))
+        assertEquals(1, plan[0].recommended)
+        assertEquals(0, plan[1].changeFromPrevious)
+        assertEquals(1, plan[1].recommended)
+        val g = LaneGuidance()
+        for (car in listOf(50.0, 150.0, 280.0, 400.0)) {
+            assertNull("car $car", g.update(sites, car, avoidLaneChanges = true, keepRight = true, laneCountAt = counts).pendingChange)
+        }
+    }
+
+    /** In the lane that ends (right edge, `merge_to_left`): one change to the left, due before the lane ends, not at B. */
+    @Test
+    fun leaveTheEndingLaneBeforeItEnds() {
+        // At A only the right lane is usable (e.g. the lane a slip road joins on).
+        val a = LaneSite(100.0, listOf(S, S, S), listOf(false, false, true), S, false, RoadKind.URBAN)
+        val b = site(800.0, listOf(S, S), S)
+        val counts: (Double) -> Int? = { d -> if (d < 400) 3 else 2 }
+        val sites = markEndedLanes(listOf(a, b), listOf(400.0 to 1))
+        val g = LaneGuidance()
+        g.update(sites, 50.0, avoidLaneChanges = true, keepRight = true, laneCountAt = counts)
+        val st = g.update(sites, 120.0, avoidLaneChanges = true, keepRight = true, laneCountAt = counts)
+        // The car came through A in the right lane: it ends at 400 m.
+        val change = st.pendingChange
+        assertTrue("a change is advised", change != null)
+        assertEquals(1, change!!.lanes)
+        assertTrue("due before the lane ends: ${change.deadline}", change.deadline <= 400.0)
+        assertTrue("starts before it ends: ${change.startAt}", change.startAt < 390.0)
+        // Without a tagged side the old behaviour stays (the left lane is assumed to end): no change advised.
+        val g2 = LaneGuidance()
+        g2.update(listOf(a, b), 50.0, avoidLaneChanges = true, keepRight = true, laneCountAt = counts)
+        assertNull(g2.update(listOf(a, b), 120.0, avoidLaneChanges = true, keepRight = true, laneCountAt = counts).pendingChange)
+    }
+
+    @Test
+    fun endedOnRightReadsMergeToLeft() {
+        val t = mapOf("oneway" to "yes", "lanes" to "3", "turn:lanes" to "through|through|merge_to_left")
+        assertEquals(1, de.lanewise.osm.OsmTags.endedOnRight(t, true, true, 1))
+        assertEquals(0, de.lanewise.osm.OsmTags.endedOnRight(mapOf("turn:lanes" to "merge_to_right|through|through"), true, true, 1))
+        assertEquals(1, de.lanewise.osm.OsmTags.endedOnRight(mapOf("turn:lanes:backward" to "through|merge_to_left"), false, false, 2))
+        assertEquals(0, de.lanewise.osm.OsmTags.endedOnRight(t, true, true, 0))
+    }
 }

@@ -136,6 +136,18 @@ object OsmTags {
     }
 
     /**
+     * Of the [dropped] lanes the road loses after this way (fewer lanes on the next way, no junction), how many end on
+     * the right edge: the rightmost lanes tagged `merge_to_left` in `turn:lanes` in travel direction. 0 when the way
+     * tags no merge on the right - then the side that ends is not known (or it is the left).
+     */
+    fun endedOnRight(tags: Map<String, String>, forward: Boolean, oneway: Boolean, dropped: Int): Int {
+        if (dropped <= 0) return 0
+        val v = tags[if (forward) "turn:lanes:forward" else "turn:lanes:backward"] ?: if (oneway) tags["turn:lanes"] else null
+        val lanes = v?.split('|')?.map { it.trim() } ?: return 0
+        return lanes.asReversed().takeWhile { it == "merge_to_left" }.size.coerceAtMost(dropped)
+    }
+
+    /**
      * Car lanes in travel direction ([forward] = along the OSM way), or null if not tagged.
      * On a two-way street `lanes` counts both directions (OSM): `lanes=4` is 2 + 2, not 4 lanes for us. Lanes of the
      * other direction and a shared centre lane (`lanes:both_ways`, e.g. a turn lane for both) are taken off when tagged:

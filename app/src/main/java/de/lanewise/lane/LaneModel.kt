@@ -122,6 +122,14 @@ data class LaneSite(
      * patch, e.g. from a marking plan). Null = the road-kind default of the lane ribbon.
      */
     val pocketLength: Double? = null,
+    /**
+     * Lanes that ended on the right edge between the previous site and this one, without a junction (OSM
+     * `merge_to_left`, lane count dropping; [markEndedLanes]). The lateral frame is anchored on the rightmost lane, so
+     * the previous site's lane x is this site's lane x - [endedRight]; a lane below 0 is gone and must be left.
+     */
+    val endedRight: Int = 0,
+    /** Where the last of those lanes ended (route distance, m): the lane change out of it is due before this point. */
+    val endedRightAt: Double? = null,
 ) {
     val laneCount get() = lanes.size
 
@@ -212,7 +220,10 @@ data class LaneAdvice(
     val optimal: BooleanArray,
     /** Lane changes needed between the previous site's recommended lane and this one (signed, + = to the left). */
     val changeFromPrevious: Int,
-    /** After a turn: lateral coordinate of the lane to turn into (null if the previous site was not a turn). */
+    /**
+     * After a turn: lateral coordinate of the lane to turn into; after lanes ended on the right on the way
+     * ([LaneSite.endedRight]): the previous lane in this site's frame. Null otherwise.
+     */
     val entryLateral: Int? = null,
 ) {
     override fun equals(other: Any?) = other is LaneAdvice && other.site == site &&
@@ -344,6 +355,23 @@ fun attachTurnsToLaneSites(sites: List<LaneSite>, turns: List<Pair<Double, Int>>
  * pocket opening to the right, and the planner kept the car in the left lane and asked for a late change.
  * A real pocket (one more lane than through lanes before) is never marked, even if OSM counts it along the whole way.
  */
+/**
+ * Sets [LaneSite.endedRight] / [LaneSite.endedRightAt] from the places ([ended]: route distance and how many lanes ended
+ * on the right edge there) between each site and the one before it. Only real lane ends count - lanes leaving at a
+ * junction are not in [ended] (they carry no `merge_to_left`).
+ */
+fun markEndedLanes(sites: List<LaneSite>, ended: List<Pair<Double, Int>>): List<LaneSite> {
+    if (ended.none { it.second > 0 }) return sites
+    val sorted = sites.sortedBy { it.distanceAlong }
+    return sorted.mapIndexed { k, s ->
+        val from = if (k == 0) Double.NEGATIVE_INFINITY else sorted[k - 1].distanceAlong
+        // A lane ending right at the site (< 10 m) belongs to the junction itself, not to the stretch before it.
+        val here = ended.filter { it.second > 0 && it.first > from && it.first < s.distanceAlong - 10 }
+        if (here.isEmpty()) s.copy(endedRight = 0, endedRightAt = null)
+        else s.copy(endedRight = here.sumOf { it.second }, endedRightAt = here.maxOf { it.first })
+    }
+}
+
 fun markFullLengthLanes(sites: List<LaneSite>, laneCountAt: (Double) -> Int?): List<LaneSite> {
     val sorted = sites.sortedBy { it.distanceAlong }
     val out = ArrayList<LaneSite>(sorted.size)
