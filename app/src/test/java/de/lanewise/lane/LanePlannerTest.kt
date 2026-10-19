@@ -618,7 +618,7 @@ class LanePlannerTest {
         val a = site(100.0, listOf(S, S, S), S)
         val b = site(500.0, listOf(S, S or R), R, maneuver = true)
         val counts: (Double) -> Int? = { d -> if (d < 300) 3 else 2 }
-        val sites = markEndedLanes(listOf(a, b), listOf(0.0 to 0, 300.0 to 1))
+        val sites = markEndedLanes(listOf(a, b), listOf(0.0 to 0, 300.0 to 1), counts)
         assertEquals(1, sites[1].endedRight)
         assertEquals(300.0, sites[1].endedRightAt!!, 0.1)
         // In the middle lane: it becomes the right lane - stay, no change.
@@ -639,7 +639,7 @@ class LanePlannerTest {
         val a = LaneSite(100.0, listOf(S, S, S), listOf(false, false, true), S, false, RoadKind.URBAN)
         val b = site(800.0, listOf(S, S), S)
         val counts: (Double) -> Int? = { d -> if (d < 400) 3 else 2 }
-        val sites = markEndedLanes(listOf(a, b), listOf(400.0 to 1))
+        val sites = markEndedLanes(listOf(a, b), listOf(400.0 to 1), counts)
         val g = LaneGuidance()
         g.update(sites, 50.0, avoidLaneChanges = true, keepRight = true, laneCountAt = counts)
         val st = g.update(sites, 120.0, avoidLaneChanges = true, keepRight = true, laneCountAt = counts)
@@ -662,5 +662,19 @@ class LanePlannerTest {
         assertEquals(0, de.lanewise.osm.OsmTags.endedOnRight(mapOf("turn:lanes" to "merge_to_right|through|through"), true, true, 1))
         assertEquals(1, de.lanewise.osm.OsmTags.endedOnRight(mapOf("turn:lanes:backward" to "through|merge_to_left"), false, false, 2))
         assertEquals(0, de.lanewise.osm.OsmTags.endedOnRight(t, true, true, 0))
+    }
+
+    /** Audit regression (B 65): an on-ramp lane joins after A and ends (`merge_to_left`): no frame shift, no zig-zag. */
+    @Test
+    fun accelerationLaneThatJoinsAndEndsDoesNotShiftTheLanes() {
+        val a = site(100.0, listOf(S, S), S)
+        val b = site(900.0, listOf(S, S), S)
+        val counts: (Double) -> Int? = { d -> if (d < 300) 2 else if (d < 500) 3 else 2 }
+        val sites = markEndedLanes(listOf(a, b), listOf(300.0 to 0, 500.0 to 1), counts)
+        assertEquals(0, sites[1].endedRight)
+        val g = LaneGuidance()
+        for (car in listOf(50.0, 200.0, 450.0, 700.0)) {
+            assertNull("car $car", g.update(sites, car, avoidLaneChanges = true, keepRight = true, laneCountAt = counts).pendingChange)
+        }
     }
 }

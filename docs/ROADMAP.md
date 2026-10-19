@@ -746,6 +746,56 @@ Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which
   connections belonged to the Wi-Fi) and reroutes at once when a validated network comes back while off the route.
   Not yet checked on a real drive.
 
+## Done (v0.4.4, part 8, 2026-10-19) — merging lanes
+- **Lane-drop work list** (`tools/streetview/merging_lanes.py`, standard library): Region Hannover + Celle, 12 696 ways
+  with `lanes` → 253 places where the lane count drops between two ways of the same road at a node no other road uses
+  (2 → 1: 99, 3 → 2: 95, 4 → 3: 54, others 5), plus 320 ways with `merge_to_*` in `turn:lanes` (476 drops at junctions
+  skipped: lanes turning off). Side that ends, from `merge_to_*` on the way before: right 152, left 32, not tagged 69
+  (46 of them in town). Motorway / trunk: right 128, left 22, unknown 23. `work/merging_lanes.json` + `.geojson`.
+- **Bug found**: the lane frame is anchored on the rightmost lane, and a lane ending between two junctions was always
+  taken as the left one. Where the right lane ends (most tagged cases), the planner compared the wrong lanes: a car in
+  the middle lane was sent over into the ending right lane "for the next right turn", and a car in the ending lane got
+  no advice to leave it (tests `rightLaneThatEndsOnTheWayIsNotTheLaneForTheNextTurn`, `leaveTheEndingLaneBeforeItEnds`
+  failed on the old code).
+- **Fix**: the corridor match reads `merge_to_left` on the way before a drop (`OsmTags.endedOnRight`,
+  `LaneCountSpan.endedRight`); `markEndedLanes` sets `LaneSite.endedRight` / `endedRightAt` between two sites. The
+  planner shifts the carried lane by it (`entryLateral`), counts leaving an ending lane as a real lane change
+  (`effectiveChanges`), the guidance makes that change due before the lane ends (not at the junction), and the strip
+  uses the road's lanes before the end (`keyframes`). Drops without a tagged side keep the old behaviour (left lane
+  ends). Only lanes that were there all the way since the previous site shift the frame: an on-ramp lane that joins
+  and then ends (`merge_to_left` on an acceleration lane) does not (`markEndedLanes` compares the fewest lanes before
+  the end with the lanes after it; test `accelerationLaneThatJoinsAndEndsDoesNotShiftTheLanes`). 125 unit tests pass
+  (4 new).
+- **Audit** (20 random routes, default seed): the first version gave 7 findings (6 STRIP_ZIGZAG on the B 65 and the
+  Westschnellweg from on-ramp lanes, 1 KEEP_RIGHT); after the on-ramp fix routes 4 and 5 have 0. The KEEP_RIGHT on
+  route 8 (A 2 / A 7 area, 52.48886,9.72648: strip at lateral 1 for 1.5 km on the motorway) is the same on the code
+  before this work (`031febd`) - an older open item, not from the merge change.
+- **The 69 drops without a tagged side, read** (`tools/aerial_lanes/merge_drops.py`: DOP20 crops turned to the
+  driving direction, and with `--photos` the newest Mapillary photo 20-90 m before each drop; readings in
+  `tools/streetview/work/merging_lanes_readings.json`). DOP20 shows no taper within ±80 m for most (motorway drops are
+  long); the photos gave 13 left (B 3 / B 3 Celle / B 441 / Gehägestraße / Wilhelm-Heinichen-Ring: 2+1 hatching or
+  merge arrow on the left lane - what the app already assumes), 2 more probably left (K 36, L 382), 1 right
+  (Jägerstraße, Celle, way 793519825: merge arrow on the right lane - owner: add `turn:lanes=through|merge_to_left`
+  in OSM), 2 not a merge (Ada-Lessing-Straße: a red bike lane counted; Berliner Allee under the railway bridge: OSM
+  dip, already filled by the app), 2 that conflict with OSM (Südschnellweg way 1185049593 and B 6 way 4853205: OSM has
+  a right-turn / exit arrow on the lane that ends - probably an exit, not a merge; check), 49 unclear (no photo,
+  sidewalk / night / roadworks photos, B 217 2+1 not visible). Nothing patched from these readings.
+- Not yet: the unclear drops (check on DOP20 / Mapillary, tag `merge_to_*` in OSM or a patch);
+  `merge_to_right` (left lane ends) only matched the old assumption by chance; solid-line spans (`change:lanes`)
+  across the shifted frame; the ribbon draws a drop symmetric, not on the side that ends; AMAP readings of the
+  drops not done yet.
+
+- **Voice packs** (owner, 2026-10-19: "with OmniVoice selected both the system voice and OmniVoice play; OmniVoice
+  lacks a lot of lines"): (1) pack clips played on a background queue but sentences without clips went straight to
+  Android TTS, so a turn and a lane hint in the same update talked at once - TTS sentences now go through the same
+  queue and the worker waits for each to finish (`VoiceGuide.sayTts`, `UtteranceProgressListener`). (2) The installed
+  English packs are the test renders: 303 of 304 phrases ("You have reached your stop" is missing - re-render), but
+  only 130 street names (Hbf north), and any sentence with a street outside the pack went to Android TTS whole. Now
+  the pack says the sentence without a missing name (`VoiceInventory.sayable`: "In 300 metres turn right" - the
+  preposition and "towards" go with the name; a missing fixed phrase still sends the whole sentence to TTS). Test
+  `packSaysTheSentenceWithoutAMissingName`. Full renders with the street names of the region are still the owner's
+  job (`tools/voice_pack`, ~2.4 h per voice).
+
 ## Video review — still open
 - [ ] Owner: check the 3D car (size, colours, behaviour in tunnels / under bridges) and the automatic theme on the phone.
 - [ ] Owner: check the car overlay (size vs. road at different zooms, tilt changes, pan away and recenter) and the
@@ -784,10 +834,9 @@ Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which
       GitHub release not done.
 
 ## Next
-- **Merging lanes (owner's next task)**: cross-reference with AMAP / DOP20 the places where lanes end without a junction
-  (3 → 2, 2 → 1: merge arrows Z 297.1, lane-end tapers). Find them from OSM (`lanes` dropping between consecutive ways
-  of the same road without a junction node, `turn:lanes` with `merge_to_left` / `merge_to_right`), read AMAP at max
-  zoom, and check that LaneWise moves the driver out of the ending lane early (planner `laneCountAt`, ribbon taper).
+- **Merging lanes (continued, part 8)**: the planner now handles right-side lane ends tagged in OSM. Left: the 69
+  drops without a tagged side in `tools/streetview/work/merging_lanes.json` (46 in town) - read DOP20 / Mapillary /
+  AMAP at max zoom which side ends, then OSM `merge_to_*` or a patch; check a few on the phone with the debug demo.
 0. **Marking plans**: fill the three sample drafts by hand (arrows from the plan, `built_confirmed` from a dated
    photo / DOP20 - the DOP20 crop looks re-marked already), then more plans from the council papers; draw
    `stop_line:lanes` per lane in the ribbon; bake v2 spans into the offline graph.

@@ -125,7 +125,7 @@ data class Route(
             de.lanewise.lane.trimToRoadLanes(r.laneSites, r::laneCountAt) { d ->
                 r.roadSpanAt(d)?.kind.let { it == de.lanewise.lane.RoadKind.MOTORWAY || it == de.lanewise.lane.RoadKind.TRUNK }
             },
-            r::laneCountAt).let { sites -> de.lanewise.lane.markEndedLanes(sites, r.laneCounts.map { it.from to it.endedRight }) })
+            r::laneCountAt).let { sites -> de.lanewise.lane.markEndedLanes(sites, r.laneCounts.map { it.from to it.endedRight }, r::laneCountAt) })
     }
     /**
      * Adds lane sites from OSM `turn:lanes` ([at]: route distance and value) where OSRM gave none within 40 m: the

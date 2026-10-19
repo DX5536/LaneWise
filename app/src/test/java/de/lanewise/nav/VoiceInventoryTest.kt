@@ -41,4 +41,28 @@ class VoiceInventoryTest {
             assertEquals(p.spoken(step, 300.0), parts.joinToString(" "))
         }
     }
+
+    /** Owner: "OmniVoice lacks a lot of lines" - a street outside the pack no longer sends the whole sentence to TTS. */
+    @Test
+    fun packSaysTheSentenceWithoutAMissingName() {
+        val pack = setOf("in 300 metres", "turn right onto", "turn right", "keep left at the fork onto", "keep left at the fork",
+            "a 7", "towards")
+        val has = { p: String -> VoiceInventory.normalize(p) in pack }
+        // Everything there: unchanged.
+        assertEquals(listOf("In 300 metres", "turn right onto", "A 7"),
+            VoiceInventory.sayable(listOf("In 300 metres", "turn right onto", "A 7"), has))
+        // Street missing: without "onto" and the name.
+        assertEquals(listOf("In 300 metres", "turn right"),
+            VoiceInventory.sayable(listOf("In 300 metres", "turn right onto", "Musterstraße"), has))
+        // Destination missing: without "towards" and the destination.
+        assertEquals(listOf("Keep left at the fork onto", "A 7"),
+            VoiceInventory.sayable(listOf("Keep left at the fork onto", "A 7", "towards", "Musterstadt"), has))
+        // A fixed phrase missing: null (Android TTS says the whole sentence).
+        assertEquals(null, VoiceInventory.sayable(listOf("In 300 metres", "turn sharp left onto", "A 7"), has))
+        assertEquals(null, VoiceInventory.sayable(listOf("Make a U-turn"), has))
+        // German / Vietnamese prepositions.
+        val de = setOf("rechts abbiegen")
+        assertEquals(listOf("Rechts abbiegen"),
+            VoiceInventory.sayable(listOf("Rechts abbiegen auf", "Musterstraße")) { VoiceInventory.normalize(it) in de + "rechts abbiegen auf" })
+    }
 }

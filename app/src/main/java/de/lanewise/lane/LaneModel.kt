@@ -358,15 +358,25 @@ fun attachTurnsToLaneSites(sites: List<LaneSite>, turns: List<Pair<Double, Int>>
 /**
  * Sets [LaneSite.endedRight] / [LaneSite.endedRightAt] from the places ([ended]: route distance and how many lanes ended
  * on the right edge there) between each site and the one before it. Only real lane ends count - lanes leaving at a
- * junction are not in [ended] (they carry no `merge_to_left`).
+ * junction are not in [ended] (they carry no `merge_to_left`). Only lanes that were there all the way from the previous
+ * site shift the frame: an on-ramp lane that joins after it and then ends (acceleration lane) never was one of its
+ * lanes ([laneCountAt]: fewest lanes before the end vs. lanes after it; unknown counts: no shift).
  */
-fun markEndedLanes(sites: List<LaneSite>, ended: List<Pair<Double, Int>>): List<LaneSite> {
+fun markEndedLanes(sites: List<LaneSite>, ended: List<Pair<Double, Int>>, laneCountAt: (Double) -> Int?): List<LaneSite> {
     if (ended.none { it.second > 0 }) return sites
     val sorted = sites.sortedBy { it.distanceAlong }
     return sorted.mapIndexed { k, s ->
         val from = if (k == 0) Double.NEGATIVE_INFINITY else sorted[k - 1].distanceAlong
         // A lane ending right at the site (< 10 m) belongs to the junction itself, not to the stretch before it.
-        val here = ended.filter { it.second > 0 && it.first > from && it.first < s.distanceAlong - 10 }
+        val here = ended.filter { it.second > 0 && it.first > from && it.first < s.distanceAlong - 10 }.mapNotNull { (d, n) ->
+            val after = laneCountAt(d + 5) ?: return@mapNotNull null
+            var fewest: Int? = null
+            var x = if (from.isInfinite()) d - 300 else from + 5
+            while (x < d - 5) { laneCountAt(x)?.let { c -> if (fewest == null || c < fewest!!) fewest = c }; x += 10 }
+            val existed = fewest ?: laneCountAt(d - 5) ?: return@mapNotNull null
+            val shift = minOf(n, existed - after)
+            if (shift > 0) d to shift else null
+        }
         if (here.isEmpty()) s.copy(endedRight = 0, endedRightAt = null)
         else s.copy(endedRight = here.sumOf { it.second }, endedRightAt = here.maxOf { it.first })
     }

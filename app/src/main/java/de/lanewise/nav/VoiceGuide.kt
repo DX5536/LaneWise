@@ -14,15 +14,21 @@ import android.speech.tts.TextToSpeech
 import de.lanewise.settings.AppLanguage
 import java.io.File
 import java.nio.ByteOrder
+import android.speech.tts.UtteranceProgressListener
 import java.util.Locale
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * Speaks announcements. With an OmniVoice voice pack for the current language (see [VoicePack]) the
  * pre-rendered clips of an announcement's segments are decoded, trimmed and joined into one sound with a short natural
  * gap ([PcmJoin]; file after file left an audible pause before the street name); if any segment (e.g. a street outside
- * the pack's region) is missing, the whole sentence is spoken by Android TextToSpeech instead, so one sentence
- * never mixes two voices.
+ * the pack's region) is missing, the pack says the sentence without it ([VoiceInventory.sayable]: "In 300 metres turn
+ * right"); only when a fixed phrase is missing does Android TextToSpeech say the whole sentence - one sentence never
+ * mixes two voices. Pack clips and TTS sentences share one queue ([worker]), so two sentences never overlap (they did
+ * when a turn and a lane hint came in the same update: the clip and the TTS voice talked at once).
  */
 class VoiceGuide(context: Context) : TextToSpeech.OnInitListener {
     private val app = context.applicationContext
@@ -52,10 +58,20 @@ class VoiceGuide(context: Context) : TextToSpeech.OnInitListener {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pcm>?) = size > 120
     }
 
+    /** TTS utterances the worker waits for (utterance id → done). */
+    private val ttsDone = ConcurrentHashMap<String, CountDownLatch>()
+
     override fun onInit(status: Int) {
         ready = status == TextToSpeech.SUCCESS
         if (ready) {
             tts.setAudioAttributes(attrs)
+            tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(id: String?) {}
+                override fun onDone(id: String?) { id?.let { ttsDone.remove(it)?.countDown() } }
+                @Deprecated("Deprecated in Java") override fun onError(id: String?) { id?.let { ttsDone.remove(it)?.countDown() } }
+                override fun onError(id: String?, code: Int) { id?.let { ttsDone.remove(it)?.countDown() } }
+                override fun onStop(id: String?, interrupted: Boolean) { id?.let { ttsDone.remove(it)?.countDown() } }
+            })
             applyLanguage()
         }
     }
@@ -82,25 +98,34 @@ class VoiceGuide(context: Context) : TextToSpeech.OnInitListener {
 
     fun speak(a: Announcement) {
         val flush = a.priority >= 2
-        val clips = packs[VoiceInventory.code(language)]?.clips(a.parts)
-        if (clips != null && clips.isNotEmpty()) {
-            if (flush) { stopClips(); tts.stop() }
-            val gen = generation
-            worker.execute {
-                if (gen != generation) return@execute
-                val pcm = utterance(clips)
-                if (pcm == null) {
-                    // A clip could not be decoded: the whole sentence by Android TTS (never two voices in one).
-                    if (ready) tts.speak(a.text, TextToSpeech.QUEUE_ADD, null, a.key)
-                    return@execute
-                }
-                play(pcm, gen)
-            }
-            return
+        val pack = packs[VoiceInventory.code(language)]
+        val clips = pack?.let { p -> VoiceInventory.sayable(a.parts, p::has)?.let { p.clips(it) } }
+        if (flush) { stopClips(); tts.stop() }
+        val gen = generation
+        worker.execute {
+            if (gen != generation) return@execute
+            val pcm = clips?.takeIf { it.isNotEmpty() }?.let { utterance(it) }
+            // No pack, a fixed phrase missing, or a clip that cannot be decoded: the whole sentence by Android TTS.
+            if (pcm == null) sayTts(a, gen) else play(pcm, gen)
         }
-        if (!ready) return
-        if (flush) stopClips()
-        tts.speak(a.text, if (flush) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD, null, a.key)
+    }
+
+    /** Speaks [a] with Android TTS and waits until it is done (on the worker), so nothing else talks over it. */
+    private fun sayTts(a: Announcement, gen: Int) {
+        if (!ready || gen != generation) return
+        val id = "${a.key}#${System.nanoTime()}"
+        val done = CountDownLatch(1).also { ttsDone[id] = it }
+        audio.requestAudioFocus(focus)
+        try {
+            if (tts.speak(a.text, TextToSpeech.QUEUE_ADD, null, id) != TextToSpeech.SUCCESS) return
+            // Wait for the end (a flush stops TTS and ends the wait too); never longer than a long sentence takes.
+            while (gen == generation && !done.await(100, TimeUnit.MILLISECONDS)) {
+                if (System.nanoTime() - id.substringAfter('#').toLong() > 20_000_000_000L) break
+            }
+        } finally {
+            ttsDone.remove(id)
+            audio.abandonAudioFocusRequest(focus)
+        }
     }
 
     /** All clips of one announcement, trimmed and joined; null if one cannot be decoded or formats differ. */
@@ -192,6 +217,7 @@ class VoiceGuide(context: Context) : TextToSpeech.OnInitListener {
     /** Drops pending utterances and stops the one playing. */
     private fun stopClips() {
         generation++
+        ttsDone.values.forEach { it.countDown() }
         runCatching { track?.pause(); track?.flush() }
     }
 
