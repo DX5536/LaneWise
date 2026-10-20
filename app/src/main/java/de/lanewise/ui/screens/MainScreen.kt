@@ -773,7 +773,7 @@ private fun RouteRow(r: Route, selected: Boolean, phrases: Phrases, onClick: () 
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(formatDuration(r.effectiveDuration), color = c.onChip, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text(formatDuration(r.etaDuration), color = c.onChip, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             val closures = r.incidents.count { it.blocked || it.kind == IncidentKind.CLOSURE }
             val works = r.incidents.count { it.kind == IncidentKind.ROADWORKS }
             val lights = r.features.count { it.kind == de.lanewise.core.model.FeatureKind.TRAFFIC_SIGNALS }
@@ -787,7 +787,7 @@ private fun RouteRow(r: Route, selected: Boolean, phrases: Phrases, onClick: () 
             }
             Text(extra.joinToString(" · "), color = c.onChip.copy(alpha = 0.7f), fontSize = 13.sp)
         }
-        if (r.trafficPenalty > 60) Text("+${(r.trafficPenalty / 60).toInt()} min", color = c.overSpeed, fontWeight = FontWeight.Bold)
+        if (r.trafficDelay > 60) Text("+${(r.trafficDelay / 60).toInt()} min", color = c.overSpeed, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -863,19 +863,22 @@ private fun NavigationOverlay(
                 val fastRoad = advice?.site?.roadKind.let { it == de.lanewise.lane.RoadKind.MOTORWAY || it == de.lanewise.lane.RoadKind.TRUNK }
                 val showLanes = advice != null && distToSite < (if (passThrough) (if (fastRoad) 600.0 else 250.0) else 900.0) &&
                     (next == null || advice.site.distanceAlong <= next.distanceAlong + 10)
+                // Off the route: no turn / lanes of the old route (they are for another street); say what happens instead.
+                val off = nav.offRoute
                 ManeuverBanner(
-                    step = next,
-                    distanceText = phrases.distance(nav.distanceToNextStep),
-                    instruction = next?.let { phrases.instruction(it) } ?: "",
-                    then = then,
+                    step = if (off) null else next,
+                    distanceText = if (off) "" else phrases.distance(nav.distanceToNextStep),
+                    instruction = if (off) phrases.rerouting() else next?.let { phrases.instruction(it) } ?: "",
+                    then = if (off) null else then,
                     thenText = then?.let { str.then },
                     modifier = Modifier.weight(1f),
                     countdown = next?.let { countdownFraction(nav) },
-                    lanesBelow = showLanes,
+                    lanesBelow = showLanes && !off,
+                    recalculating = off,
                     belowLeft = nav.signals?.takeIf { settings.showSigns && it.distance < 250 }?.let { sig -> { de.lanewise.ui.hud.SignalCard(sig) } },
                     signColors = settings.signColors,
                 ) {
-                    if (showLanes && advice != null) {
+                    if (showLanes && advice != null && !off) {
                         Spacer(Modifier.height(3.dp))
                         LaneBar(advice, bikeColor = nav.bikeLane.takeIf { settings.showBikeLanes }?.let { bikeColor },
                             onLaneTap = vm::overrideLane, onLongPress = vm::reportLanes, docked = true,
@@ -969,6 +972,7 @@ private fun NavigationOverlay(
             // Demo: scrub bar (tap / drag to jump, also backwards) showing the distance from the start while dragging.
             onSeek = if (ui.simulating) vm::seekDemo else null,
             scrubLabel = { f -> phrases.distance(f * nav.route.distance) + " / " + phrases.distance(nav.route.distance) },
+            online = ui.online, onlineText = str.online, offlineText = str.offlineBadge,
             modifier = Modifier.align(Alignment.BottomCenter),
         )
     }

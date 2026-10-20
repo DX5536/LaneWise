@@ -20,19 +20,28 @@ object RouteScorer {
         routes.map { r ->
             val hits = incidents.filter { onRoute(r, it) }
             var penalty = 0.0
+            var delay = 0.0
             for (i in hits) {
                 // A TomTom traffic ETA already contains TomTom's own incidents; don't count them twice.
                 if ((r.trafficEta || r.provider == "tomtom") && i.source == "TomTom") continue
-                penalty += when {
-                    i.blocked || i.kind == IncidentKind.CLOSURE -> 1800.0
+                // Real expected delays (they go into the ETA too) vs. penalties that only steer the route choice: a
+                // closure the route still uses has no known delay (owner: "2 h 27 min" for 20 km with closures matched).
+                val d = when {
+                    i.blocked || i.kind == IncidentKind.CLOSURE -> 0.0
                     i.kind == IncidentKind.ACCIDENT -> (i.delaySeconds ?: 420).toDouble()
                     i.kind == IncidentKind.JAM -> if (r.provider == "tomtom" || r.trafficEta) 0.0 else (i.delaySeconds ?: 300).toDouble()
+                    else -> 0.0
+                }
+                delay += d
+                penalty += when {
+                    i.blocked || i.kind == IncidentKind.CLOSURE -> 1800.0
                     i.kind == IncidentKind.ROADWORKS -> 60.0
+                    i.kind == IncidentKind.ACCIDENT || i.kind == IncidentKind.JAM -> d
                     else -> 30.0
                 }
             }
             if (preferFewLaneChanges) penalty += 15.0 * forcedChanges(r)
-            r.copy(trafficPenalty = penalty, incidents = hits)
+            r.copy(trafficPenalty = penalty, trafficDelay = delay, incidents = hits)
         }.sortedBy { it.effectiveDuration }
 
     /**

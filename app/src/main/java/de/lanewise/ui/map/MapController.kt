@@ -88,8 +88,16 @@ class MapController(private val context: Context) {
     private var targetZoom = 17.6
     private var tweenPitch = 60.0
     private var tweenTopPad = 0.0
+    /**
+     * Off the route: the last fix (position, bearing, speed, time). The car and camera glide from fix to fix like on
+     * the route - predicted along the heading at the measured speed, eased towards each new fix; jumping to every fix
+     * made the screen look like ~5 frames a second (owner: "off route ... a very laggy screen").
+     */
     private var offRoutePos: LatLon? = null
     private var offRouteBearing = 0.0
+    private var offRouteSpeed = 0.0
+    private var offRouteAt = 0L
+    private var shownOff: LatLon? = null
     private var frameRunning = false
 
     /** True while the map is covered (Settings): no per-frame work; resumes where the car should be by then. */
@@ -777,17 +785,20 @@ class MapController(private val context: Context) {
         val route = snap.route
         val along = snap.distanceAlong
         setNavigating(true)
-        carLabel = if (optRoadName) route.steps.lastOrNull { it.distanceAlong <= along + 1 }?.let { st ->
+        carLabel = if (optRoadName && !snap.offRoute) route.steps.lastOrNull { it.distanceAlong <= along + 1 }?.let { st ->
             val name = st.name.ifBlank { st.ref.orEmpty() }
             listOfNotNull(name.takeIf { it.isNotBlank() }, snap.speedLimit?.let { "$it km/h" }).joinToString("  ·  ").ifBlank { null }
         } else null
 
         if (snap.offRoute) {
+            if (offRoutePos == null) shownOff = lastShownPos ?: snap.fix.position
             offRoutePos = snap.fix.position
             offRouteBearing = snap.fix.bearing?.toDouble() ?: offRouteBearing
+            offRouteSpeed = snap.fix.speedMps.toDouble()
+            offRouteAt = now
             tweenRoute = null
         } else {
-            offRoutePos = null
+            offRoutePos = null; shownOff = null
             val jump = shownAlong.isNaN() || tweenRoute !== route || abs(along - shownAlong) > 300 || snap.fix.seek
             val dt = (now - fixAt) / 1000.0
             if (jump) {
@@ -841,8 +852,8 @@ class MapController(private val context: Context) {
         }
 
         if (snap.offRoute) {
-            ribbon = null
-            clearLanes()
+            // Once when leaving the route (not at every fix: emptying the sources each time made MapLibre re-render).
+            if (ribbon != null || roadRoute != null || geomKey != null) { ribbon = null; geomKey = null; clearLanes() }
         } else {
             if (!showRibbons) clearLaneSources()
             // Streets mode: the street layer (all streets around the car) stays, only the highlight is the route's.
@@ -854,7 +865,7 @@ class MapController(private val context: Context) {
 
     fun stopTween() {
         geomGeneration++; geomPending = null
-        tweenRoute = null; offRoutePos = null; ribbon = null
+        tweenRoute = null; offRoutePos = null; shownOff = null; ribbon = null
         (style?.getSource(SRC_LANES_DYN) as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(emptyList()))
         roadRoute = null; shownChunks = emptySet(); geomKey = null
         setNavigating(false); carLabel = null
@@ -873,7 +884,15 @@ class MapController(private val context: Context) {
         val pos: LatLon
         val targetBearing: Double
         if (off != null) {
-            pos = off; targetBearing = offRouteBearing
+            val since = ((SystemClock.uptimeMillis() - offRouteAt) / 1000.0).coerceIn(0.0, 1.5)
+            val predicted = Geo.destination(off, offRouteBearing, offRouteSpeed * since)
+            val cur = shownOff ?: predicted
+            // Move on at the measured speed and pull gently towards the prediction (a far jump - first fix - snaps).
+            val gap = Geo.distance(cur, predicted)
+            val moved = if (gap > 80) predicted
+                else Geo.destination(cur, Geo.bearing(cur, predicted), (offRouteSpeed * dt).coerceAtMost(gap) + (gap - offRouteSpeed * dt).coerceAtLeast(0.0) * ease(dt, 0.6))
+            shownOff = moved
+            pos = moved; targetBearing = offRouteBearing
         } else {
             val route = tweenRoute ?: return
             val since = ((SystemClock.uptimeMillis() - fixAt) / 1000.0).coerceIn(0.0, 1.5)
@@ -912,8 +931,10 @@ class MapController(private val context: Context) {
         }
         // The car on the screen overlay, after the camera moved: while following it sits exactly at the camera target
         // (never lags the map); panned away it is placed under the current camera.
+        lastShownPos = pos
         updateCar(pos, shownBearing)
     }
+    private var lastShownPos: LatLon? = null
 
     /** Share of the remaining distance covered in [dt] s by exponential easing with time constant [tau] s. */
     private fun ease(dt: Double, tau: Double) = 1.0 - kotlin.math.exp(-dt / tau)

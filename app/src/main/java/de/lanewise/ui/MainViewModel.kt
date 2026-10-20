@@ -58,6 +58,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -159,7 +161,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var currentRoute: Route? = null
 
     init {
-        viewModelScope.launch { loadGraph() }
+        // The offline map of the selected region - once the saved settings are read (at start `settings.value` is
+        // still the default region, so a downloaded "Hannover (Stadt)" was never loaded after a restart) and again
+        // whenever the region changes.
+        viewModelScope.launch { settings.map { it.offlineRegion }.distinctUntilChanged().collect { loadGraph(it) } }
         viewModelScope.launch { placesRepo.places.collect { p -> _ui.update { it.copy(places = p) } } }
         viewModelScope.launch { refreshVoicePacks() }
         viewModelScope.launch { settings.collect { s -> voice.setPacks(selectedPacks(s)) } }
@@ -237,7 +242,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (s.voice) ann.sortedByDescending { it.priority }.forEach { voice.speak(it) }
         if (s.overSpeedSound && snap.speedStatus == SpeedStatus.OVER && (fix.timeMs / 1000) % 5 == 0L) voice.beep()
         if (snap.arrived) { stopNavigation(); _ui.update { it.copy(message = phrases.instruction(snap.route.steps.last())) }; return }
-        if (snap.offRoute && !fix.simulated) reroute(fix)
+        if (snap.offRoute && (!fix.simulated || demoDrivePath != null)) reroute(fix)
         // Next stretch of OSM data 8 km before the fetched one ends - only if there is more route to fetch, one fetch at
         // a time and not again within 30 s of a failure. Short routes (< 8 km) were refetched on every fix (4 / s),
         // and each answer replaced the route: the lanes shifted and broke constantly (owner's video).
@@ -451,8 +456,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Demo from [from] to [to] (test drive; debug builds also accept it from adb, see MainActivity). */
     fun startDemo(from: LatLon, to: LatLon, fromName: String = "A", toName: String = "B", preferTestRoute: Boolean = false, speed: Double? = null,
-                  via: List<LatLon> = emptyList()) {
+                  via: List<LatLon> = emptyList(), detour: LatLon? = null) {
         testDrivePending = true
+        demoDetour = detour
+        demoDrivePath = null
         testPreferA7 = preferTestRoute
         speed?.let { s -> _ui.update { it.copy(demoSpeed = s) } }
         _ui.update {
@@ -464,6 +471,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private var testPreferA7 = false
+
+    /**
+     * Debug demo (adb, see MainActivity): the simulated car drives [demoDrivePath] - the route through [demoDetour] -
+     * instead of the navigated route, and its fixes count for re-routing like real ones. [debugOffline]: once navigating,
+     * the app acts as if there were no internet (offline routing only), without touching the phone's network.
+     */
+    private var demoDetour: LatLon? = null
+    private var demoDrivePath: de.lanewise.core.geo.Polyline? = null
+    var debugOffline = false
 
     fun chooseDestination(place: Place) {
         _ui.update { it.copy(destination = place, results = emptyList(), query = place.title, mode = Mode.PREVIEW) }
@@ -603,6 +619,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _ui.update { it.copy(routes = ranked, selected = 0, routing = false, incidents = incidents) }
             if (testDrivePending && ranked.isNotEmpty()) {
                 testDrivePending = false
+                // Detour demo: the path the car really drives (start → detour point → destination), fetched now while the
+                // route is planned (before any simulated "offline").
+                demoDrivePath = demoDetour?.let { d ->
+                    val st = _ui.value
+                    val o = st.origin?.position ?: return@let null
+                    val dest = st.destination?.position ?: return@let null
+                    providers(s, online).firstNotNullOfOrNull { p ->
+                        runCatching { p.route(RouteRequest(o, dest, null, alternatives = false, via = listOf(d))).firstOrNull() }.getOrNull()
+                    }?.geometry
+                }
                 val i = if (!testPreferA7) 0 else ranked.indexOfFirst { r ->
                     r.steps.any { it.ref.orEmpty().replace(" ", "").contains("A7") } &&
                         r.steps.any { it.maneuver.type == de.lanewise.core.model.ManeuverType.ROUNDABOUT }
@@ -689,8 +715,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             navJob = viewModelScope.launch {
                 demoControl = de.lanewise.location.DemoControl()
                 _ui.update { it.copy(demoPaused = false) }
-                SimulatedLocationSource(route.geometry, { d -> (currentRoute?.speedLimitAt(d)?.kmh ?: 50).toDouble() }, { _ui.value.demoSpeed },
-                    demoControl).fixes()
+                SimulatedLocationSource(demoDrivePath ?: route.geometry, { d -> (currentRoute?.speedLimitAt(d)?.kmh ?: 50).toDouble() },
+                    { _ui.value.demoSpeed }, demoControl).fixes()
                     .collect { onFix(it) }
                 // The demo drove to the end of the route line: arrived, even if the last fix snapped a few metres short
                 // (it stayed at "50 m" with an empty banner).
@@ -870,10 +896,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // --- offline data ---------------------------------------------------------------------------
     private fun graphFile(region: String) = File(ctx.filesDir, "graph_$region.lwg")
 
-    private suspend fun loadGraph() {
-        val f = graphFile(settings.value.offlineRegion)
-        if (!f.exists()) return
-        graph = withContext(Dispatchers.IO) { runCatching { OfflineGraph.load(f) }.getOrNull() }
+    private suspend fun loadGraph(region: String) {
+        val f = graphFile(region)
+        if (!f.exists()) { graph = null; _ui.update { it.copy(offlineGraphReady = false) }; return }
+        graph = withContext(Dispatchers.IO) {
+            runCatching { OfflineGraph.load(f) }.onFailure { android.util.Log.w("LaneWise", "offline map ${f.name}: $it") }.getOrNull()
+        }
         _ui.update { it.copy(offlineGraphReady = graph != null) }
     }
 
@@ -935,10 +963,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 _ui.update { it.copy(offlineProgress = st.dlStart) }
                 graph = OfflineGraphBuilder(laneOverrides()).build(region, graphFile(region.id), st) { msg -> _ui.update { it.copy(offlineProgress = msg) } }
                 _ui.update { it.copy(offlineGraphReady = true, offlineProgress = st.dlTiles + " …") }
-                for (dark in listOf(false, true)) {
-                    OfflineTiles(ctx).download(region, dark) { pct ->
-                        if (pct >= 0) _ui.update { it.copy(offlineProgress = "${st.dlTiles} ${if (dark) st.dlTilesDark else st.dlTilesLight}: $pct %") }
-                    }
+                // One download: light and dark styles use the same tiles (see OfflineTiles).
+                OfflineTiles(ctx).download(region) { pct ->
+                    if (pct >= 0) _ui.update { it.copy(offlineProgress = "${st.dlTiles}: $pct %") }
                 }
                 _ui.update { it.copy(offlineProgress = null, message = "${st.dlReady}: ${region.name}") }
             } catch (e: Exception) {
@@ -948,6 +975,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun isOnline(): Boolean {
+        // Debug demo "offline": the route is planned online, then the drive runs as if the network were gone.
+        if (de.lanewise.BuildConfig.DEBUG && debugOffline && _ui.value.mode == Mode.NAVIGATING) {
+            if (_ui.value.online) _ui.update { it.copy(online = false) }
+            return false
+        }
         val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
         return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&

@@ -171,6 +171,42 @@ class LaneConnectivityTest {
         assertNull(snap.lanes.nextAdvice)
     }
 
+    /**
+     * Owner's phone check (offline re-route): off the route the screen kept the old route's turn and lane box, and the
+     * map rebuilt the lanes at every fix (laggy). Off route: no lane advice, no announcements, no "arrived", and the
+     * progress stays where the car left the route.
+     */
+    @Test
+    fun offRouteGivesNoLanesAndKeepsProgress() {
+        val a = LatLon(52.3700, 9.7400)
+        val b = Geo.destination(a, 0.0, 600.0)
+        val line = Polyline(listOf(a, b))
+        fun step(at: Double, type: ManeuverType, m: Modifier, p: LatLon) =
+            RouteStep(at, 0.0, 0.0, Maneuver(type, m, p, 0.0, 0.0), "Musterstraße", null, null, null)
+        val sites = listOf(LaneSite(500.0, listOf(L, S, S), null, L, true, RoadKind.URBAN))
+        val route = Route("osrm", line, line.length, 120.0, listOf(step(0.0, ManeuverType.DEPART, Modifier.STRAIGHT, a),
+            step(500.0, ManeuverType.TURN, Modifier.LEFT, Geo.destination(a, 0.0, 500.0)),
+            step(line.length, ManeuverType.ARRIVE, Modifier.STRAIGHT, b)), sites)
+        val engine = NavigationEngine(route)
+        val s = AppSettings(); val p = Phrases(AppLanguage.ENGLISH)
+        engine.update(Fix(line.pointAt(200.0), 12f, 0f, 5f, 1000), s, p)
+        // Now driving parallel 150 m east of the route, up to beside the destination.
+        var last: de.lanewise.nav.NavSnapshot? = null
+        var said = 0
+        for ((k, d) in listOf(250.0, 350.0, 450.0, 550.0, 595.0).withIndex()) {
+            val (snap, ann) = engine.update(Fix(Geo.destination(line.pointAt(d), 90.0, 150.0), 12f, 0f, 5f, 2000L + k), s, p)
+            last = snap; if (snap.offRoute) said += ann.size   // 3 fixes in a row before off route (GPS jitter)
+        }
+        val snap = last!!
+        assertTrue(snap.offRoute)
+        assertTrue(!snap.arrived)
+        assertNull(snap.lanes.nextAdvice)
+        assertNull(snap.signals); assertNull(snap.speedLimit); assertTrue(snap.upcoming.isEmpty())
+        assertEquals(0, said)
+        // Frozen where off route was declared (third fix, 350 m), not following the parallel street to 595 m.
+        assertEquals(350.0, snap.distanceAlong, 5.0)
+    }
+
     // --- planner --------------------------------------------------------------------------------------------------
 
     @Test

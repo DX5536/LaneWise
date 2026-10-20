@@ -87,8 +87,13 @@ data class Route(
     val laneSites: List<LaneSite>,
     val speedLimits: List<SpeedLimitSpan> = emptyList(),
     val roadSpans: List<RoadSpan> = emptyList(),
-    /** Extra time (s) attributed to traffic/incidents by the scorer. */
+    /**
+     * Route-choice score (s) from the scorer: real delays plus penalties (30 min per closure, roadworks, forced lane
+     * changes). Only for comparing routes - never shown as a time ([trafficDelay] is).
+     */
     val trafficPenalty: Double = 0.0,
+    /** Expected extra driving time (s) from jams / accidents on the route (their reported delay); part of the ETA. */
+    val trafficDelay: Double = 0.0,
     val incidents: List<TrafficIncident> = emptyList(),
     /** Traffic lights and road signs on the route, sorted by distance. */
     val features: List<RoadFeature> = emptyList(),
@@ -246,7 +251,10 @@ data class Route(
     fun bikeLaneAt(d: Double): BikeLaneSpan? = bikeLanes.firstOrNull { d >= it.from && d < it.to }
     fun speedLimitAt(d: Double): SpeedLimitSpan? = speedLimits.firstOrNull { d >= it.from && d < it.to }
     fun roadSpanAt(d: Double): RoadSpan? = roadSpans.firstOrNull { d >= it.from && d < it.to }
+    /** For ranking routes (includes the scorer's penalties). */
     val effectiveDuration get() = duration + trafficPenalty
+    /** For the time shown to the driver (remaining time, arrival): the provider's duration plus real delays. */
+    val etaDuration get() = duration + trafficDelay
 
     companion object {
         /** Lane sites this close to a patched junction (m) are replaced by the patch (one junction, up to two nodes). */

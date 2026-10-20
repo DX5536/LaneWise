@@ -109,12 +109,18 @@ class NavigationEngine(
         offRouteCount = if (abs(proj.signedOffset) > tolerance || !headingOk) offRouteCount + 1 else 0
         val offRoute = offRouteCount >= 3
 
-        // Keep progress monotonic against GNSS jitter, but allow re-anchoring on large jumps.
-        val along = if (proj.distanceAlong < lastAlong && lastAlong - proj.distanceAlong < 30) lastAlong else proj.distanceAlong
+        // Keep progress monotonic against GNSS jitter, but allow re-anchoring on large jumps. Off the route the car is
+        // not on it at all: progress stays where it left the route (the projection onto the nearest bit of route could
+        // jump ahead - even to "arrived" - while driving down another street).
+        val along = when {
+            offRoute -> lastAlong
+            proj.distanceAlong < lastAlong && lastAlong - proj.distanceAlong < 30 -> lastAlong
+            else -> proj.distanceAlong
+        }
         if (!offRoute) { hint = proj.segmentIndex; lastAlong = along }
 
         val remaining = max(0.0, route.distance - along)
-        val remainingSec = route.effectiveDuration * (remaining / max(1.0, route.distance))
+        val remainingSec = route.etaDuration * (remaining / max(1.0, route.distance))
         val nextIdx = route.steps.indexOfFirst { it.distanceAlong > along + 5 }
         val next = route.steps.getOrNull(nextIdx)
         val after = if (nextIdx >= 0) route.steps.getOrNull(nextIdx + 1) else null
@@ -146,9 +152,10 @@ class NavigationEngine(
         // could send the driver into a lane that cannot make this turn).
         val unknownTurn = unknownTurnAhead(along) || inUnknownSpan || nextUnknown != null && nextUnknown - along < 400 &&
             (route.laneCountAt(nextUnknown - 30) ?: 2) > 1
-        val lanes = if (unknownTurn) LaneState.EMPTY.copy(assumedLateral = planned.assumedLateral, assumedSince = planned.assumedSince)
+        // Off the route the planned lanes belong to a road the car is not on: no lane advice until the new route.
+        val lanes = if (unknownTurn || offRoute) LaneState.EMPTY.copy(assumedLateral = planned.assumedLateral, assumedSince = planned.assumedSince)
         else planned
-        val arrived = remaining < 25
+        val arrived = !offRoute && remaining < 25
 
         val ahead = route.features.filter { it.distanceAlong > along - 5 && it.distanceAlong - along < 400 }
         // One HUD entry per junction: signal positions within 50 m of each other count as one junction.
@@ -175,8 +182,11 @@ class NavigationEngine(
         }
         val bike = route.bikeLaneAt(along) ?: route.bikeLaneAt(along + 50)
 
-        val snap = NavSnapshot(route, fix, along, remaining, remainingSec, next, distNext, after, limit, noLimit,
-            status, lanes, kind, offRoute, arrived, upcoming, signals, bike, solidLineIn = solidLineAhead(along),
+        // Off the route the old route's limit, signals, signs and lines are for another street: none of them.
+        val snap = NavSnapshot(route, fix, along, remaining, remainingSec, next, distNext, after,
+            if (offRoute) null else limit, noLimit && !offRoute, if (offRoute) SpeedStatus.UNKNOWN else status, lanes, kind,
+            offRoute, arrived, if (offRoute) emptyList() else upcoming, if (offRoute) null else signals,
+            if (offRoute) null else bike, solidLineIn = if (offRoute) null else solidLineAhead(along),
             lanesUnknown = unknownTurn)
         return snap to announcements(snap, phrases)
     }
@@ -208,6 +218,8 @@ class NavigationEngine(
 
     private fun announcements(s: NavSnapshot, p: Phrases): List<Announcement> {
         val out = ArrayList<Announcement>()
+        // Off the route: the old route's turns and lanes are wrong here; the app says "recalculating" itself.
+        if (s.offRoute) return out
         val step = s.nextStep
         if (s.arrived) {
             say(out, "arrive", p.instructionParts(route.steps.last()))

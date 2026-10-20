@@ -67,9 +67,15 @@ class RouteRenderLiveTest {
                 if (Geo.distance(pts[i], pts[i + 1]) < 0.3) continue
                 val pr = route.geometry.project(pts[i]) ?: continue
                 val seg = Geo.bearing(pts[i], pts[i + 1])
-                if (abs(Geo.bearingDelta(seg, route.geometry.bearingAt(pr.distanceAlong))) > 100) {
+                // Against the road both here and just after this point: the outer edge of a sharp turn projects onto the
+                // corner, where the route line still has the old street's bearing (Isernhagener Straße → Dragonerstraße,
+                // a 113° right turn, was a false "fold").
+                fun off(d: Double) = abs(Geo.bearingDelta(seg, route.geometry.bearingAt(d)))
+                if (off(pr.distanceAlong) > 100 && off(pr.distanceAlong + 12) > 100) {
                     problems++
-                    println("${sh.kind} runs backwards at route ${pr.distanceAlong.toInt()} m")
+                    println("${sh.kind} runs backwards at route ${pr.distanceAlong.toInt()} m (point $i of ${pts.size}, " +
+                        "seg ${seg.toInt()}°, road ${route.geometry.bearingAt(pr.distanceAlong).toInt()}°, offset ${pr.signedOffset.toInt()} m, " +
+                        "len ${"%.1f".format(Geo.distance(pts[i], pts[i + 1]))} m)")
                     break
                 }
             }
@@ -99,6 +105,19 @@ class RouteRenderLiveTest {
         }
         // 5) Lane-count profile (LANEWISE_PROFILE=1): OSM lanes, road kind and the drawn lane count every 200 m
         //    (LANEWISE_PROFILE_STEP=m for a finer one), with the position for checking on a map.
+        // LANEWISE_SIGNALS=1: junction traffic lights where the route turns and no lane data is known - the list for the
+        // owner to map `turn:lanes` in OSM (the app shows "No lane data" there).
+        if (System.getenv("LANEWISE_SIGNALS") == "1" && c != null) {
+            val lights = c.features.filter { it.kind == de.lanewise.core.model.FeatureKind.TRAFFIC_SIGNALS && !it.pedestrian }
+            for (st in route.steps.filter { it.maneuver.type == de.lanewise.core.model.ManeuverType.TURN ||
+                    it.maneuver.type == de.lanewise.core.model.ManeuverType.END_OF_ROAD }) {
+                val light = lights.firstOrNull { kotlin.math.abs(it.distanceAlong - st.distanceAlong) < 50 } ?: continue
+                if (route.laneSites.any { kotlin.math.abs(it.distanceAlong - st.distanceAlong) < 40 }) continue
+                val p = light.position
+                println("NO_LANES ${st.maneuver.modifier} onto ${st.name.ifBlank { "?" }} @${st.distanceAlong.toInt()} m  " +
+                    "%.5f,%.5f  lanes before: ${route.laneCountAt(st.distanceAlong - 30) ?: "?"}".format(java.util.Locale.US, p.lat, p.lon))
+            }
+        }
         if (System.getenv("LANEWISE_PROFILE") == "1") {
             var d = 0.0
             while (d < route.distance) {

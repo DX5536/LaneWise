@@ -34,6 +34,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -164,6 +165,12 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, ui: UiState, onBack: () ->
             val reports = remember { vm.laneReportCount() }
             Text(str.laneReports, fontSize = 15.sp, modifier = Modifier.padding(top = 8.dp))
             Text(String.format(str.laneReportsSub, reports), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            // Hand-checked lane patches (asset + the phone's own lane_overrides.json): how many apply, how many were dropped.
+            val patches by produceState<Pair<Int, Int>?>(null) { value = vm.laneOverrides().let { it.entries.size to it.rejected.size } }
+            patches?.let { (ok, bad) ->
+                Text(String.format(str.lanePatches, ok, bad), fontSize = 12.sp,
+                    color = if (bad > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             OutlinedButton(onClick = { vm.laneReportShareIntent()?.let { context.startActivity(it) } }, enabled = reports > 0,
                 modifier = Modifier.padding(top = 4.dp)) { ButtonIcon(Icons.Rounded.Share); Text(str.shareReports) }
         }

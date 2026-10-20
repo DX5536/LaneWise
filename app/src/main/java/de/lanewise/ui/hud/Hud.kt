@@ -24,12 +24,17 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.rounded.Cloud
+import androidx.compose.material.icons.rounded.CloudOff
+import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.material.icons.Icons
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.runtime.remember
 import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.asImageBitmap
@@ -305,6 +310,8 @@ fun ManeuverBanner(
     belowLeft: (@Composable () -> Unit)? = null,
     /** Colour the banner like the German guide sign of the road after the manoeuvre (option). */
     signColors: Boolean = false,
+    /** No manoeuvre ([step] null) but a state to show: off route the tile shows a turning "recalculating" symbol. */
+    recalculating: Boolean = false,
     below: @Composable () -> Unit = {},
 ) {
     val base = LocalLaneColors.current
@@ -325,10 +332,20 @@ fun ManeuverBanner(
             Box(
                 Modifier.size(64.dp).clip(RoundedCornerShape(16.dp)).background(c.bannerAccent),
                 contentAlignment = Alignment.Center,
-            ) { if (step != null) ManeuverIcon(step, if (sign != null) c.onBanner else Color.White, Modifier.size(46.dp)) }
+            ) {
+                if (step != null) ManeuverIcon(step, if (sign != null) c.onBanner else Color.White, Modifier.size(46.dp))
+                else if (recalculating) {
+                    // Off route: a slowly turning refresh symbol instead of an empty tile.
+                    val spin = androidx.compose.animation.core.rememberInfiniteTransition(label = "recalc")
+                    val deg by spin.animateFloat(0f, 360f, androidx.compose.animation.core.infiniteRepeatable(
+                        androidx.compose.animation.core.tween(1600, easing = androidx.compose.animation.core.LinearEasing)), label = "recalcDeg")
+                    androidx.compose.material3.Icon(Icons.Rounded.Sync, contentDescription = null, tint = Color.White,
+                        modifier = Modifier.size(40.dp).graphicsLayer { rotationZ = -deg })
+                }
+            }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text(distanceText, color = c.onBanner, fontSize = 32.sp, fontWeight = FontWeight.Bold)
+                if (distanceText.isNotEmpty()) Text(distanceText, color = c.onBanner, fontSize = 32.sp, fontWeight = FontWeight.Bold)
                 Text(instruction, color = c.onBanner.copy(alpha = 0.9f), fontSize = 17.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         }
@@ -383,6 +400,13 @@ fun EtaBar(
      */
     onSeek: ((Float) -> Unit)? = null,
     scrubLabel: (Float) -> String = { "" },
+    /**
+     * Connection badge before the distance line: green cloud = online, grey crossed-out cloud = offline (routing and
+     * re-routing then use the offline map only, no traffic / corridor data). Null = not shown. [onlineText] /
+     * [offlineText]: spoken by TalkBack.
+     */
+    online: Boolean? = null,
+    onlineText: String = "", offlineText: String = "",
 ) {
     val c = LocalLaneColors.current
     // The panel's colour runs down behind the system navigation bar, so it sits on the screen edge instead of hovering.
@@ -429,7 +453,18 @@ fun EtaBar(
                     Text("  ⏱ $elapsedText", color = c.onChip.copy(alpha = 0.85f), fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 }
             }
-            Text("$distanceText · $etaText", color = c.onChip.copy(alpha = 0.7f), fontSize = 15.sp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (online != null) {
+                    androidx.compose.material3.Icon(
+                        if (online) androidx.compose.material.icons.Icons.Rounded.Cloud else androidx.compose.material.icons.Icons.Rounded.CloudOff,
+                        contentDescription = if (online) onlineText else offlineText,
+                        tint = if (online) Color(0xFF34C759) else c.onChip.copy(alpha = 0.7f),
+                        modifier = Modifier.size(18.dp),
+                    )
+                    androidx.compose.foundation.layout.Spacer(Modifier.width(6.dp))
+                }
+                Text("$distanceText · $etaText", color = c.onChip.copy(alpha = 0.7f), fontSize = 15.sp)
+            }
         }
         RoundAction(RoundIcon.OVERVIEW, onOverview)
     }

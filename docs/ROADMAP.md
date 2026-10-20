@@ -554,7 +554,10 @@ Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which
       pixels) - they must come from OSM `turn:lanes` (or street-level imagery, e.g. Mapillary).
 - [ ] Align the drawn road with the real carriageway (lane edges detected on DOP20 by the U-Net, or OSM `width` /
       `placement`) and put the stop line at the painted one (OSM `stop` nodes / `traffic_signals:direction`).
-- [ ] Signals without lane data on the test routes: list them for the owner to map `turn:lanes` in OSM.
+- [x] Signals without lane data on the test routes: `LANEWISE_SIGNALS=1` in `RouteRenderLiveTest` lists junction lights
+      where the route turns without lane data (2026-10-20). Owner's route option 1: Melanchthonstraße left turn
+      (52.39785,9.72564); test drive: right turn onto Berliner Allee at Lavesstraße (52.37243,9.75119); option 2: none.
+      Both have a one-lane approach, so no lane choice and nothing to map.
 - [ ] **Reference screenshots from AMAP / Petal Maps** (later, owner's decision): at flagged junctions (audit, no lane
       data, owner reports) open AMAP / Petal on the phone and screenshot their lane view; disagreements are checked
       against DOP20 and reality - never copied (see `docs/DATA_SOURCES.md`). Note: Herschelstraße / Celler Straße is
@@ -585,7 +588,8 @@ Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which
 - [ ] Fill the asset with real, checked patches (none yet: owner to pick junctions from lane reports / junction audit,
       e.g. Herschelstraße / Celler Straße — DOP20 + drive as evidence).
 - [ ] Phone check: push a test patch, demo a route through it (lanes replaced; `lanes_unknown` shows the hint).
-- [ ] Settings: show "N lane patches (M rejected)" next to the lane reports; share / edit on the phone.
+- [x] Settings: show "N lane patches (M rejected)" next to the lane reports (Settings → Lane assist, DE / EN / VI; red when
+      a patch was rejected, the reasons are in logcat). Share / edit on the phone: not yet.
 - [x] Phone check (2026-10-17, test-only patch `lanes_unknown` on Aegidientorplatz way 4699114, demo ×0.5 from Schiffgraben):
       "No lane data here – follow the road markings" from ~850 m before the left turn into Hildesheimer Straße, no strip,
       lane bar back after the junction. Test patch removed from the phone. The OSM lanes there
@@ -657,7 +661,11 @@ Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which
       lanes read from them go into `lane_overrides.json` as text ("AMAP screenshot <date> (unconfirmed)"); screenshots
       are never committed, nothing goes into OSM. AMAP can be searched by name over adb (not by coordinates).
 - [x] **App icon updated again** from the owner's new `docs/icon.svg` (larger road slab).
-- [ ] Owner's screenshot: ETA "2 h 27 min" for 20 km while the demo was paused - check how the ETA is computed at 0 km/h.
+- [x] Owner's screenshot: ETA "2 h 27 min" for 20 km while the demo was paused - not the speed: the remaining time was
+      `duration + trafficPenalty`, and the penalty is the scorer's route-choice score (30 min per closure along the
+      route, 1 min per roadworks, 15 s per forced lane change). Now `Route.trafficDelay` (reported jam / accident
+      delays only) is part of the ETA (`etaDuration`: remaining time, arrival clock, route cards, "+N min" badge); the
+      penalties only rank routes (`effectiveDuration`). Test `closurePenaltyIsNotInTheEta` (2026-10-20).
 - [x] **Lane topology like HERE's lane model** (owner's link, docs.here.com "model-lane"): HERE stores explicit lane
       connectivity (lane inputs → outputs at "accessors"), a transition status per lane (forming / ending) and boundary
       traversal (= our `change:lanes`). Now `LaneSite.connectivity` (`lane/LaneConnectivity.kt`): per lane the lanes it
@@ -796,6 +804,62 @@ Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which
   `packSaysTheSentenceWithoutAMissingName`. Full renders with the street names of the region are still the owner's
   job (`tools/voice_pack`, ~2.4 h per voice).
 
+## Done (v0.4.4, part 9, 2026-10-20) — phone checks: voice, re-routing, off route, offline
+- **Voice queue checked on the phone** (demo ×4, 3 min, `dumpsys audio` playback log): 11 navigation sentences, 8 by
+  OmniVoice and 3 by Android TTS, never two at once.
+- **Debug demo hooks** (`MainActivity`, debug builds): `--es demo_detour "lat,lon"` - the simulated car drives through
+  that point instead of following the route, and its fixes trigger re-routing like real ones; `--ez demo_offline true`
+  - once navigating the app acts as if the internet were gone (offline routing only). Online re-route checked: the car
+  left the route at Hohenzollernstraße and got a new route from there.
+- **Off route** (owner: "off route ... a very laggy screen"; found during the offline re-route test): (1) the banner
+  and lane box kept the old route's turn and lanes ("30 m keep left onto Raschplatzhochstraße" while on another street)
+  - now the banner says "Recalculating route", no lane advice, no turn announcements, no traffic lights / signs /
+  speed limit / road name of the old route, no false "arrived", and the progress stays where the car left the route
+  (test `offRouteGivesNoLanesAndKeepsProgress`). (2) The car and camera jumped to each GPS fix (5.8 distinct frames/s
+  measured from a screen recording, 116 on route) - now they glide (predicted along the heading, eased to each fix):
+  117 frames/s off route; the lane sources are emptied once instead of at every fix.
+- **Connection badge** (owner's request): green cloud before the distance line in the driving bar when online, grey
+  crossed-out cloud when offline (TalkBack text DE / EN / VI).
+- **Offline map not loaded after a restart**: the graph was looked up before the saved settings were read (default
+  region "Region Hannover"), so a downloaded "Hannover (Stadt)" never loaded - now loaded when the settings are read
+  and whenever the region changes ("Offline routing ready ✓" after a restart, checked).
+- **Offline map tiles never downloaded** (owner: "the map is not downloaded at all"): MapLibre's offline download
+  fetches the style over HTTP and cannot read our `asset://` styles ("Unable to parse resourceUrl", stuck at 0 %). The
+  region is now downloaded with OpenFreeMap's `styles/liberty` (same vector source and Noto Sans glyphs as our styles;
+  tiles are shared by URL), once for light and dark. Checked: "Hannover (Stadt)" downloaded completely (688 / 688
+  resources; it stalls while the phone sleeps - no network).
+- **Off-route banner**: a slowly turning refresh symbol in the tile and "Recalculating route" centred, instead of an
+  empty tile (checked on the phone).
+- **Render check false alarm**: `RouteRenderLiveTest` flagged the outer road edge after a sharp right turn
+  (Isernhagener Straße → Dragonerstraße, 113°) as "runs backwards" - it was compared with the route's bearing at the
+  corner point (old street). Now it also accepts the bearing 12 m on; the drawing was fine.
+- **Offline re-route checked on the phone** (`demo_detour` + `demo_offline`, offline map "Hannover (Stadt)"): the car
+  left the route, the banner said "Recalculating route", and the offline router planned a new route from
+  Hohenzollernstraße (with lanes and signals from the offline map, crossed-out cloud in the bar); no failed re-route.
+  The phone's network stayed on, so map tiles still came from the cache or the network - a real flight-mode drive is
+  the owner's check.
+
+## Done (v0.4.4, part 10, 2026-10-20) — AMAP disagreements checked on DOP20; 2-lane work list
+- **Owner asked to improve the guidance with AMAP lane data.** Per `docs/DATA_SOURCES.md` every AMAP / OSM disagreement
+  went to DOP20 first (`tools/aerial_lanes/stopline_crops.py WAY ...`: crops at the stop line, turned to the driving
+  direction; readings in `amap_check.json` field `dop20`). Result: wherever DOP20 shows the lane count, **OSM is right
+  and AMAP is outdated** - 9 approaches where AMAP had fewer lanes: 7 Erich-Panitz-Straße, 10 Brühlstraße NW, 18 / 48 /
+  50 Karl-Wiechert-Allee, 58 Hannoversche Straße (Lahe), 60 / 62 Bothfelder Straße, plus 16 Lavesallee (count). No
+  AMAP lanes were written to `lane_overrides.json`: in this survey AMAP was wrong every time DOP20 could check it, so
+  it is not a safe source for lane counts here. Still open (DOP20 / Mapillary inconclusive, arrows only): 14
+  Ritter-Brüning-Straße left lane, 36 Hamburger Allee NW lane 5 (`right` vs `through;right`), 46 Berliner Allee W
+  (bridge shadow), 52 Vahrenwalder Straße N (4 or 5 lanes) - candidates for an own photo / drive, AMAP only as the last
+  resort.
+- **2-lane junctions** (owner: "slowly move to intersections with just 2 lanes"): `tools/streetview/work/
+  amap_plan_2lane.json` - 977 two-lane approaches with a lane choice in Hannover (Stadt) from the OSM cache
+  (`left|through;right` 246, `left|through` 186, `through|right` 65, ...; tertiary 394, secondary 299, motorway_link
+  120, primary 79), split by Stadtteil (OSM admin_level 10) with `tools/streetview/amap_2lane.py` (`assign`,
+  `status` = coverage per district, `todo DISTRICT`, `record N ...`; readings in `amap_check_2lane.json`). 689 lie
+  in 56 Stadtteile, 288 outside the city (motorway links etc.). Started with Mitte (owner, 2026-10-20): 13 / 42
+  (31 %) - Goseriede, Celler Straße, Otto-Brenner-Straße, Kurt-Schumacher-Straße: 9 match, 2 differ (Goseriede
+  N-bound: AMAP adds a sharp-left branch on the left lane), 3 without arrows (Kurt-Schumacher-Straße W-bound: AMAP 1
+  lane, OSM 2 - check DOP20).
+
 ## Video review — still open
 - [ ] Owner: check the 3D car (size, colours, behaviour in tunnels / under bridges) and the automatic theme on the phone.
 - [ ] Owner: check the car overlay (size vs. road at different zooms, tilt changes, pan away and recenter) and the
@@ -807,12 +871,18 @@ Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which
       the highlight never lags behind the car with the 25 m rebuild step.
 - [ ] Philipsbornstraße (video 2:45): only the route line, no lane surface — OSM has no lane data on most of it;
       street-name labels are drawn on top of the route line there (label placement over the route).
-- [ ] `RouteRenderLiveTest` Schiffgraben → Berliner Allee: one road edge folds back at the `CONTINUE LEFT` bend
-      (route 1371 m) — check the offset-line pruning on tight bends.
+- [x] `RouteRenderLiveTest` Schiffgraben → Berliner Allee: one road edge folds back at the `CONTINUE LEFT` bend
+      (route 1371 m) — re-checked 2026-10-20 (Schiffgraben SW-bound, left into Berliner Allee, plus the test-drive
+      route and the owner's test route): 0 backwards / outside-road findings.
 - [ ] Re-check the whole test route on the phone with the fixes (the video was before them).
 - [ ] Philipsbornstraße left turn (4 lanes, video 1:25–1:45) and Hauptstraße left turn (video 9:10): verify the strip
-      enters the left pocket where it opens; Overpass timed out in the PC check of the 8.4 km route option, so those
-      were only checked without OSM lane counts.
+      enters the left pocket where it opens. 2026-10-20 with OSM lane counts: OSRM's 2nd option of the owner's route no
+      longer passes Philipsbornstraße (9.1 km via Vahrenwalder Straße); Hauptstraße (8833 m) has no lane data on it;
+      Hermannsburger Straße (8252 m, `left | through | right`): the left lane opens at ~8170 m and the change is advised
+      from 8197 m - entered as it opens. Philipsbornstraße (2026-10-20): OSRM does not route through its 4-lane
+      approach for nearby targets; the left turn from Dragonerstraße onto Vahrenwalder Straße (`left | through |
+      right`) is planned in the left lane with no change, and the left turn into Philipsbornstraße at Jahnplatz has no
+      lane data in OSM (the app shows "No lane data" there). The 4-lane approach itself is still unchecked.
 
 - [x] **Browse / standby map: lines broken at OSM way splits** (owner's screenshot, 2026-10-15, Herschelstraße /
       Celler Straße) — fixed in v0.4.4 part 3.

@@ -31,3 +31,9 @@ readings go into `tools/streetview/work/amap_check.json`.
    no_arrows|not_found), note, date`. Differences go to DOP20 / Mapillary first; AMAP into `lane_overrides.json` only
    as last resort (`"source": "AMAP screenshot <date> (unconfirmed)"`).
 6. Update `docs/ROADMAP.md` (v0.4.4 part 7, AMAP rechecks, "Still open" list).
+
+## 2-lane survey by district
+`python -I tools/streetview/amap_2lane.py status` (coverage % per Stadtteil), `todo Mitte 20` (next approaches with
+driving direction and coordinates), `record N "left|through" "S-bound 2 | N-bound 2" match "note"`. Read arrows from
+the driver's view: on the north-up map the driver's left is east when driving south. Swipes must not start on the
+bottom search panel (y > ~2400 phone px): split long pans.
