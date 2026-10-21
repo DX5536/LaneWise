@@ -860,6 +860,41 @@ Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which
   N-bound: AMAP adds a sharp-left branch on the left lane), 3 without arrows (Kurt-Schumacher-Straße W-bound: AMAP 1
   lane, OSM 2 - check DOP20).
 
+## Done (v0.4.4, part 12, 2026-10-21) — 2-lane AMAP survey: Mitte complete
+- **Mitte 42 / 42 (100 %)** on the phone (AMAP lane view does not render in the emulator). 29 new readings today:
+  Herschelstraße, Karmarschstraße, Osterstraße / Aegidienkirchhof, Aegidientorplatz / Marienstraße, Berliner Allee /
+  Fernroder Straße, Hamburger Allee, Arndtstraße, Celler Straße, Otto-Brenner-Straße, Königsworther Platz. Whole
+  district: 16 match, 2 equivalent (AMAP's bent arrow = OSM `slight_left`, Fernroder Straße), 13 without arrows,
+  3 not found (no separate stop line / no road in AMAP), 6 differ.
+- **Differences (check DOP20 / Mapillary next; nothing written to `lane_overrides.json`)**:
+  - 527 / 534 Celler Straße NE-bound at Kohlrauschstraße: AMAP `through|right`, OSM `left;through|right` with
+    `lanes:backward=1` (2 turn lanes on 1 lane - OSM tagging inconsistent either way).
+  - 641 Herschelstraße N-bound at Brüderstraße: AMAP `none|right` (turn into the east leg / car park), OSM
+    `left|through;right`.
+  - 734 Otto-Brenner-Straße SW-bound at Brühlstraße (T-junction): AMAP 3 lanes `left|left|right`, OSM 2
+    `left;through|right` - lane count.
+  - 638 Herschelstraße S-bound south of Kurt-Schumacher-Straße: AMAP draws only a pedestrian way (Andreaestraße), OSM a
+    tertiary road with turn lanes - check whether cars drive there at all.
+  - (576 / 580 Goseriede from part 10.)
+- **Lane counts AMAP draws lower than OSM** (AMAP was outdated every time DOP20 could check it, part 10): Herschelstraße
+  at Karolinenstraße (637 / 642) and at Kurt-Schumacher-Straße (639 / 640) 1 lane per direction without lane lines vs.
+  OSM `lanes=3`.
+- Lesson: check the plan coordinates against the OSM junction node before reading - I first read 637 / 642 at the
+  wrong Herschelstraße junction (Brüderstraße instead of Karolinenstraße) and redid them; an approach's OSM way can end
+  at a lane widening before the stop line (186 Arndtstraße: the arrows belong to the next way, which matches).
+- Next district: pick by coverage (`amap_2lane.py status`), e.g. the neighbours Calenberger Neustadt (16), Oststadt
+  (9), Nordstadt (19).
+
+## Done (v0.4.4, part 11, 2026-10-20) — emulator
+- **Android emulator for LaneWise** (owner: test without connecting the phone): AVD `LaneWise_S24` (Android 14 Google
+  APIs x86_64 + arm64 translation, 1440×3120, 8 GB RAM, WHPX, RTX GPU). LaneWise installs and runs there: debug demo,
+  lane strip, banner, offline badge checked by screenshot. Smoothness / frame rate still on the phone (the emulator
+  renders through the PC GPU). Setup and commands in `CLAUDE.md` ("Emulator for LaneWise").
+- **AMAP in the emulator**: installed from the phone's APK splits (17.01.0.2015), map, search page and pan / pinch
+  work (`tools/phoneapp_survey/emu_touch.sh`: raw multitouch pinch, slow drag, fast double-tap); but its lane-level
+  view never appears, even at maximum zoom (`lane/lane_navi_config.bin` fails to load). So the AMAP survey stays on
+  the phone; `ANDROID_SERIAL` switches the survey helpers between phone and emulator.
+
 ## Video review — still open
 - [ ] Owner: check the 3D car (size, colours, behaviour in tunnels / under bridges) and the automatic theme on the phone.
 - [ ] Owner: check the car overlay (size vs. road at different zooms, tilt changes, pan away and recenter) and the

@@ -37,3 +37,9 @@ readings go into `tools/streetview/work/amap_check.json`.
 driving direction and coordinates), `record N "left|through" "S-bound 2 | N-bound 2" match "note"`. Read arrows from
 the driver's view: on the north-up map the driver's left is east when driving south. Swipes must not start on the
 bottom search panel (y > ~2400 phone px): split long pans.
+
+## Device: phone or emulator
+`export ANDROID_SERIAL=emulator-5554` points every helper at the emulator (AVD `LaneWise_S24`, see `CLAUDE.md`), unset
+it for the phone. On the emulator `input tap` double-taps are too slow to zoom and swipes fling: use
+`tools/phoneapp_survey/emu_touch.sh pinch X Y IN|OUT [SPREAD]`, `drag DX DY`, `dtap X Y` (after `adb root`). AMAP's
+lane-level view does not render in the emulator, so lane readings come from the phone only.

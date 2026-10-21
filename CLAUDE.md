@@ -23,10 +23,12 @@ Read this first when resuming work in a new chat.
 
 ## AMAP survey (copy-paste prompt to continue)
 
-> Continue the AMAP cross-check of big junctions. Read `docs/DATA_SOURCES.md` (AMAP rules) and `docs/ROADMAP.md`
-> (v0.4.4 parts 6-7). Plan: `tools/streetview/work/amap_plan.json` (64 junctions, OSM ways + arrows), results so far:
-> `tools/streetview/work/amap_check.json` (`amap`, `amap_lanes` = this direction | opposite, `osm_lanes` = forward +
-> backward, `verdict`), OSM lane tags per way in `osm_lanes.json`. AMAP is open on my phone (adb). Way of working:
+> Continue the AMAP cross-check, now the 2-lane junctions district by district (skill `phoneapp-survey`). Read
+> `docs/DATA_SOURCES.md` (AMAP rules) and `docs/ROADMAP.md` (v0.4.4 parts 6-10). The 64 big junctions are done
+> (`tools/streetview/work/amap_check.json`). 2-lane plan: `tools/streetview/work/amap_plan_2lane.json`, by Stadtteil:
+> `python -I tools/streetview/amap_2lane.py status` (coverage % per district), `todo DISTRICT`, `record N ...`
+> (readings in `amap_check_2lane.json`). Mitte is done (100 %); continue with Calenberger Neustadt, Oststadt or Nordstadt. AMAP is open on my phone (adb): its lane-level view
+> does NOT render in the emulator, so AMAP readings need the phone. Way of working:
 > search a nearby place, open it, leave with the upper-left back button (not the system back) until the home map,
 > then pan / zoom by hand (double-tap on empty map; double-tap + drag down zooms out) to the 5 m scale bar or closer -
 > arrows often only show at 2 m / 1 m, a street label can hide one; "no arrows" only after maximum zoom along the whole
@@ -95,6 +97,14 @@ Android 16, package `de.lanewise.app.debug`); the CI build/release APK is the ow
 - Owner's test route: home in Hannover → a restaurant in Langenhagen (coordinates in `RouteRenderLiveTest`), 2nd route option.
 - Test drive for all road types: Settings → Test drive (or `LANEWISE_FROM=52.37390,9.74662 LANEWISE_TO=52.50796,9.81688
   LANEWISE_ALT=0` with `RouteRenderLiveTest`): city, B 3 trunk road, A 37 / A 7, exit, roundabouts, rural L 383.
+- **Emulator for LaneWise** (owner, 2026-10-20: debug / test without the phone): AVD `LaneWise_S24` (Android 14
+  Google APIs x86_64 with arm64 translation, 1440×3120, 8 GB; `%USERPROFILE%\.android\avd`). Start:
+  `emulator -avd LaneWise_S24 -no-snapshot-save -no-audio -gpu host -memory 8192` (PowerShell `Start-Process`, it
+  must outlive the shell), then `adb -s emulator-5554 install -r <apk>`; GPS: `adb -s emulator-5554 emu geo fix LON LAT`.
+  The debug demo intent works there (`demo_from/_to/_via/_detour/_offline`). `export ANDROID_SERIAL=emulator-5554`
+  makes `tools/phoneapp_survey/*.sh` use it; `emu_touch.sh` does pinch / slow drag / fast double-tap (needs
+  `adb root`, emulator only). Frame rate / smoothness: phone only. AMAP is installed there (from the phone's APK
+  splits) and its map works, but its lane-level view never renders (lane resources fail) - AMAP survey stays on the phone.
 - The phone can be driven over adb (screen 1440×3120; `adb shell input tap`, `uiautomator dump`, `screenrecord`); the
   owner allowed this for checking bugs. In Git Bash set `MSYS_NO_PATHCONV=1` for `/sdcard/...` paths.
 - Never block coroutine IO threads with OkHttp `execute()`: use `Http.fetch` (async, cancellable).
