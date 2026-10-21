@@ -24,6 +24,8 @@ data class Fix(
     val accuracyM: Float,
     val timeMs: Long,
     val simulated: Boolean = false,
+    /** Demo only: first fix after the demo was scrubbed to another place (the map jumps there instead of gliding). */
+    val seek: Boolean = false,
 ) {
     val speedKmh get() = speedMps * 3.6f
 }
@@ -105,21 +107,44 @@ class SimulatedLocationSource(
     private val speedAt: (Double) -> Double, // km/h for a given distance
     /** Demo speed-up (1 = real time); read on every step so it can be changed while driving. */
     private val speedFactor: () -> Double = { 1.0 },
+    /** Pause / scrub like a video player (optional). */
+    private val control: DemoControl? = null,
 ) {
     fun fixes(startAt: Double = 0.0): Flow<Fix> = flow {
         var d = startAt
         val dtMs = 250L
         var phase = 0.0
         while (d < line.length) {
+            var seek = false
+            control?.takeSeek()?.let { d = it.coerceIn(0.0, line.length - 1.0); seek = true }
+            control?.position = d
+            if (control?.paused == true) {
+                // Standing still where it was paused (or scrubbed to), so the lanes there can be studied.
+                emit(Fix(line.pointAt(d), 0f, line.bearingAt(d).toFloat(), 3f, System.currentTimeMillis(), simulated = true, seek = seek))
+                delay(dtMs)
+                continue
+            }
             phase += 0.01
             val limit = speedAt(d).coerceIn(20.0, 140.0)
             // Oscillate ±12% around the limit to exercise the over/under-speed border.
             val kmh = limit * (1.0 + 0.12 * kotlin.math.sin(phase))
             val mps = kmh / 3.6 * speedFactor()
-            emit(Fix(line.pointAt(d), (kmh / 3.6).toFloat(), line.bearingAt(d).toFloat(), 3f, System.currentTimeMillis(), simulated = true))
+            emit(Fix(line.pointAt(d), (kmh / 3.6).toFloat(), line.bearingAt(d).toFloat(), 3f, System.currentTimeMillis(), simulated = true, seek = seek))
             delay(dtMs)
             d += mps * dtMs / 1000.0
         }
         emit(Fix(line.points.last(), 0f, null, 3f, System.currentTimeMillis(), simulated = true))
     }
+}
+
+/** Play / pause and scrubbing of the demo, set from the UI, read by [SimulatedLocationSource] on every step. */
+class DemoControl {
+    @Volatile var paused = false
+    /** Route distance the demo car is at (m). */
+    @Volatile var position = 0.0
+    @Volatile private var seekTo: Double? = null
+
+    fun seek(distance: Double) { seekTo = distance }
+
+    internal fun takeSeek(): Double? = seekTo?.also { seekTo = null }
 }

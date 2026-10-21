@@ -88,8 +88,16 @@ class MapController(private val context: Context) {
     private var targetZoom = 17.6
     private var tweenPitch = 60.0
     private var tweenTopPad = 0.0
+    /**
+     * Off the route: the last fix (position, bearing, speed, time). The car and camera glide from fix to fix like on
+     * the route - predicted along the heading at the measured speed, eased towards each new fix; jumping to every fix
+     * made the screen look like ~5 frames a second (owner: "off route ... a very laggy screen").
+     */
     private var offRoutePos: LatLon? = null
     private var offRouteBearing = 0.0
+    private var offRouteSpeed = 0.0
+    private var offRouteAt = 0L
+    private var shownOff: LatLon? = null
     private var frameRunning = false
 
     /** True while the map is covered (Settings): no per-frame work; resumes where the car should be by then. */
@@ -117,11 +125,29 @@ class MapController(private val context: Context) {
         }
     }
 
+    private var attributionTopPx = 0
+
+    /** Distance of the (i) attribution button from the top of the map (px), below whatever the screen shows there. */
+    fun setAttributionTop(px: Int) {
+        attributionTopPx = px
+        val m = map ?: return
+        val side = (12 * context.resources.displayMetrics.density).toInt()
+        m.uiSettings.attributionGravity = android.view.Gravity.TOP or android.view.Gravity.START
+        m.uiSettings.setAttributionMargins(side, px, 0, 0)
+    }
+
     fun attach(view: MapView, darkMode: Boolean) {
         view.getMapAsync { m ->
             map = m
             m.uiSettings.isCompassEnabled = false
             m.uiSettings.isAttributionEnabled = true
+            // Settings preview: the (i) attribution button top left (owner's request; bottom left it covered the road).
+            // The main map keeps MapLibre's default place.
+            if (attributionTopPx > 0) {
+                m.uiSettings.attributionGravity = android.view.Gravity.TOP or android.view.Gravity.START
+                val side = (12 * context.resources.displayMetrics.density).toInt()
+                m.uiSettings.setAttributionMargins(side, attributionTopPx, 0, 0)
+            }
             m.uiSettings.isLogoEnabled = false
             m.uiSettings.isRotateGesturesEnabled = true
             m.uiSettings.isTiltGesturesEnabled = true
@@ -170,6 +196,8 @@ class MapController(private val context: Context) {
     private fun setupLayers(s: Style, isDark: Boolean) {
         s.addImage(IMG_CAR, carBitmap(if (isDark) 0xFF9A82FF.toInt() else 0xFF6C4CF5.toInt()))
         s.addImage(IMG_DEST, pinBitmap())
+        s.addImage(IMG_STOP, pinBitmap(0xFFB8F33A.toInt(), 0xFFFFFFFF.toInt()))
+        s.addImage(IMG_BIKE, bikeSymbolBitmap())
         de.lanewise.core.model.AutobahnPoiKind.entries.forEach { s.addImage("lw-ab-${it.name}", abPoiBitmap(it)) }
         FeatureKind.entries.forEach { s.addImage("lw-feat-${it.name}", RoadSignArt.feature(it, 64)) }
         listOf(SRC_ROUTE, SRC_ALT, SRC_LANES, SRC_LANES_DYN, SRC_CHEV, SRC_CAR, SRC_CAR3D, SRC_LABEL, SRC_ABPOI, SRC_DEST, SRC_INC, SRC_FEAT, SRC_SIGNAL).forEach { s.addSource(GeoJsonSource(it)) }
@@ -213,6 +241,14 @@ class MapController(private val context: Context) {
         ))
         fill("lane-surface", "SURFACE", if (isDark) 0xFF1C1F27.toInt() else 0xFF2B2F38.toInt(), 0.97f)
         fill("lane-bike", "BIKE", bikeColor, 0.9f)
+        // Bike symbol painted on the bike lane: lies flat on the road, points along it, ~1 m wide in real metres.
+        add(SymbolLayer("lane-bike-symbol", SRC_LANES).withFilter(kind("BIKE_SYMBOL")).withProperties(
+            PropertyFactory.iconImage(IMG_BIKE), PropertyFactory.iconRotate(Expression.get("b")),
+            PropertyFactory.iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP),
+            PropertyFactory.iconPitchAlignment(Property.ICON_PITCH_ALIGNMENT_MAP),
+            PropertyFactory.iconAllowOverlap(true), PropertyFactory.iconIgnorePlacement(true),
+            PropertyFactory.iconOpacity(0.9f), PropertyFactory.iconSize(metresToIconScale(1.3, BIKE_BMP_W)),
+        ))
         // Highlight: lime on the dark map, violet on the light map (lime has too little contrast on light grey).
         val highlight = if (isDark) 0xFFB8F33A.toInt() else 0xFF6C4CF5.toInt()
         fill("lane-allowed", "ALLOWED", highlight, if (isDark) 0.28f else 0.3f, SRC_LANES_DYN)
@@ -290,9 +326,17 @@ class MapController(private val context: Context) {
             PropertyFactory.iconAllowOverlap(true), PropertyFactory.iconIgnorePlacement(true),
             PropertyFactory.iconPitchAlignment(Property.ICON_PITCH_ALIGNMENT_VIEWPORT),
         ))
-        s.addLayer(SymbolLayer("dest", SRC_DEST).withProperties(
+        s.addLayer(SymbolLayer("dest", SRC_DEST).withFilter(Expression.not(Expression.has("n"))).withProperties(
             PropertyFactory.iconImage(IMG_DEST), PropertyFactory.iconAnchor(Property.ICON_ANCHOR_BOTTOM),
             PropertyFactory.iconAllowOverlap(true), PropertyFactory.iconIgnorePlacement(true),
+        ))
+        s.addLayer(SymbolLayer("stops", SRC_DEST).withFilter(Expression.has("n")).withProperties(
+            PropertyFactory.iconImage(IMG_STOP), PropertyFactory.iconAnchor(Property.ICON_ANCHOR_BOTTOM),
+            PropertyFactory.iconAllowOverlap(true), PropertyFactory.iconIgnorePlacement(true),
+            PropertyFactory.textField(Expression.get("n")), PropertyFactory.textFont(arrayOf("Noto Sans Bold")),
+            // The number sits in the white dot of the pin (60 px above its tip; 10 sp text = 37.5 px per em on the phone).
+            PropertyFactory.textSize(10f), PropertyFactory.textColor("#6C4CF5"), PropertyFactory.textOffset(arrayOf(0f, -1.6f)),
+            PropertyFactory.textAllowOverlap(true), PropertyFactory.textIgnorePlacement(true),
         ))
         s.addLayer(SymbolLayer("car", SRC_CAR).withProperties(
             PropertyFactory.iconImage(IMG_CAR), PropertyFactory.iconRotate(Expression.get("bearing")),
@@ -488,6 +532,18 @@ class MapController(private val context: Context) {
     }
 
     /** line-width in pixels for a feature property "w" in metres, exact at the current latitude. */
+    /**
+     * Icon scale so that an icon [bitmapPx] wide covers [metres] on the map at every zoom. MapLibre treats the bitmap as
+     * drawn at the screen density, so the scale is multiplied by it (without, the bike symbols were a quarter size).
+     */
+    private fun metresToIconScale(metres: Double, bitmapPx: Int): Expression {
+        val z1 = 10.0; val z2 = 24.0
+        val density = context.resources.displayMetrics.density
+        return Expression.interpolate(Expression.exponential(2f), Expression.zoom(),
+            Expression.stop(z1, metres / Geo.metersPerPixel(lastLat, z1) / bitmapPx * density),
+            Expression.stop(z2, metres / Geo.metersPerPixel(lastLat, z2) / bitmapPx * density))
+    }
+
     private fun metresToPixels(): Expression {
         val z1 = 10.0
         val z2 = 24.0
@@ -502,14 +558,16 @@ class MapController(private val context: Context) {
 
     // --- data updates ---------------------------------------------------------------------------
 
-    fun showRoutes(main: Route?, alternatives: List<Route>, destination: LatLon?) {
+    fun showRoutes(main: Route?, alternatives: List<Route>, destination: LatLon?, stops: List<LatLon> = emptyList()) {
         val s = style ?: return
         (s.getSource(SRC_ROUTE) as? GeoJsonSource)?.setGeoJson(
             FeatureCollection.fromFeatures(listOfNotNull(main?.let { Feature.fromGeometry(line(it.geometry.points)) })))
         (s.getSource(SRC_ALT) as? GeoJsonSource)?.setGeoJson(
             FeatureCollection.fromFeatures(alternatives.map { Feature.fromGeometry(line(it.geometry.points)) }))
         (s.getSource(SRC_DEST) as? GeoJsonSource)?.setGeoJson(
-            FeatureCollection.fromFeatures(listOfNotNull(destination?.let { Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat)) })))
+            FeatureCollection.fromFeatures(listOfNotNull(destination?.let { Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat)) }) +
+                // Stops: numbered lime pins ("n" = 1, 2 …).
+                stops.mapIndexed { i, p -> Feature.fromGeometry(Point.fromLngLat(p.lon, p.lat)).apply { addStringProperty("n", "${i + 1}") } }))
         if (main == null) stopTween()
     }
 
@@ -568,13 +626,17 @@ class MapController(private val context: Context) {
 
     /** Plain object building, safe off the UI thread. */
     private fun features(shapes: List<LaneRibbonBuilder.Shape>): FeatureCollection = FeatureCollection.fromFeatures(shapes.map { sh ->
-        val geom = if (sh.polygon) Polygon.fromLngLats(listOf(sh.points.map { Point.fromLngLat(it.lon, it.lat) }))
-        else line(sh.points)
+        val geom = when {
+            sh.kind == LaneRibbonBuilder.Kind.BIKE_SYMBOL -> Point.fromLngLat(sh.points[0].lon, sh.points[0].lat)
+            sh.polygon -> Polygon.fromLngLats(listOf(sh.points.map { Point.fromLngLat(it.lon, it.lat) }))
+            else -> line(sh.points)
+        }
         Feature.fromGeometry(geom).apply {
             addStringProperty("k", sh.kind.name)
             addNumberProperty("w", sh.widthM)
             if (sh.opacity != 1.0) addNumberProperty("o", sh.opacity)
             if (sh.index >= 0) addNumberProperty("i", sh.index)
+            if (sh.kind == LaneRibbonBuilder.Kind.BIKE_SYMBOL) addNumberProperty("b", sh.bearing)
         }
     })
 
@@ -607,7 +669,10 @@ class MapController(private val context: Context) {
     private var roadBikes = true
     private var roadExtras = LaneRibbonBuilder.RoadExtras()
     private val roadChunks = HashMap<Int, List<LaneRibbonBuilder.Shape>>()
+    /** Carriageways beside the route in its direction (context lanes, e.g. a parallel motorway carriageway). */
+    private var sideShapes: List<LaneRibbonBuilder.Shape> = emptyList()
     private var roadClosuresOn = false
+    @Volatile private var sideRoute: Route? = null
     private var shownChunks: Set<Int> = emptySet()
 
     /**
@@ -631,7 +696,7 @@ class MapController(private val context: Context) {
             LaneRibbonBuilder.buildRoad(route, c * ROAD_CHUNK, minOf(route.distance, (c + 1) * ROAD_CHUNK), showBikeLanes, roadExtras)
         }
         roadChunks.keys.retainAll { it in (first - 1)..(want.max() + 1) }
-        return want to features(want.sorted().flatMap { roadChunks[it].orEmpty() })
+        return want to features(want.sorted().flatMap { roadChunks[it].orEmpty() } + sideShapes)
     }
 
     /** What the shown highlight was built for; a new build is needed only when this changes or the car moved on. */
@@ -655,6 +720,13 @@ class MapController(private val context: Context) {
                 val result = runCatching {
                     withContext(Dispatchers.Default) {
                         val r = LaneRibbonBuilder.build(snap.route, snap.lanes, along, fade = fade, withChevrons = chev)
+                        if (snap.route !== sideRoute) {
+                            sideRoute = snap.route
+                            sideShapes = runCatching {
+                                de.lanewise.osm.StreetLanes.build(snap.route.sideRoads.map { de.lanewise.osm.OsmStreet(it.geometry, it.tags) })
+                                    .filter { it.kind != LaneRibbonBuilder.Kind.BIKE }
+                            }.getOrDefault(emptyList())
+                        }
                         val road = if (showRibbons && !streetsMode) buildRoad(snap.route, along, showBikeLanes, shown, furniture, closures) else null
                         Triple(r, if (showRibbons) features(r.shapes) else null, road)
                     }
@@ -713,18 +785,21 @@ class MapController(private val context: Context) {
         val route = snap.route
         val along = snap.distanceAlong
         setNavigating(true)
-        carLabel = if (optRoadName) route.steps.lastOrNull { it.distanceAlong <= along + 1 }?.let { st ->
+        carLabel = if (optRoadName && !snap.offRoute) route.steps.lastOrNull { it.distanceAlong <= along + 1 }?.let { st ->
             val name = st.name.ifBlank { st.ref.orEmpty() }
             listOfNotNull(name.takeIf { it.isNotBlank() }, snap.speedLimit?.let { "$it km/h" }).joinToString("  ·  ").ifBlank { null }
         } else null
 
         if (snap.offRoute) {
+            if (offRoutePos == null) shownOff = lastShownPos ?: snap.fix.position
             offRoutePos = snap.fix.position
             offRouteBearing = snap.fix.bearing?.toDouble() ?: offRouteBearing
+            offRouteSpeed = snap.fix.speedMps.toDouble()
+            offRouteAt = now
             tweenRoute = null
         } else {
-            offRoutePos = null
-            val jump = shownAlong.isNaN() || tweenRoute !== route || abs(along - shownAlong) > 300
+            offRoutePos = null; shownOff = null
+            val jump = shownAlong.isNaN() || tweenRoute !== route || abs(along - shownAlong) > 300 || snap.fix.seek
             val dt = (now - fixAt) / 1000.0
             if (jump) {
                 shownAlong = along; tweenRoute = route; speedMps = snap.fix.speedKmh / 3.6
@@ -777,8 +852,8 @@ class MapController(private val context: Context) {
         }
 
         if (snap.offRoute) {
-            ribbon = null
-            clearLanes()
+            // Once when leaving the route (not at every fix: emptying the sources each time made MapLibre re-render).
+            if (ribbon != null || roadRoute != null || geomKey != null) { ribbon = null; geomKey = null; clearLanes() }
         } else {
             if (!showRibbons) clearLaneSources()
             // Streets mode: the street layer (all streets around the car) stays, only the highlight is the route's.
@@ -790,7 +865,7 @@ class MapController(private val context: Context) {
 
     fun stopTween() {
         geomGeneration++; geomPending = null
-        tweenRoute = null; offRoutePos = null; ribbon = null
+        tweenRoute = null; offRoutePos = null; shownOff = null; ribbon = null
         (style?.getSource(SRC_LANES_DYN) as? GeoJsonSource)?.setGeoJson(FeatureCollection.fromFeatures(emptyList()))
         roadRoute = null; shownChunks = emptySet(); geomKey = null
         setNavigating(false); carLabel = null
@@ -809,7 +884,15 @@ class MapController(private val context: Context) {
         val pos: LatLon
         val targetBearing: Double
         if (off != null) {
-            pos = off; targetBearing = offRouteBearing
+            val since = ((SystemClock.uptimeMillis() - offRouteAt) / 1000.0).coerceIn(0.0, 1.5)
+            val predicted = Geo.destination(off, offRouteBearing, offRouteSpeed * since)
+            val cur = shownOff ?: predicted
+            // Move on at the measured speed and pull gently towards the prediction (a far jump - first fix - snaps).
+            val gap = Geo.distance(cur, predicted)
+            val moved = if (gap > 80) predicted
+                else Geo.destination(cur, Geo.bearing(cur, predicted), (offRouteSpeed * dt).coerceAtMost(gap) + (gap - offRouteSpeed * dt).coerceAtLeast(0.0) * ease(dt, 0.6))
+            shownOff = moved
+            pos = moved; targetBearing = offRouteBearing
         } else {
             val route = tweenRoute ?: return
             val since = ((SystemClock.uptimeMillis() - fixAt) / 1000.0).coerceIn(0.0, 1.5)
@@ -848,8 +931,10 @@ class MapController(private val context: Context) {
         }
         // The car on the screen overlay, after the camera moved: while following it sits exactly at the camera target
         // (never lags the map); panned away it is placed under the current camera.
+        lastShownPos = pos
         updateCar(pos, shownBearing)
     }
+    private var lastShownPos: LatLon? = null
 
     /** Share of the remaining distance covered in [dt] s by exponential easing with time constant [tau] s. */
     private fun ease(dt: Double, tau: Double) = 1.0 - kotlin.math.exp(-dt / tau)
@@ -917,18 +1002,39 @@ class MapController(private val context: Context) {
         return bmp
     }
 
-    private fun pinBitmap(): Bitmap {
+    /**
+     * Sinnbild Radfahrer (StVO 1992, the symbol of Zeichen 237), white on transparent, from its SVG paths (1000 x 600):
+     * two wheels and the frame, sized on the map by [metresToIconScale].
+     */
+    private fun bikeSymbolBitmap(): Bitmap {
+        // Stretched 1.8 x along the lane, like the paint on the road (readable from a low angle).
+        val k = BIKE_BMP_W / 1000f
+        val bmp = Bitmap.createBitmap(BIKE_BMP_W, (600 * k * 1.8f).toInt(), Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        c.scale(k, k * 1.8f)
+        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFFFFF.toInt() }
+        p.style = Paint.Style.STROKE; p.strokeWidth = 40f
+        c.drawCircle(215f, 409f, 161f, p)
+        c.drawCircle(790f, 406f, 161f, p)
+        p.style = Paint.Style.FILL
+        val frame = androidx.core.graphics.PathParser.createPathFromPathData(BIKE_FRAME_PATH)
+        frame.fillType = android.graphics.Path.FillType.EVEN_ODD
+        c.drawPath(frame, p)
+        return bmp
+    }
+
+    private fun pinBitmap(body: Int = 0xFF6C4CF5.toInt(), dot: Int = 0xFFB8F33A.toInt()): Bitmap {
         val bmp = Bitmap.createBitmap(72, 96, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         val p = Paint(Paint.ANTI_ALIAS_FLAG)
-        p.color = 0xFF6C4CF5.toInt()
+        p.color = body
         val path = Path().apply {
             moveTo(36f, 94f); cubicTo(36f, 94f, 4f, 56f, 4f, 36f); cubicTo(4f, 16f, 18f, 4f, 36f, 4f)
             cubicTo(54f, 4f, 68f, 16f, 68f, 36f); cubicTo(68f, 56f, 36f, 94f, 36f, 94f); close()
         }
         c.drawPath(path, p)
-        p.color = 0xFFB8F33A.toInt()
-        c.drawCircle(36f, 36f, 13f, p)
+        p.color = dot
+        c.drawCircle(36f, 36f, if (dot == 0xFFFFFFFF.toInt()) 20f else 13f, p)
         return bmp
     }
 
@@ -947,6 +1053,18 @@ class MapController(private val context: Context) {
         private const val ROAD_CHUNK = 1000.0
         private const val SRC_CAR = "lw-car"
         private const val SRC_CAR3D = "lw-car3d"
+        private const val IMG_BIKE = "lw-bike-symbol"
+        private const val BIKE_BMP_W = 200
+        /** Frame of the Sinnbild Radfahrer (Wikimedia Commons "Sinnbild Radfahrer, StVO 1992.svg", official sign symbol). */
+        private const val BIKE_FRAME_PATH = "M 429.48437,15.467118 C 296.91790,16.759190 319.39993,1.7711686 248.07762,230.98455 " +
+            "C 189.97511,414.12586 196.30387,394.15363 196.00000,407.00000 C 195.78704,416.98022 203.84333,424.89312 213.96694,425.57043 " +
+            "C 235.02054,423.44166 226.16492,427.84741 299.15748,201.18078 C 565.86963,482.53640 465.80592,436.91194 609.34064,442.62576 " +
+            "C 797.98299,440.81686 813.31557,452.44550 815.55516,424.79518 C 815.29674,415.40613 810.90371,409.80716 681.43820,121.67535 " +
+            "L 693.84208,87.564675 L 736.48042,86.789433 L 734.92994,51.128275 L 576.00521,51.128275 " +
+            "C 561.96471,70.337063 581.69033,70.250925 652.75423,86.014190 L 640.35035,120.90010 L 323.27614,121.67535 " +
+            "C 344.63838,47.079788 332.57905,51.731243 428.70913,51.903518 L 429.48437,15.467118 z " +
+            "M 314.11415,159.91012 L 624.37752,159.36001 L 534.70921,400.30922 L 314.11415,159.91012 z " +
+            "M 661.78516,174.21304 L 573.76718,405.26023 L 766.30650,405.81034 L 661.78516,174.21304 z"
         private const val SRC_CHEV = "lw-chevrons"
         private const val SRC_LABEL = "lw-car-label"
         private const val SRC_ABPOI = "lw-ab-poi"
@@ -961,5 +1079,6 @@ class MapController(private val context: Context) {
             "&REQUEST=GetMap&LAYERS=ni_dop20&STYLES=&CRS=EPSG:3857&BBOX={bbox-epsg-3857}&WIDTH=256&HEIGHT=256&FORMAT=image/jpeg"
         private const val IMG_CAR = "lw-car-img"
         private const val IMG_DEST = "lw-dest-img"
+        private const val IMG_STOP = "lw-stop-img"
     }
 }

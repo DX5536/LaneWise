@@ -19,7 +19,7 @@ de.lanewise
 ├── routing/                          RoutingProvider, OSRM (FOSSGIS), TomTom, RouteScorer (traffic)
 ├── offline/                          OSM graph builder (Overpass), compact graph, A* router, tile packs
 ├── speed/SpeedLimitProvider.kt       OSM maxspeed along the route corridor (Overpass)
-├── traffic/                          Autobahn GmbH API, TomTom, HERE, Mobilithek DATEX II
+├── traffic/                          Autobahn GmbH API, TomTom, HERE, Mobilithek DATEX II (MobilithekClient, pure Kotlin)
 ├── location/Location.kt              raw GNSS (LocationManager GPS_PROVIDER + GnssStatus), simulator
 ├── nav/                              NavigationEngine (snap, reroute, speed status, announcements),
 │                                     Phrases (DE/EN/VI, voice segments), VoiceGuide (OmniVoice packs → Android TTS),
@@ -27,7 +27,8 @@ de.lanewise
 │                                     NavigationService (foreground service: guidance with the screen off)
 ├── osm/                              OsmTags, StreetLanes (all streets around the car, clipped at junctions),
 │                                     AerialLanes (lane counts from aerial photos, applied over OSM),
-│                                     LaneReports ("lanes wrong here" → lane_reports.geojson)
+│                                     LaneReports ("lanes wrong here" → lane_reports.geojson),
+│                                     LaneOverrides (hand-checked lane patches, lane_overrides.json, docs/LANE_OVERRIDES.md)
 ├── search/Geocoder.kt                Photon (OSM) search, Germany only
 ├── settings/Settings.kt              DataStore-backed AppSettings
 └── ui/

@@ -28,12 +28,12 @@ import java.util.Locale
 class TomTomRoutingProvider(private val apiKey: String) : RoutingProvider {
     override val id = "tomtom"
     override val requiresNetwork = true
+    override val supportsVia = true
 
     override suspend fun route(request: RouteRequest): List<Route> {
         if (apiKey.isBlank()) throw RoutingException("TomTom API key missing")
-        val o = request.origin
-        val d = request.destination
-        val locs = String.format(Locale.US, "%.6f,%.6f:%.6f,%.6f", o.lat, o.lon, d.lat, d.lon)
+        val locs = (listOf(request.origin) + request.via + request.destination)
+            .joinToString(":") { String.format(Locale.US, "%.6f,%.6f", it.lat, it.lon) }
         val avoid = buildString {
             if (request.avoidTolls) append("&avoid=tollRoads")
             if (request.avoidMotorways) append("&avoid=motorways")

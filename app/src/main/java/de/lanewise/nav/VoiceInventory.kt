@@ -50,6 +50,35 @@ object VoiceInventory {
     fun normalize(s: String): String =
         s.lowercase(Locale.ROOT).trim().split(Regex("\\s+")).joinToString(" ").trimEnd('.', '!')
 
+    /**
+     * The segments of an announcement a voice pack can say in its own voice ([has]: a clip exists): all of them, or -
+     * when a road name / ref / destination is missing (streets outside the pack's region) - the sentence without it:
+     * the preposition before the road ("onto" / "auf" / "vào") goes too, and so does "towards" before a missing
+     * destination ("In 300 metres turn right" instead of the whole sentence by Android TTS; the name is on screen).
+     * Null if a fixed phrase itself is missing: then Android TTS says the whole sentence (never two voices in one).
+     */
+    fun sayable(parts: List<String>, has: (String) -> Boolean): List<String>? {
+        if (parts.isEmpty()) return null
+        if (parts.all(has)) return parts
+        // Only a name may be left out: the first missing segment must follow "onto" / "auf" / "vào" or "towards".
+        val first = parts.indexOfFirst { !has(it) }
+        if (first == 0) return null
+        val kept = parts.take(first).toMutableList()
+        if (normalize(kept.last()) in TOWARDS) {
+            kept.removeAt(kept.lastIndex)
+            return kept.takeIf { it.isNotEmpty() }
+        }
+        val last = kept.last().trimEnd('.', '!')
+        val prep = PREPOSITIONS.firstOrNull { normalize(last).endsWith(it) } ?: return null
+        val bare = last.substring(0, last.length - prep.length).trimEnd()
+        if (!has(bare)) return null
+        kept[kept.lastIndex] = bare
+        return kept
+    }
+
+    private val TOWARDS = setOf("richtung", "towards", "hướng")
+    private val PREPOSITIONS = listOf(" auf", " onto", " vào")
+
     fun code(lang: AppLanguage) = when (lang) {
         AppLanguage.GERMAN -> "de"
         AppLanguage.ENGLISH -> "en"

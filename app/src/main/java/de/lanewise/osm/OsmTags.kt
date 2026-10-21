@@ -103,6 +103,31 @@ object OsmTags {
         }
     }
 
+    /**
+     * Per lane in travel direction (left → right): may a car use it? From `access:lanes`, `vehicle:lanes`,
+     * `motor_vehicle:lanes`, `motorcar:lanes` (no / psv / bus / designated / private …) and `bus:lanes` / `psv:lanes`
+     * = designated (a bus lane, unless a car tag opens it). Null when no lane access is tagged. Hollerithallee:
+     * `access:lanes:forward=psv|yes|yes|yes` - the unmarked left lane is a bus lane.
+     */
+    fun carLanes(tags: Map<String, String>, forward: Boolean, oneway: Boolean): List<Boolean>? {
+        val dir = if (forward) "forward" else "backward"
+        fun v(key: String) = (tags["$key:$dir"] ?: if (oneway && forward) tags[key] else null)?.split('|')?.map { it.trim() }
+        val car = listOf("access:lanes", "vehicle:lanes", "motor_vehicle:lanes", "motorcar:lanes").mapNotNull(::v)
+        val designated = listOf("bus:lanes", "psv:lanes").mapNotNull(::v)
+        if (car.isEmpty() && designated.isEmpty()) return null
+        val n = (car + designated).maxOf { it.size }
+        if ((car + designated).any { it.size != n }) return null   // inconsistent tagging: not used
+        val closed = setOf("no", "psv", "bus", "designated", "private", "delivery", "agricultural", "forestry", "emergency")
+        return List(n) { i ->
+            val carValue = car.lastOrNull { it[i].isNotEmpty() }?.get(i)   // the most specific car tag wins
+            when {
+                carValue != null -> carValue !in closed
+                designated.any { it[i] == "designated" } -> false
+                else -> true
+            }
+        }
+    }
+
     /** Lane-change permissions in travel direction (`change:lanes*`), or null if unrestricted / not tagged. */
     fun changeLanes(tags: Map<String, String>, forward: Boolean, oneway: Boolean): List<Int>? {
         val v = tags[if (forward) "change:lanes:forward" else "change:lanes:backward"]
@@ -110,7 +135,24 @@ object OsmTags {
         return v?.let { de.lanewise.lane.ChangeSpan.parse(it) }
     }
 
-    /** Car lanes in travel direction ([forward] = along the OSM way), or null if not tagged. */
+    /**
+     * Of the [dropped] lanes the road loses after this way (fewer lanes on the next way, no junction), how many end on
+     * the right edge: the rightmost lanes tagged `merge_to_left` in `turn:lanes` in travel direction. 0 when the way
+     * tags no merge on the right - then the side that ends is not known (or it is the left).
+     */
+    fun endedOnRight(tags: Map<String, String>, forward: Boolean, oneway: Boolean, dropped: Int): Int {
+        if (dropped <= 0) return 0
+        val v = tags[if (forward) "turn:lanes:forward" else "turn:lanes:backward"] ?: if (oneway) tags["turn:lanes"] else null
+        val lanes = v?.split('|')?.map { it.trim() } ?: return 0
+        return lanes.asReversed().takeWhile { it == "merge_to_left" }.size.coerceAtMost(dropped)
+    }
+
+    /**
+     * Car lanes in travel direction ([forward] = along the OSM way), or null if not tagged.
+     * On a two-way street `lanes` counts both directions (OSM): `lanes=4` is 2 + 2, not 4 lanes for us. Lanes of the
+     * other direction and a shared centre lane (`lanes:both_ways`, e.g. a turn lane for both) are taken off when tagged:
+     * `lanes=3` + `lanes:backward=1` is 2 for us, `lanes=3` + `lanes:both_ways=1` is 1 per direction.
+     */
     fun lanesInDirection(tags: Map<String, String>, forward: Boolean, oneway: Boolean): Int? {
         val dir = if (forward) "forward" else "backward"
         tags["lanes:$dir"]?.toIntOrNull()?.let { return it }
@@ -120,7 +162,25 @@ object OsmTags {
             tags["turn:lanes"]?.let { return it.split('|').size }
             return null
         }
-        return tags["lanes"]?.toIntOrNull()?.let { (it / 2).coerceAtLeast(1) }
+        val total = tags["lanes"]?.substringBefore(';')?.trim()?.toIntOrNull() ?: return null
+        val both = tags["lanes:both_ways"]?.toIntOrNull() ?: 0
+        val otherDir = if (forward) "backward" else "forward"
+        val other = tags["lanes:$otherDir"]?.toIntOrNull() ?: tags["turn:lanes:$otherDir"]?.split('|')?.size
+        return if (other != null) (total - other - both).coerceAtLeast(1) else ((total - both) / 2).coerceAtLeast(1)
+    }
+
+    /**
+     * One-way direction of a way: 1 = one-way along the way, -1 = one-way against it (`oneway=-1`), 0 = two-way.
+     * `oneway=yes|true|1`, and implied for motorways, motorway links and roundabouts (unless `oneway=no`).
+     */
+    fun onewayDir(tags: Map<String, String>): Int {
+        when (tags["oneway"]) {
+            "yes", "true", "1" -> return 1
+            "-1", "reverse" -> return -1
+            "no", "false", "0" -> return 0
+        }
+        val hw = tags["highway"].orEmpty()
+        return if (hw == "motorway" || hw == "motorway_link" || tags["junction"] == "roundabout" || tags["junction"] == "circular") 1 else 0
     }
 
     const val NO_LIMIT = 0

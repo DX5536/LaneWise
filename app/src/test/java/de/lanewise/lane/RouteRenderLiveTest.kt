@@ -30,12 +30,12 @@ class RouteRenderLiveTest {
         val routes = OsrmRoutingProvider().route(req)
         println("${routes.size} routes: " + routes.joinToString { "${it.distance.toInt()} m" })
         var route: Route = routes.getOrElse(System.getenv("LANEWISE_ALT")?.toIntOrNull() ?: 1) { routes.first() }
-        val c = runCatching { SpeedLimitProvider().corridor(route.geometry, 0.0, route.distance) }
+        val c = runCatching { SpeedLimitProvider().corridor(route.geometry, 0.0, route.distance, route.osmNodes) }
             .onFailure { println("corridor unavailable (${it.message}) - checking without OSM lane counts") }.getOrNull()
-        if (c != null) route = route.copy(laneChanges = c.laneChanges, bikeLanes = c.bikeLanes).withLaneCounts(c.laneCounts)
-        println("route ${route.distance.toInt()} m, ${route.laneSites.size} lane sites, ${route.laneCounts.size} lane-count spans")
+        if (c != null) route = route.copy(laneChanges = c.laneChanges, bikeLanes = c.bikeLanes, sideRoads = c.sideRoads).withOsmTurnLanes(c.turnLanes.map { it.distanceAlong to it.lanes }).withLaneAccess(c.laneAccess.map { it.distanceAlong to it.carLanes }).withLaneCounts(c.laneCounts)
+        println("route ${route.distance.toInt()} m, ${route.laneSites.size} lane sites, ${route.laneCounts.size} lane-count spans, ${route.sideRoads.size} side roads")
         route.steps.forEach { st -> println("  step @${st.distanceAlong.toInt()} ${st.maneuver.type} ${st.maneuver.modifier} ${st.name}") }
-        route.laneSites.forEach { println("  site @${it.distanceAlong.toInt()} lanes=${it.lanes} turn=${it.turn} maneuver=${it.isManeuver} valid=${it.providerValid}") }
+        route.laneSites.forEach { println("  site @${it.distanceAlong.toInt()} lanes=${it.lanes} turn=${it.turn} maneuver=${it.isManeuver} valid=${it.providerValid}" + (it.connectivity?.let { c -> " conn=$c" } ?: "") + " allowed=${it.allowed().toList()}") }
 
         val road = (0 until (route.distance / 1000).toInt() + 1).flatMap {
             LaneRibbonBuilder.buildRoad(route, it * 1000.0, minOf(route.distance, (it + 1) * 1000.0))
@@ -48,7 +48,7 @@ class RouteRenderLiveTest {
         var car = 20.0
         while (car < route.distance - 50) {
             val state = guidance.update(route.laneSites, car, avoidLaneChanges = true, keepRight = true, route.laneChanges,
-                route::laneCountAt.takeIf { route.laneCounts.isNotEmpty() })
+                route::laneCountAt.takeIf { route.laneCounts.isNotEmpty() }, { d -> route.roadSpanAt(d)?.kind })
             val live = LaneRibbonBuilder.build(route, state, car)
             for (sh in live.shapes.filter { it.kind != LaneRibbonBuilder.Kind.TURN_ARROW }) {
                 val out = sh.points.filter { p -> surfaces.none { inside(it, p) } && nearestOffset(route, p) > 1.0 }
@@ -67,9 +67,15 @@ class RouteRenderLiveTest {
                 if (Geo.distance(pts[i], pts[i + 1]) < 0.3) continue
                 val pr = route.geometry.project(pts[i]) ?: continue
                 val seg = Geo.bearing(pts[i], pts[i + 1])
-                if (abs(Geo.bearingDelta(seg, route.geometry.bearingAt(pr.distanceAlong))) > 100) {
+                // Against the road both here and just after this point: the outer edge of a sharp turn projects onto the
+                // corner, where the route line still has the old street's bearing (Isernhagener Straße → Dragonerstraße,
+                // a 113° right turn, was a false "fold").
+                fun off(d: Double) = abs(Geo.bearingDelta(seg, route.geometry.bearingAt(d)))
+                if (off(pr.distanceAlong) > 100 && off(pr.distanceAlong + 12) > 100) {
                     problems++
-                    println("${sh.kind} runs backwards at route ${pr.distanceAlong.toInt()} m")
+                    println("${sh.kind} runs backwards at route ${pr.distanceAlong.toInt()} m (point $i of ${pts.size}, " +
+                        "seg ${seg.toInt()}°, road ${route.geometry.bearingAt(pr.distanceAlong).toInt()}°, offset ${pr.signedOffset.toInt()} m, " +
+                        "len ${"%.1f".format(Geo.distance(pts[i], pts[i + 1]))} m)")
                     break
                 }
             }
@@ -78,7 +84,7 @@ class RouteRenderLiveTest {
         val g2 = LaneGuidance()
         for (st in route.steps.filter { it.maneuver.type != de.lanewise.core.model.ManeuverType.DEPART }) {
             val state = g2.update(route.laneSites, st.distanceAlong - 60, true, true, route.laneChanges,
-                route::laneCountAt.takeIf { route.laneCounts.isNotEmpty() })
+                route::laneCountAt.takeIf { route.laneCounts.isNotEmpty() }, { d -> route.roadSpanAt(d)?.kind })
             val a = state.nextAdvice ?: continue
             println("  before step @${st.distanceAlong.toInt()} ${st.maneuver.modifier}: next site @${a.site.distanceAlong.toInt()} " +
                 "lanes=${a.site.lanes} turn=${a.site.turn} rec=${a.recommended}")
@@ -89,12 +95,37 @@ class RouteRenderLiveTest {
             var d = 0.0
             while (d < route.distance) {
                 val s = g3.update(route.laneSites, d, true, true, route.laneChanges,
-                    route::laneCountAt.takeIf { route.laneCounts.isNotEmpty() })
+                    route::laneCountAt.takeIf { route.laneCounts.isNotEmpty() }, { d -> route.roadSpanAt(d)?.kind })
                 val a = s.nextAdvice
                 if (a != null && a.site.distanceAlong - d < 400) println("  car ${d.toInt()} lanesHere=${route.laneCountAt(d)} assumed=${s.assumedLateral} " +
                     "site@${a.site.distanceAlong.toInt()} ${a.site.lanes} turn=${a.site.turn} man=${a.site.isManeuver} rec=${a.recommended} " +
                     "chg=${a.changeFromPrevious} pending=${s.pendingChange?.let { "${it.lanes}@${it.startAt.toInt()}" }}")
                 d += 20.0
+            }
+        }
+        // 5) Lane-count profile (LANEWISE_PROFILE=1): OSM lanes, road kind and the drawn lane count every 200 m
+        //    (LANEWISE_PROFILE_STEP=m for a finer one), with the position for checking on a map.
+        // LANEWISE_SIGNALS=1: junction traffic lights where the route turns and no lane data is known - the list for the
+        // owner to map `turn:lanes` in OSM (the app shows "No lane data" there).
+        if (System.getenv("LANEWISE_SIGNALS") == "1" && c != null) {
+            val lights = c.features.filter { it.kind == de.lanewise.core.model.FeatureKind.TRAFFIC_SIGNALS && !it.pedestrian }
+            for (st in route.steps.filter { it.maneuver.type == de.lanewise.core.model.ManeuverType.TURN ||
+                    it.maneuver.type == de.lanewise.core.model.ManeuverType.END_OF_ROAD }) {
+                val light = lights.firstOrNull { kotlin.math.abs(it.distanceAlong - st.distanceAlong) < 50 } ?: continue
+                if (route.laneSites.any { kotlin.math.abs(it.distanceAlong - st.distanceAlong) < 40 }) continue
+                val p = light.position
+                println("NO_LANES ${st.maneuver.modifier} onto ${st.name.ifBlank { "?" }} @${st.distanceAlong.toInt()} m  " +
+                    "%.5f,%.5f  lanes before: ${route.laneCountAt(st.distanceAlong - 30) ?: "?"}".format(java.util.Locale.US, p.lat, p.lon))
+            }
+        }
+        if (System.getenv("LANEWISE_PROFILE") == "1") {
+            var d = 0.0
+            while (d < route.distance) {
+                val span = route.roadSpanAt(d)
+                val pos = route.geometry.pointAt(d)
+                println("  profile ${d.toInt()} osmLanes=${route.laneCountAt(d)} kind=${span?.kind} twoWay=${span?.twoWay} " +
+                    "nominal=${LaneRibbonBuilder.drawnLanes(route, d)} drawn=${"%.1f".format(LaneRibbonBuilder.drawnLaneWidth(route, d) ?: 0.0)} @${"%.5f,%.5f".format(java.util.Locale.US, pos.lat, pos.lon)}")
+                d += System.getenv("LANEWISE_PROFILE_STEP")?.toDoubleOrNull() ?: 200.0
             }
         }
         println("problems: $problems")

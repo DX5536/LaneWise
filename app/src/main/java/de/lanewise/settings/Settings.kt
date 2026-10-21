@@ -25,6 +25,10 @@ data class AppSettings(
     val avoidLaneChanges: Boolean = true,
     val keepRight: Boolean = true,
     val showLaneScene: Boolean = true,
+    /** Countdown fill in the lane box under the manoeuvre banner (shrinks towards the junction). */
+    val laneBoxCountdown: Boolean = true,
+    /** Driving time so far (stopwatch since the start of navigation) next to the remaining time. */
+    val showDriveTimer: Boolean = true,
     /** AMAP-style navigation view: no junction box, the camera zooms in at decisions and out on plain stretches. */
     val immersiveView: Boolean = true,
     /** Petal style: draw the real streets around the car while navigating too; only the route highlight on top. */
@@ -48,6 +52,8 @@ data class AppSettings(
     val overSpeedWarning: Boolean = true,
     /** Tolerance above the limit before the red border shows (km/h). */
     val overSpeedOffset: Int = 5,
+    /** Strength of the speed-warning glow around the screen (0.2 = faint … 2 = strong), owner's request. */
+    val speedGlow: Float = 1f,
     val underSpeedWarning: Boolean = false,
     /** How far below the limit counts as "too slow" (km/h); only above [underSpeedMinSpeed]. */
     val underSpeedOffset: Int = 20,
@@ -112,6 +118,8 @@ class SettingsRepository(private val context: Context) {
         val avoid = booleanPreferencesKey("avoid_lane_changes")
         val keepRight = booleanPreferencesKey("keep_right")
         val laneScene = booleanPreferencesKey("lane_scene")
+        val laneBoxCountdown = booleanPreferencesKey("lane_box_countdown")
+        val driveTimer = booleanPreferencesKey("drive_timer")
         val laneSceneDist = intPreferencesKey("lane_scene_distance")
         val junctionZoom = booleanPreferencesKey("junction_zoom")
         val autoZoom = booleanPreferencesKey("auto_zoom")
@@ -140,6 +148,7 @@ class SettingsRepository(private val context: Context) {
         val voicePacks = stringPreferencesKey("voice_packs")
         val over = booleanPreferencesKey("over_speed")
         val overOff = intPreferencesKey("over_speed_offset")
+        val speedGlow = floatPreferencesKey("speed_glow")
         val under = booleanPreferencesKey("under_speed")
         val underOff = intPreferencesKey("under_speed_offset")
         val underMin = intPreferencesKey("under_speed_min")
@@ -166,6 +175,8 @@ class SettingsRepository(private val context: Context) {
             avoidLaneChanges = p[K.avoid] ?: d.avoidLaneChanges,
             keepRight = p[K.keepRight] ?: d.keepRight,
             showLaneScene = p[K.laneScene] ?: d.showLaneScene,
+            laneBoxCountdown = p[K.laneBoxCountdown] ?: d.laneBoxCountdown,
+            showDriveTimer = p[K.driveTimer] ?: d.showDriveTimer,
             immersiveView = p[K.immersive] ?: d.immersiveView,
             streetsWhileDriving = p[K.streetsDriving] ?: d.streetsWhileDriving,
             laneSceneDistance = p[K.laneSceneDist] ?: d.laneSceneDistance,
@@ -179,6 +190,7 @@ class SettingsRepository(private val context: Context) {
             voicePacks = p[K.voicePacks] ?: d.voicePacks,
             overSpeedWarning = p[K.over] ?: d.overSpeedWarning,
             overSpeedOffset = p[K.overOff] ?: d.overSpeedOffset,
+            speedGlow = p[K.speedGlow] ?: d.speedGlow,
             underSpeedWarning = p[K.under] ?: d.underSpeedWarning,
             underSpeedOffset = p[K.underOff] ?: d.underSpeedOffset,
             underSpeedMinSpeed = p[K.underMin] ?: d.underSpeedMinSpeed,
@@ -221,6 +233,8 @@ class SettingsRepository(private val context: Context) {
             p[K.avoid] = s.avoidLaneChanges
             p[K.keepRight] = s.keepRight
             p[K.laneScene] = s.showLaneScene
+            p[K.laneBoxCountdown] = s.laneBoxCountdown
+            p[K.driveTimer] = s.showDriveTimer
             p[K.immersive] = s.immersiveView
             p[K.streetsDriving] = s.streetsWhileDriving
             p[K.laneSceneDist] = s.laneSceneDistance
@@ -234,6 +248,7 @@ class SettingsRepository(private val context: Context) {
             p[K.voicePacks] = s.voicePacks
             p[K.over] = s.overSpeedWarning
             p[K.overOff] = s.overSpeedOffset
+            p[K.speedGlow] = s.speedGlow
             p[K.under] = s.underSpeedWarning
             p[K.underOff] = s.underSpeedOffset
             p[K.underMin] = s.underSpeedMinSpeed

@@ -2,6 +2,8 @@ package de.lanewise.core.net
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.cancelChildren
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
 import okhttp3.FormBody
@@ -25,8 +27,40 @@ object Overpass {
     )
     private val BACKOFF_MS = longArrayOf(0, 3_000, 8_000)
 
+    /** Mirrors in the order they are tried: healthiest first after a [ServerHealth.probe], else [ENDPOINTS]. */
+    @Volatile var preferred: List<String> = ENDPOINTS
+
     private val longClient: OkHttpClient by lazy {
         Http.client.newBuilder().readTimeout(15, TimeUnit.MINUTES).build()
+    }
+
+    private suspend fun once(url: String, query: String): JsonElement {
+        val req = Request.Builder().url(url).header("Accept", "application/json")
+            .post(FormBody.Builder().add("data", query).build()).build()
+        val r = Http.fetch(req)
+        if (!r.ok) throw IOException("Overpass HTTP ${r.code} at $url")
+        if (!r.contentType.contains("json") || !r.body.trimStart().startsWith("{")) {
+            throw IOException("Overpass returned no JSON (busy?) at $url")
+        }
+        return withContext(kotlinx.coroutines.Dispatchers.Default) { Http.json.parseToJsonElement(r.body) }
+    }
+
+    /**
+     * Interactive searches (smart stops): the [n] healthiest mirrors at once, the first answer wins and the other
+     * request is cancelled — on busy days one after the other took ~40 s. Falls back to [json] if all of them fail.
+     */
+    suspend fun jsonRace(query: String, n: Int = 2): JsonElement {
+        val first = kotlinx.coroutines.coroutineScope {
+            val result = kotlinx.coroutines.CompletableDeferred<JsonElement?>()
+            val jobs = preferred.take(n).map { url ->
+                launch { runCatching { once(url, query) }.onSuccess { result.complete(it) } }
+            }
+            launch { jobs.forEach { it.join() }; result.complete(null) }
+            val r = result.await()
+            coroutineContext.cancelChildren()
+            r
+        }
+        return first ?: json(query)
     }
 
     /** Small queries: returns the parsed JSON. Asynchronous and cancellable (see [Http.fetch]). */
@@ -34,16 +68,9 @@ object Overpass {
         var last: Exception? = null
         for (wait in BACKOFF_MS) {
             if (wait > 0) delay(wait)
-            for (url in ENDPOINTS) {
+            for (url in preferred) {
                 try {
-                    val req = Request.Builder().url(url).header("Accept", "application/json")
-                        .post(FormBody.Builder().add("data", query).build()).build()
-                    val r = Http.fetch(req)
-                    if (!r.ok) throw IOException("Overpass HTTP ${r.code} at $url")
-                    if (!r.contentType.contains("json") || !r.body.trimStart().startsWith("{")) {
-                        throw IOException("Overpass returned no JSON (busy?) at $url")
-                    }
-                    return withContext(kotlinx.coroutines.Dispatchers.Default) { Http.json.parseToJsonElement(r.body) }
+                    return once(url, query)
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -61,7 +88,7 @@ object Overpass {
         var last: Exception? = null
         for (wait in BACKOFF_MS) {
             if (wait > 0) delay(wait)
-            for (url in ENDPOINTS) {
+            for (url in preferred) {
                 try {
                     return withContext(Dispatchers.IO) { execute(url, query, client, read) }
                 } catch (e: Exception) {

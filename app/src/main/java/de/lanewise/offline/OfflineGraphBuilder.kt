@@ -19,7 +19,10 @@ import java.util.Locale
  * Downloads the drivable road network of a region from the Overpass API (fresh OSM data) and
  * converts it into an [OfflineGraph]. Runs once while online; afterwards routing works with GNSS only.
  */
-class OfflineGraphBuilder {
+class OfflineGraphBuilder(
+    /** Hand-checked lane patches, baked into the graph at download (re-download the region after changing them). */
+    private val overrides: de.lanewise.osm.LaneOverrides = de.lanewise.osm.LaneOverrides.EMPTY,
+) {
 
     data class Region(val id: String, val name: String, val south: Double, val west: Double, val north: Double, val east: Double)
 
@@ -161,7 +164,7 @@ class OfflineGraphBuilder {
             }
         }
         r.endObject()
-        if (type == "way" && nodeIds.size >= 2 && nodeIds.size == geom.size) acc.addWay(id, nodeIds, geom, tags)
+        if (type == "way" && nodeIds.size >= 2 && nodeIds.size == geom.size) acc.addWay(id, nodeIds, geom, overrides.apply(id, tags))
         if (type == "node" && !lat.isNaN() && !lon.isNaN()) OsmTags.feature(tags, LatLon(lat, lon), 0.0)?.let { acc.addFeature(lat, lon, it.encode()) }
     }
 

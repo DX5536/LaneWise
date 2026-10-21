@@ -1,13 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="432" height="432" viewBox="0 0 108 108">
-  <title>LaneWise</title>
-  <rect width="108" height="108" rx="24" fill="#6C4CF5"/>
-  <path fill="#4A33B8" opacity="0.6" d="M18,86 L98,86 L98,96 L18,96 Z"/>
-  <path fill="#0B0C10" d="M14,80 L94,80 L94,91 L14,91 Z"/>
-  <path fill="#15171D" d="M94,80 L66,24 L66,30 L94,91 Z"/>
-  <path fill="#2B2F38" d="M42,24 L66,24 L94,80 L14,80 Z"/>
-  <path fill="#B8F33A" d="M67.3,80 L94,80 C88,64 64,54 60.7,40 L58,24 L50,24 L47.3,40 C50,54 70,62 67.3,80 Z"/>
-  <path stroke="#FFFFFF" stroke-width="1.4" stroke-dasharray="4 3.5" d="M50,24 L40.7,80 M58,24 L67.3,80"/>
-  <path stroke="#FFFFFF" stroke-width="1.8" d="M42,24 L14,80 M66,24 L94,80"/>
-  <circle cx="80.7" cy="74" r="5.5" fill="#FFFFFF"/>
-  <circle cx="80.7" cy="74" r="3" fill="#6C4CF5"/>
-</svg>
+<?xml version="1.0" encoding="UTF-8" standalone="no"?><!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd"><svg width="100%" height="100%" viewBox="0 0 1800 1800" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xml:space="preserve" xmlns:affinity="https://www.affinity.studio/" style="fill-rule:evenodd;clip-rule:evenodd;"><path d="M1700,0c55.192,0 100,44.808 100,100l0,1600c0,55.192 -44.808,100 -100,100l-1600,0c-55.192,0 -100,-44.808 -100,-100l0,-1600c0,-55.192 44.808,-100 100,-100l1600,0Z" style="fill:#6c4cf5;"/><g><rect x="275.18" y="1341.379" width="1372.448" height="171.556" style="fill:#4a33b8;fill-opacity:0.6;fill-rule:nonzero;"/><rect x="189.295" y="1238.445" width="1407.023" height="188.712" style="fill:#0b0c10;fill-rule:nonzero;"/><path d="M1596.318,1238.445l-492.458,-960.714l0,102.934l492.458,1046.492l0,-188.712Z" style="fill:#15171d;fill-rule:nonzero;"/><path d="M686.914,277.732l411.735,0l480.357,960.714l-1372.448,0l480.357,-960.714Z" style="fill:#2b2f38;fill-rule:nonzero;"/><path d="M1120.93,1238.445l458.216,0c-87.505,-314.242 -542.465,-420.648 -571.483,-686.224l-46.336,-274.49l-137.293,0l-40.533,243.985c-38.719,316.37 307.548,399.095 337.43,716.729Z" style="fill:#b8f33a;fill-rule:nonzero;"/><path d="M824.159,277.732l-159.547,960.714m296.792,-960.714l159.547,960.714" style="fill-rule:nonzero;stroke:#fff;stroke-width:24.02px;stroke-dasharray:68.622,60.045;"/><path d="M189.295,1238.445l480.357,-960.714l34.525,0l-480.357,960.714l-34.525,0Zm926.616,-960.714l480.357,960.714l-34.525,0l-480.357,-960.714l34.525,0Z" style="fill:#fff;"/><g id="a"><ellipse cx="1318.702" cy="1109.494" rx="115.916" ry="82.732" style="fill:none;stroke:#2b2f38;stroke-width:20.83px;stroke-linejoin:round;stroke-miterlimit:2;"/><ellipse cx="1318.702" cy="1109.494" rx="115.916" ry="82.732" style="fill:#fff;"/><path d="M1318.702,989.427l130.406,210.449l-130.406,-51.911l-130.406,51.911l130.406,-210.449Z" style="fill:#6c4cf5;"/></g></g></svg>

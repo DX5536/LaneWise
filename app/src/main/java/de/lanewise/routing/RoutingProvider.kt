@@ -13,15 +13,22 @@ data class RouteRequest(
     val alternatives: Boolean = true,
     val avoidTolls: Boolean = false,
     val avoidMotorways: Boolean = false,
+    /** Stops on the way, in order (route preview "Add stop"). */
+    val via: List<LatLon> = emptyList(),
 )
 
 interface RoutingProvider {
     val id: String
     val requiresNetwork: Boolean
+    /** Whether [RouteRequest.via] stops are routed through (providers without it are skipped when there are stops). */
+    val supportsVia: Boolean get() = false
     suspend fun route(request: RouteRequest): List<Route>
 }
 
 class RoutingException(message: String, cause: Throwable? = null) : Exception(message, cause)
+
+/** Lane arrow bit of a manoeuvre modifier (also for lane sites added from OSM, see [Route.withOsmTurnLanes]). */
+fun laneDirOf(m: Modifier): Int = m.toLaneDir()
 
 internal fun Modifier.toLaneDir(): Int = when (this) {
     Modifier.UTURN -> LaneDir.UTURN

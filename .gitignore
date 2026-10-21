@@ -59,3 +59,11 @@ __pycache__/
 # Voice-pack pipeline (OmniVoice venv, rendered clips)
 tools/voice_pack/.venv/
 tools/voice_pack/work/
+
+# Street-level audit output (photo links, reports)
+tools/streetview/work/
+tools/marking_plans/work/
+tools/marking_plans/.venv/
+
+# Phone-app survey screenshots (never commit)
+tools/phoneapp_survey/work/

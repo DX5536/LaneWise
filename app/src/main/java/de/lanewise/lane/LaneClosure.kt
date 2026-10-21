@@ -13,6 +13,34 @@ import kotlin.math.ceil
  */
 data class LaneClosure(val from: Double, val to: Double, val open: List<Boolean>) {
 
+    /**
+     * The closure as a "no lane change into it" span for the lane planner (like a solid line): an open lane next to a
+     * closed one may not move into it; closed lanes may be left. So the advice never sends the car into a closed lane
+     * — e.g. into the exit lane while it is still closed by roadworks (A 2 test run) — and keeps right only as far as
+     * the rightmost open lane. Lanes are counted from the right edge, like [ChangeSpan].
+     */
+    /**
+     * A checkpoint for the lane planner just before the closure: only the open lanes may be used, so the advice moves
+     * the car out of a lane that is about to close in time and keeps right only as far as the rightmost open lane.
+     * Not drawn (no stop line / arrows) - for the planner and the lane bar only.
+     */
+    fun site(kind: RoadKind): LaneSite? {
+        if (open.all { it } || open.none { it }) return null
+        return LaneSite((from - 20.0).coerceAtLeast(0.0), List(open.size) { LaneDir.STRAIGHT }, open, LaneDir.STRAIGHT,
+            isManeuver = false, roadKind = kind)
+    }
+
+    fun toChangeSpan(): ChangeSpan? {
+        if (open.all { it } || open.none { it }) return null
+        val perms = open.indices.map { i ->
+            var p = ChangeSpan.LEFT or ChangeSpan.RIGHT
+            if (open[i] && i + 1 < open.size && !open[i + 1]) p = p and ChangeSpan.RIGHT.inv()
+            if (open[i] && i - 1 >= 0 && !open[i - 1]) p = p and ChangeSpan.LEFT.inv()
+            p
+        }
+        return ChangeSpan(from, to, perms)
+    }
+
     companion object {
         /**
          * Closures of [incidents] that run along [route] in its direction: ≥ 30 m of the incident line within 14 m of
@@ -20,7 +48,21 @@ data class LaneClosure(val from: Double, val to: Double, val open: List<Boolean>
          */
         fun along(route: Route, incidents: List<TrafficIncident>): List<LaneClosure> = incidents.mapNotNull { i ->
             val open = i.laneOpen ?: return@mapNotNull null
-            if (!i.active || i.geometry.size < 2) return@mapNotNull null
+            if (!i.active) return@mapNotNull null
+            span(route, i)?.let { (a, b) -> LaneClosure(a, b, open) }
+        }.sortedBy { it.from }
+
+        /**
+         * Stretches (route distance from → to) of active incidents that restrict lanes without saying which
+         * ([TrafficIncident.laneRestrictionUnknown], e.g. DATEX II `lane2`): no lane advice there.
+         */
+        fun unknownAlong(route: Route, incidents: List<TrafficIncident>): List<ClosedRange<Double>> = incidents.mapNotNull { i ->
+            if (!i.active || !i.laneRestrictionUnknown) null else span(route, i)?.let { (a, b) -> a..b }
+        }.sortedBy { it.start }
+
+        /** Where [i]'s line runs along the route in its direction, or null. */
+        private fun span(route: Route, i: TrafficIncident): Pair<Double, Double>? {
+            if (i.geometry.size < 2) return null
             val hits = ArrayList<Double>()
             for (k in 0 until i.geometry.size - 1) {
                 val a = i.geometry[k]; val b = i.geometry[k + 1]
@@ -37,7 +79,7 @@ data class LaneClosure(val from: Double, val to: Double, val open: List<Boolean>
                     hits += pr.distanceAlong
                 }
             }
-            if (hits.size < 3 || hits.max() - hits.min() < 30.0) null else LaneClosure(hits.min(), hits.max(), open)
-        }.sortedBy { it.from }
+            return if (hits.size < 3 || hits.max() - hits.min() < 30.0) null else hits.min() to hits.max()
+        }
     }
 }

@@ -58,14 +58,32 @@ class LaneRibbonBuilderTest {
         val r = route(listOf(a), 1)
         val state = LaneGuidance().update(r.laneSites, 100.0, avoidLaneChanges = true, keepRight = false)
         val surface = LaneRibbonBuilder.buildRoad(r, 0.0, 1000.0).first { it.kind == LaneRibbonBuilder.Kind.SURFACE }
-        // Width of the surface 10 m after the junction: one lane (+0.6 m margin), not still tapering from two.
-        val p = Geo.destination(r.geometry.points.first(), 0.0, 410.0)
+        // The ending lane narrows across the junction box (a short funnel, no notch) and is gone 20 m after the stop
+        // line: one lane (+0.6 m margin), not still tapering from two along the next road.
+        val p = Geo.destination(r.geometry.points.first(), 0.0, 420.0)
         val widths = surface.points.mapNotNull { q ->
             val pr = r.geometry.project(q) ?: return@mapNotNull null
-            if (abs(pr.distanceAlong - 410.0) < 3) abs(pr.signedOffset) else null
+            if (abs(pr.distanceAlong - 420.0) < 3) abs(pr.signedOffset) else null
         }
         assertTrue("no surface points near 410 m (${p})", widths.isNotEmpty())
         assertTrue("road still ${widths.max() * 2} m wide after the junction", widths.max() < 2.2)
+    }
+
+    /**
+     * Owner's screenshot (Celler Straße straight on at Herschelstraße, `left | through | through`, two lanes after):
+     * the left-turn lane narrowed across the junction into the through lanes. A turn pocket ends at the stop line;
+     * right behind it only the through lanes are drawn. A through lane that ends after the junction still narrows.
+     */
+    @Test
+    fun turnPocketIsCutAtTheStopLine() {
+        val celler = route(listOf(LaneSite(400.0, listOf(L, S, S), null, S, false, RoadKind.URBAN)), null)
+            .copy(laneCounts = listOf(LaneCountSpan(0.0, 400.0, 3), LaneCountSpan(400.0, 1200.0, 2)))
+        assertEquals(3.0, LaneRibbonBuilder.drawnLaneWidth(celler, 396.0)!!, 0.01)
+        for (d in listOf(406.0, 412.0, 418.0)) assertEquals("at $d m", 2.0, LaneRibbonBuilder.drawnLaneWidth(celler, d)!!, 0.01)
+        // Three through lanes, two after the junction: the ending through lane narrows (no pocket to cut).
+        val merge = route(listOf(LaneSite(400.0, listOf(S, S, S), null, S, false, RoadKind.URBAN)), null)
+            .copy(laneCounts = listOf(LaneCountSpan(0.0, 400.0, 3), LaneCountSpan(400.0, 1200.0, 2)))
+        assertTrue(LaneRibbonBuilder.drawnLaneWidth(merge, 406.0)!! > 2.2)
     }
 
     /**
@@ -151,5 +169,18 @@ class LaneRibbonBuilderTest {
         val later = LaneRibbonBuilder.chevrons(LaneRibbonBuilder.build(r, LaneState.EMPTY, 120.0), 120.0, 270.0)
         val same = later.first { it.index == chev[5].index }
         assertTrue(Geo.distance(same.points[1], chev[5].points[1]) < 0.05)
+    }
+
+    /** Owner's screenshot (Berliner Allee): 3 lanes, 55 m tagged 2 under a bridge, 3 again - no choke. */
+    @Test
+    fun shortLaneDipIsFilled() {
+        val spans = listOf(LaneCountSpan(0.0, 300.0, 3), LaneCountSpan(300.0, 355.0, 2), LaneCountSpan(355.0, 600.0, 3),
+            LaneCountSpan(600.0, 900.0, 4))
+        val f = de.lanewise.core.model.fillShortLaneDips(spans, listOf(300.0, 900.0))
+        org.junit.Assert.assertEquals(listOf(3, 3, 3, 4), f.map { it.count })
+        // A junction inside the narrow stretch, or a long one, stays as tagged.
+        org.junit.Assert.assertEquals(2, de.lanewise.core.model.fillShortLaneDips(spans, listOf(330.0))[1].count)
+        val long = spans.toMutableList().also { it[1] = LaneCountSpan(300.0, 500.0, 2); it[2] = LaneCountSpan(500.0, 600.0, 3) }
+        org.junit.Assert.assertEquals(2, de.lanewise.core.model.fillShortLaneDips(long, emptyList())[1].count)
     }
 }

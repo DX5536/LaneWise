@@ -23,6 +23,7 @@ import de.lanewise.offline.OfflineGraph
 import de.lanewise.offline.OfflineGraphBuilder
 import de.lanewise.offline.OfflineRouter
 import de.lanewise.offline.OfflineTiles
+import de.lanewise.core.net.Http
 import de.lanewise.routing.OsrmRoutingProvider
 import de.lanewise.routing.RouteRequest
 import de.lanewise.routing.RouteScorer
@@ -37,6 +38,7 @@ import de.lanewise.settings.SavedPlace
 import de.lanewise.ui.i18n.Strings
 import de.lanewise.core.geo.Geo
 import de.lanewise.osm.AerialLanes
+import de.lanewise.osm.LaneOverrides
 import de.lanewise.osm.OsmTags
 import de.lanewise.settings.RoutingSource
 import de.lanewise.settings.SettingsRepository
@@ -44,7 +46,7 @@ import de.lanewise.speed.SpeedLimitProvider
 import de.lanewise.traffic.AutobahnApiSource
 import de.lanewise.traffic.BBox
 import de.lanewise.traffic.HereTrafficSource
-import de.lanewise.traffic.MobilithekDatexSource
+import de.lanewise.traffic.MobilithekClient
 import de.lanewise.traffic.TomTomTrafficSource
 import de.lanewise.traffic.TrafficService
 import de.lanewise.traffic.TrafficSource
@@ -56,6 +58,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -81,6 +85,7 @@ data class UiState(
     val simulating: Boolean = false,
     /** Demo playback speed (×1 = real driving time). */
     val demoSpeed: Double = 1.0,
+    val demoPaused: Boolean = false,
     val message: String? = null,
     val incidents: List<TrafficIncident> = emptyList(),
     val offlineGraphReady: Boolean = false,
@@ -91,6 +96,8 @@ data class UiState(
     val laneHint: String? = null,
     /** Countdown of the lane-change hint: 1 when it appears, 0 at the last point the change can be made. */
     val laneHintCountdown: Float? = null,
+    /** Wall-clock start of the current navigation (ms), kept across re-routes: the drive timer counts from here. */
+    val navStartedAt: Long = 0L,
     /** Speed limit of the current road while not navigating (km/h, 0 = no limit, null = unknown). */
     val browseLimit: Int? = null,
     val places: List<SavedPlace> = emptyList(),
@@ -98,6 +105,14 @@ data class UiState(
     val nearbyStreets: List<de.lanewise.osm.OsmStreet> = emptyList(),
     /** Start of the route when not the current position (route preview "From"); null = GPS position. */
     val origin: Place? = null,
+    /** Stops on the way, in driving order (route preview "Add stop"). */
+    val stops: List<Place> = emptyList(),
+    /** Add-stop search: places (plain search) or candidates along the route (smart), and whether it is running. */
+    val stopPlaces: List<Place> = emptyList(),
+    val stopCandidates: List<de.lanewise.search.StopCandidate> = emptyList(),
+    val stopSearching: Boolean? = null,
+    /** Load of the search / routing servers (dot in "Add stop"); null = not checked yet. */
+    val serverHealth: de.lanewise.core.net.Health? = null,
     /** Metres driven on earlier routes of this journey (re-routes), so the journey progress bar keeps counting. */
     val journeyDriven: Double = 0.0,
     val originResults: List<Place> = emptyList(),
@@ -134,6 +149,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var trafficJob: Job? = null
     private var engine: NavigationEngine? = null
     private var lastReroute = 0L
+    private var rerouteJob: Job? = null
+    /** "Recalculating" was spoken for the current off-route episode (not again every 10 s while offline). */
+    private var rerouteAnnounced = false
     private var speedFetchedUntil = 0.0
     private var browseLimitJob: Job? = null
     private var browseLimitAt: Fix? = null
@@ -143,13 +161,51 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var currentRoute: Route? = null
 
     init {
-        viewModelScope.launch { loadGraph() }
+        // The offline map of the selected region - once the saved settings are read (at start `settings.value` is
+        // still the default region, so a downloaded "Hannover (Stadt)" was never loaded after a restart) and again
+        // whenever the region changes.
+        viewModelScope.launch { settings.map { it.offlineRegion }.distinctUntilChanged().collect { loadGraph(it) } }
         viewModelScope.launch { placesRepo.places.collect { p -> _ui.update { it.copy(places = p) } } }
         viewModelScope.launch { refreshVoicePacks() }
         viewModelScope.launch { settings.collect { s -> voice.setPacks(selectedPacks(s)) } }
         viewModelScope.launch {
             while (isActive) { _ui.update { it.copy(online = isOnline()) }; delay(10_000) }
         }
+        watchNetwork()
+    }
+
+    /**
+     * Drive started on Wi-Fi, then no internet, then mobile data (owner's test drive 2026-10-18): the reroute never came
+     * back. On every network change the HTTP pool is dropped (its connections belonged to the Wi-Fi) and, while off the
+     * route, a reroute starts at once instead of waiting for the next fix and the 10 s throttle.
+     */
+    private fun watchNetwork() {
+        val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            private var validated: android.net.Network? = null
+            override fun onCapabilitiesChanged(network: android.net.Network, caps: NetworkCapabilities) {
+                val ok = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                    caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                if (!ok || network == validated) return
+                validated = network
+                main.post { onNetworkBack() }
+            }
+            override fun onLost(network: android.net.Network) {
+                if (network == validated) validated = null
+                main.post { Http.onNetworkChanged(); _ui.update { it.copy(online = isOnline()) } }
+            }
+        }
+        runCatching { cm.registerDefaultNetworkCallback(cb) }
+        addCloseable { runCatching { cm.unregisterNetworkCallback(cb) } }
+    }
+
+    private fun onNetworkBack() {
+        Http.onNetworkChanged()
+        _ui.update { it.copy(online = true) }
+        val st = _ui.value
+        val fix = st.fix ?: return
+        if (st.mode == Mode.NAVIGATING && !st.simulating && st.nav?.offRoute == true) reroute(fix, force = true)
     }
 
     // --- settings -------------------------------------------------------------------------------
@@ -186,8 +242,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (s.voice) ann.sortedByDescending { it.priority }.forEach { voice.speak(it) }
         if (s.overSpeedSound && snap.speedStatus == SpeedStatus.OVER && (fix.timeMs / 1000) % 5 == 0L) voice.beep()
         if (snap.arrived) { stopNavigation(); _ui.update { it.copy(message = phrases.instruction(snap.route.steps.last())) }; return }
-        if (snap.offRoute && !fix.simulated) reroute(fix)
-        if (snap.route.provider != "offline" && snap.distanceAlong > speedFetchedUntil - 8_000) fetchCorridor(snap.route, snap.distanceAlong)
+        if (snap.offRoute && (!fix.simulated || demoDrivePath != null)) reroute(fix)
+        // Next stretch of OSM data 8 km before the fetched one ends - only if there is more route to fetch, one fetch at
+        // a time and not again within 30 s of a failure. Short routes (< 8 km) were refetched on every fix (4 / s),
+        // and each answer replaced the route: the lanes shifted and broke constantly (owner's video).
+        if (snap.route.provider != "offline" && snap.distanceAlong > speedFetchedUntil - 8_000 &&
+            speedFetchedUntil < snap.route.distance - 1 && corridorJob?.isActive != true &&
+            System.currentTimeMillis() - corridorFailedAt > 30_000) fetchCorridor(snap.route, snap.distanceAlong)
     }
 
     private var aerial: AerialLanes? = null
@@ -199,6 +260,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }.getOrDefault(AerialLanes.EMPTY)
     }.also { aerial = it }
 
+    /**
+     * Hand-checked lane patches: `assets/lane_overrides.json` with `lane_overrides.json` next to `lane_reports.geojson`
+     * on top (patch a junction on the phone right away: `adb push`, then restart). Rejected entries go to logcat.
+     */
+    suspend fun laneOverrides(): LaneOverrides = overrides ?: withContext(Dispatchers.IO) {
+        fun load(text: () -> String, name: String) = runCatching { LaneOverrides.parse(text()) }
+            .onFailure { if (it !is java.io.FileNotFoundException) android.util.Log.w("LaneWise", "$name: $it") }
+            .getOrDefault(LaneOverrides.EMPTY)
+        val asset = load({ ctx.assets.open("lane_overrides.json").bufferedReader().use { it.readText() } }, "assets/lane_overrides.json")
+        val local = laneOverrideFile().let { f -> if (f.exists()) load({ f.readText() }, f.path) else LaneOverrides.EMPTY }
+        LaneOverrides.merge(asset, local).also { o ->
+            o.rejected.forEach { android.util.Log.w("LaneWise", "lane override rejected: $it") }
+            speedLimits.overrides = o
+        }
+    }.also { overrides = it }
+    private var overrides: LaneOverrides? = null
+
+    fun laneOverrideFile() = File(ctx.getExternalFilesDir(null) ?: ctx.filesDir, "lane_overrides.json")
+
     /** Lane-level street data around the car (refetched after moving 250 m), for the map when no route is active. */
     private fun updateNearbyStreets(p: LatLon) {
         val c = streetsCenter
@@ -206,7 +286,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (streetsJob?.isActive == true || !isOnline()) return
         streetsCenter = p
         streetsJob = viewModelScope.launch {
-            val nearby = runCatching { de.lanewise.osm.StreetLanes.fetchNearby(p) }.getOrNull()
+            // Healthiest Overpass mirror first (some answer every map query with HTTP 500 for hours).
+            if (System.currentTimeMillis() - de.lanewise.core.net.ServerHealth.lastProbeMs > 120_000) {
+                runCatching { de.lanewise.core.net.ServerHealth.probe(settings.value.osrmUrl) }.getOrNull()
+                    ?.let { r -> _ui.update { it.copy(serverHealth = r.overall) } }
+            }
+            val res = runCatching { de.lanewise.osm.StreetLanes.fetchNearby(p) }
+            res.exceptionOrNull()?.let { if (it !is kotlinx.coroutines.CancellationException) android.util.Log.w("LaneWise", "nearby streets: $it") }
+            val nearby = res.getOrNull()
             val streets = nearby?.streets
             if (streets == null) { streetsCenter = c; return@launch }   // retry on next fix
             _ui.update { it.copy(nearbyStreets = streets, nearbyFeatures = nearby?.features.orEmpty()) }
@@ -274,6 +361,84 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Swap start and destination (route preview ⇅). Starting from the GPS position, the position becomes the
+     * destination. The stops are driven in reverse order.
+     */
+    fun swapEnds() {
+        val st = _ui.value
+        val dest = st.destination ?: return
+        val from = st.origin ?: st.fix?.position?.let { Place(strings.myPosition, "", it) }
+            ?: run { _ui.update { it.copy(message = strings.waitingForGps) }; return }
+        _ui.update { it.copy(origin = dest, destination = from, query = from.title, stops = it.stops.reversed()) }
+        computeRoutes()
+    }
+
+    private var stopJob: Job? = null
+
+    /**
+     * Add-stop search. [smart]: places matching a name / brand / category along the selected route, ranked by the time
+     * they add ([de.lanewise.search.StopFinder]); else a normal address / place search.
+     */
+    fun onStopQuery(q: String, smart: Boolean) {
+        stopJob?.cancel()
+        if (q.trim().length < 2) { _ui.update { it.copy(stopPlaces = emptyList(), stopCandidates = emptyList(), stopSearching = null) }; return }
+        stopJob = viewModelScope.launch {
+            delay(if (smart) 700 else 350)
+            _ui.update { it.copy(stopSearching = true) }
+            val st = _ui.value
+            val route = st.selectedRoute
+            if (smart && route != null) {
+                val from = st.origin?.position ?: route.geometry.points.first()
+                val to = st.destination?.position ?: route.geometry.points.last()
+                val osrm = OsrmRoutingProvider(settings.value.osrmUrl)
+                val res = runCatching {
+                    de.lanewise.search.StopFinder { pts -> osrm.durations(pts) }
+                        .find(q, route.geometry, listOf(from) + st.stops.map { it.position } + to)
+                }
+                _ui.update { it.copy(stopCandidates = res.getOrDefault(emptyList()), stopPlaces = emptyList(), stopSearching = false,
+                    message = res.exceptionOrNull()?.let { e -> "${strings.searchFailed}: ${e.message}" }) }
+            } else {
+                val res = runCatching { geocoder.search(q, st.fix?.position ?: st.destination?.position) }
+                _ui.update { it.copy(stopPlaces = res.getOrDefault(emptyList()), stopCandidates = emptyList(), stopSearching = false,
+                    message = res.exceptionOrNull()?.let { e -> "${strings.searchFailed}: ${e.message}" }) }
+            }
+        }
+    }
+
+    /** Add [place] as a stop: at [insertAt] (smart: the leg where it adds least), else as the last stop. */
+    fun addStop(place: Place, insertAt: Int? = null) {
+        stopJob?.cancel()
+        _ui.update { st ->
+            val i = (insertAt ?: st.stops.size).coerceIn(0, st.stops.size)
+            st.copy(stops = st.stops.toMutableList().apply { add(i, place) }, stopPlaces = emptyList(),
+                stopCandidates = emptyList(), stopSearching = null)
+        }
+        computeRoutes()
+    }
+
+    fun removeStop(index: Int) {
+        _ui.update { st -> st.copy(stops = st.stops.filterIndexed { i, _ -> i != index }) }
+        computeRoutes()
+    }
+
+    private var healthJob: Job? = null
+
+    /** Checks how busy the search and routing servers are (offline = unreachable). Skipped while a check runs. */
+    fun probeServers() {
+        if (healthJob?.isActive == true) return
+        healthJob = viewModelScope.launch {
+            if (!isOnline()) { _ui.update { it.copy(serverHealth = de.lanewise.core.net.Health.DOWN) }; return@launch }
+            val r = runCatching { de.lanewise.core.net.ServerHealth.probe(settings.value.osrmUrl) }.getOrNull()
+            _ui.update { it.copy(serverHealth = r?.overall ?: de.lanewise.core.net.Health.DOWN) }
+        }
+    }
+
+    fun clearStopSearch() {
+        stopJob?.cancel()
+        _ui.update { it.copy(stopPlaces = emptyList(), stopCandidates = emptyList(), stopSearching = null) }
+    }
+
     /** Route from [place] instead of the current position; null = back to the GPS position. Recomputes the routes. */
     fun chooseOrigin(place: Place?) {
         _ui.update { it.copy(origin = place, originResults = emptyList(), originSearching = null) }
@@ -287,14 +452,34 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * A 37 → A 7 → exit Großburgwedel → L 381 / L 383 → roundabout → rural L 383, 25 km. The demo starts by itself on the
      * route option that really uses the A 7 and the roundabout.
      */
-    fun startTestDrive() {
+    fun startTestDrive() = startDemo(TEST_FROM, TEST_TO, strings.testStart, strings.testEnd, preferTestRoute = true)
+
+    /** Demo from [from] to [to] (test drive; debug builds also accept it from adb, see MainActivity). */
+    fun startDemo(from: LatLon, to: LatLon, fromName: String = "A", toName: String = "B", preferTestRoute: Boolean = false, speed: Double? = null,
+                  via: List<LatLon> = emptyList(), detour: LatLon? = null) {
         testDrivePending = true
+        demoDetour = detour
+        demoDrivePath = null
+        testPreferA7 = preferTestRoute
+        speed?.let { s -> _ui.update { it.copy(demoSpeed = s) } }
         _ui.update {
-            it.copy(origin = Place(strings.testStart, "", TEST_FROM), destination = Place(strings.testEnd, "", TEST_TO),
-                results = emptyList(), query = strings.testEnd, mode = Mode.PREVIEW)
+            it.copy(origin = Place(fromName, "", from), destination = Place(toName, "", to),
+                stops = via.mapIndexed { i, p -> Place("${strings.stop} ${i + 1}", "", p) },
+                results = emptyList(), query = toName, mode = Mode.PREVIEW)
         }
         computeRoutes()
     }
+
+    private var testPreferA7 = false
+
+    /**
+     * Debug demo (adb, see MainActivity): the simulated car drives [demoDrivePath] - the route through [demoDetour] -
+     * instead of the navigated route, and its fixes count for re-routing like real ones. [debugOffline]: once navigating,
+     * the app acts as if there were no internet (offline routing only), without touching the phone's network.
+     */
+    private var demoDetour: LatLon? = null
+    private var demoDrivePath: de.lanewise.core.geo.Polyline? = null
+    var debugOffline = false
 
     fun chooseDestination(place: Place) {
         _ui.update { it.copy(destination = place, results = emptyList(), query = place.title, mode = Mode.PREVIEW) }
@@ -304,20 +489,31 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun chooseDestination(p: LatLon) = chooseDestination(Place(strings.markedPlace, String.format(java.util.Locale.US, "%.5f, %.5f", p.lat, p.lon), p))
 
     // --- saved places ---------------------------------------------------------------------------
-    fun goTo(place: SavedPlace) = chooseDestination(Place(place.name, place.address, LatLon(place.lat, place.lon)))
+    fun goTo(place: SavedPlace) = chooseDestination(place.asPlace())
 
-    fun savePlace(kind: PlaceKind, name: String, place: Place) {
+    fun savePlace(kind: PlaceKind, name: String, place: Place, icon: String? = null, color: Long? = null) {
         viewModelScope.launch {
-            placesRepo.save(SavedPlace(kind = kind, name = name.ifBlank { place.title },
-                address = place.subtitle.ifBlank { place.title }, lat = place.position.lat, lon = place.position.lon))
+            // Address: street and city; for a named place (restaurant) its name and street, so "Pizzeria (Mum's
+            // favourite)" keeps both.
+            val address = listOf(place.title, place.subtitle).filter { it.isNotBlank() }.distinct().joinToString(", ")
+            placesRepo.save(SavedPlace(kind = kind, name = name.ifBlank { place.title }, address = address,
+                lat = place.position.lat, lon = place.position.lon, icon = icon, color = color, category = place.category))
         }
     }
+
+    /** Saved place at [p] (within 40 m), for the star / home / work badge on search results. */
+    fun savedAt(p: LatLon): SavedPlace? =
+        _ui.value.places.firstOrNull { Geo.distance(LatLon(it.lat, it.lon), p) < 40 }
+
+    /** A saved place as a search result (start, stop or destination preset). */
+    fun SavedPlace.asPlace() = Place(name, address, LatLon(lat, lon), category)
 
     fun deletePlace(id: String) { viewModelScope.launch { placesRepo.delete(id) } }
 
     fun selectRoute(i: Int) = _ui.update { it.copy(selected = i) }
 
-    fun cancelPreview() = _ui.update { it.copy(mode = Mode.BROWSE, routes = emptyList(), destination = null, query = "", origin = null, originResults = emptyList()) }
+    fun cancelPreview() = _ui.update { it.copy(mode = Mode.BROWSE, routes = emptyList(), destination = null, query = "", origin = null,
+        originResults = emptyList(), stops = emptyList()) }
 
     fun clearMessage() = _ui.update { it.copy(message = null) }
 
@@ -370,7 +566,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (s.useAutobahnApi) add(AutobahnApiSource())
         if (s.tomtomKey.isNotBlank()) add(TomTomTrafficSource(s.tomtomKey))
         if (s.hereKey.isNotBlank()) add(HereTrafficSource(s.hereKey))
-        if (s.mobilithekUrl.isNotBlank()) add(MobilithekDatexSource(s.mobilithekUrl, mobilithekCert(), s.mobilithekCertPassword))
+        if (s.mobilithekUrl.isNotBlank()) add(MobilithekClient(s.mobilithekUrl, mobilithekCert(), s.mobilithekCertPassword))
     }
 
     fun mobilithekCert(): File = File(ctx.filesDir, "mobilithek.p12")
@@ -394,12 +590,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             _ui.update { it.copy(routing = true) }
             val online = isOnline()
+            val via = _ui.value.stops.map { it.position }
             val req = RouteRequest(from, dest.position, heading.takeIf { origin != null || custom == null }, alternatives = true,
-                avoidTolls = s.avoidTolls, avoidMotorways = s.avoidMotorways)
+                avoidTolls = s.avoidTolls, avoidMotorways = s.avoidMotorways, via = via)
             var routes: List<Route> = emptyList()
             var lastError: String? = null
             for (p in providers(s, online)) {
                 if (p.requiresNetwork && !online) continue
+                if (via.isNotEmpty() && !p.supportsVia) { lastError = lastError ?: strings.stopsNeedOnline; continue }
                 val r = runCatching { p.route(req) }
                 if (r.isSuccess && r.getOrThrow().isNotEmpty()) { routes = r.getOrThrow(); break }
                 lastError = r.exceptionOrNull()?.message
@@ -421,7 +619,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _ui.update { it.copy(routes = ranked, selected = 0, routing = false, incidents = incidents) }
             if (testDrivePending && ranked.isNotEmpty()) {
                 testDrivePending = false
-                val i = ranked.indexOfFirst { r ->
+                // Detour demo: the path the car really drives (start → detour point → destination), fetched now while the
+                // route is planned (before any simulated "offline").
+                demoDrivePath = demoDetour?.let { d ->
+                    val st = _ui.value
+                    val o = st.origin?.position ?: return@let null
+                    val dest = st.destination?.position ?: return@let null
+                    providers(s, online).firstNotNullOfOrNull { p ->
+                        runCatching { p.route(RouteRequest(o, dest, null, alternatives = false, via = listOf(d))).firstOrNull() }.getOrNull()
+                    }?.geometry
+                }
+                val i = if (!testPreferA7) 0 else ranked.indexOfFirst { r ->
                     r.steps.any { it.ref.orEmpty().replace(" ", "").contains("A7") } &&
                         r.steps.any { it.maneuver.type == de.lanewise.core.model.ManeuverType.ROUNDABOUT }
                 }.coerceAtLeast(0)
@@ -434,11 +642,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Speed limits (OSRM only; TomTom/offline bring their own), signs and bike lanes for the next 40 km. */
+    private var corridorJob: Job? = null
+    private var corridorFailedAt = 0L
+
     private fun fetchCorridor(route: Route, from: Double) {
         val to = minOf(route.distance, from + 40_000)
+        val before = speedFetchedUntil
         speedFetchedUntil = to
-        viewModelScope.launch {
-            val data = runCatching { speedLimits.corridor(route.geometry, from, to) }.getOrNull() ?: return@launch
+        corridorJob?.cancel()
+        corridorJob = viewModelScope.launch {
+            laneOverrides()
+            val data = runCatching { speedLimits.corridor(route.geometry, from, to, route.osmNodes) }.getOrNull()
+            if (data == null) {
+                // Try again later (from where the car is then), not on the next fix.
+                speedFetchedUntil = before
+                corridorFailedAt = System.currentTimeMillis()
+                return@launch
+            }
             val base = currentRoute ?: route
             val updated = base.copy(
                 speedLimits = if (base.provider == "osrm") (base.speedLimits.filter { it.to <= from } + data.limits).sortedBy { it.from }
@@ -447,7 +667,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 bikeLanes = (base.bikeLanes.filter { it.to <= from } + data.bikeLanes).sortedBy { it.from },
                 laneChanges = de.lanewise.lane.ChangeSpan.merge(
                     (base.laneChanges.filter { it.to <= from && it !in base.tomtomLaneLines } + data.laneChanges).sortedBy { it.from }, base.tomtomLaneLines),
-            ).withLaneCounts((base.laneCounts.filter { it.to <= from } + data.laneCounts).sortedBy { it.from })
+                sideRoads = base.sideRoads + data.sideRoads,
+            ).withLaneOverrides(data.laneOverrides).withOsmTurnLanes(data.turnLanes.map { it.distanceAlong to it.lanes })
+                .withLaneAccess(data.laneAccess.map { it.distanceAlong to it.carLanes })
+                .withLaneCounts((base.laneCounts.filter { it.to <= from } + data.laneCounts).sortedBy { it.from }).withConnectivity(data.connectivity)
             if (_ui.value.mode == Mode.NAVIGATING) {
                 engine = NavigationEngine(updated, laneGuidance).also { it.rehydrate(engine) }
                 currentRoute = updated
@@ -458,13 +681,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun previewCorridor(route: Route) {
         viewModelScope.launch {
-            val data = runCatching { speedLimits.corridor(route.geometry, 0.0, minOf(route.distance, 15_000.0)) }.getOrNull()
+            laneOverrides()
+            val data = runCatching { speedLimits.corridor(route.geometry, 0.0, minOf(route.distance, 15_000.0), route.osmNodes) }.getOrNull()
                 ?: return@launch
             val updated = route.copy(
                 speedLimits = if (route.provider == "osrm") data.limits else route.speedLimits,
                 features = data.features, bikeLanes = data.bikeLanes,
                 laneChanges = de.lanewise.lane.ChangeSpan.merge(data.laneChanges, route.tomtomLaneLines),
-            ).withLaneCounts(data.laneCounts)
+                sideRoads = data.sideRoads,
+            ).withLaneOverrides(data.laneOverrides).withOsmTurnLanes(data.turnLanes.map { it.distanceAlong to it.lanes })
+                .withLaneAccess(data.laneAccess.map { it.distanceAlong to it.carLanes }).withLaneCounts(data.laneCounts)
+                .withConnectivity(data.connectivity)
             _ui.update { st -> st.copy(routes = st.routes.map { if (it === route) updated else it }) }
         }
     }
@@ -477,7 +704,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         currentRoute = route
         engine = NavigationEngine(route, laneGuidance)
         speedFetchedUntil = 0.0
-        _ui.update { it.copy(mode = Mode.NAVIGATING, simulating = simulate, routes = listOf(route), selected = 0, journeyDriven = 0.0) }
+        _ui.update { it.copy(mode = Mode.NAVIGATING, simulating = simulate, routes = listOf(route), selected = 0, journeyDriven = 0.0,
+            navStartedAt = System.currentTimeMillis()) }
         notifText = ""
         de.lanewise.nav.NavigationService.start(ctx, "LaneWise", route.steps.firstOrNull()?.name.orEmpty(),
             Strings.of(settings.value.language).navChannel)
@@ -485,8 +713,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         navJob?.cancel()
         if (simulate) {
             navJob = viewModelScope.launch {
-                SimulatedLocationSource(route.geometry, { d -> (currentRoute?.speedLimitAt(d)?.kmh ?: 50).toDouble() }, { _ui.value.demoSpeed }).fixes()
+                demoControl = de.lanewise.location.DemoControl()
+                _ui.update { it.copy(demoPaused = false) }
+                SimulatedLocationSource(demoDrivePath ?: route.geometry, { d -> (currentRoute?.speedLimitAt(d)?.kmh ?: 50).toDouble() },
+                    { _ui.value.demoSpeed }, demoControl).fixes()
                     .collect { onFix(it) }
+                // The demo drove to the end of the route line: arrived, even if the last fix snapped a few metres short
+                // (it stayed at "50 m" with an empty banner).
+                if (_ui.value.mode == Mode.NAVIGATING && _ui.value.simulating) {
+                    val last = currentRoute?.steps?.lastOrNull()
+                    stopNavigation()
+                    last?.let { _ui.update { st -> st.copy(message = Phrases(settings.value.language).instruction(it)) } }
+                }
             }
         } else {
             onLocationPermissionGranted()
@@ -516,6 +754,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         de.lanewise.nav.NavigationService.update(ctx, title, text, Strings.of(settings.value.language).navChannel)
     }
 
+    private var demoControl: de.lanewise.location.DemoControl? = null
+
+    /** Demo only: pause / play, like a video player. */
+    fun toggleDemoPause() {
+        val c = demoControl ?: return
+        c.paused = !c.paused
+        _ui.update { it.copy(demoPaused = c.paused) }
+    }
+
+    /** Demo only: jump to [fraction] (0..1) of the route, from the scrub bar. */
+    fun seekDemo(fraction: Float) {
+        val c = demoControl ?: return
+        val r = currentRoute ?: return
+        val d = (fraction.coerceIn(0f, 1f) * r.distance).coerceAtMost(r.distance - 30)
+        engine?.seek(d)
+        c.seek(d)
+    }
+
     /** Demo only: one step slower / faster through [DEMO_SPEEDS]. */
     fun changeDemoSpeed(faster: Boolean) {
         _ui.update { st ->
@@ -529,7 +785,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         de.lanewise.nav.NavigationService.stop(ctx)
         engine = null; currentRoute = null
         _ui.update { it.copy(mode = Mode.BROWSE, nav = null, simulating = false, routes = emptyList(), destination = null, laneHint = null, laneHintCountdown = null,
-            origin = null, originResults = emptyList()) }
+            origin = null, originResults = emptyList(), stops = emptyList(), query = "", results = emptyList()) }
     }
 
     /** Long-press on the lane bar: remember this spot as "lanes wrong here" (GeoJSON for fixing OSM later). */
@@ -550,47 +806,102 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun laneReportFile() = File(ctx.getExternalFilesDir(null) ?: ctx.filesDir, "lane_reports.geojson")
 
+    /** Number of saved lane reports (Settings). */
+    fun laneReportCount(): Int = runCatching { de.lanewise.osm.LaneReports.read(laneReportFile()).size }.getOrDefault(0)
+
+    /** Share sheet for lane_reports.geojson (FileProvider), or null if there is nothing to share. */
+    fun laneReportShareIntent(): android.content.Intent? {
+        val f = laneReportFile()
+        if (!f.exists() || laneReportCount() == 0) return null
+        val uri = androidx.core.content.FileProvider.getUriForFile(ctx, ctx.packageName + ".files", f)
+        val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "application/geo+json"
+            putExtra(android.content.Intent.EXTRA_STREAM, uri)
+            putExtra(android.content.Intent.EXTRA_SUBJECT, "LaneWise lane reports")
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        return android.content.Intent.createChooser(send, null).addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+
     fun overrideLane(index: Int) {
         val advice = _ui.value.nav?.lanes?.nextAdvice ?: return
         laneGuidance.overrideCurrentLane(advice.site, index)
     }
 
-    private fun reroute(fix: Fix) {
+    /**
+     * New route from [fix] after leaving the route. One attempt at a time (a newer one replaces a hung one), each
+     * provider limited to [REROUTE_TIMEOUT_MS]; a provider is asked again without the GPS heading if it failed with it.
+     * If nothing answers (offline without an offline map, server down) the old route stays, the driver is told once, and
+     * the next attempt follows 10 s later or right when the network is back ([onNetworkBack]).
+     */
+    private fun reroute(fix: Fix, force: Boolean = false) {
         val now = System.currentTimeMillis()
-        if (now - lastReroute < 10_000) return
+        if (!force && (now - lastReroute < 10_000 || (rerouteJob?.isActive == true && now - lastReroute < 30_000))) return
         lastReroute = now
         val s = settings.value
-        if (s.voice) voice.speak(de.lanewise.nav.Announcement("reroute-$now", Phrases(s.language).rerouting(), 2))
+        if (s.voice && !rerouteAnnounced) voice.speak(de.lanewise.nav.Announcement("reroute-$now", Phrases(s.language).rerouting(), 2))
+        rerouteAnnounced = true
         val dest = _ui.value.destination ?: return
-        viewModelScope.launch {
+        // Stops still ahead: the ones whose "stop reached" point on the current route is not passed yet.
+        val along = _ui.value.nav?.distanceAlong ?: 0.0
+        val reached = currentRoute?.steps.orEmpty().filter { it.maneuver.type == de.lanewise.core.model.ManeuverType.WAYPOINT }
+            .count { it.distanceAlong <= along + 30 }
+        val ahead = _ui.value.stops.drop(reached)
+        _ui.update { it.copy(stops = ahead) }
+        rerouteJob?.cancel()
+        rerouteJob = viewModelScope.launch {
             val online = isOnline()
             val req = RouteRequest(fix.position, dest.position, fix.bearing?.toDouble(), alternatives = false,
-                avoidTolls = s.avoidTolls, avoidMotorways = s.avoidMotorways)
+                avoidTolls = s.avoidTolls, avoidMotorways = s.avoidMotorways, via = ahead.map { it.position })
+            var route: Route? = null
             for (p in providers(s, online)) {
                 if (p.requiresNetwork && !online) continue
-                val r = runCatching { p.route(req) }.getOrNull()?.firstOrNull()
-                    ?.let { withTrafficFromTomTom(listOf(it), s, online).first() } ?: continue
-                laneGuidance.reset()
-                // Keep the journey progress: what was driven on the old route stays driven.
-                val drivenOnOld = _ui.value.nav?.distanceAlong ?: 0.0
-                _ui.update { it.copy(journeyDriven = it.journeyDriven + drivenOnOld) }
-                currentRoute = r
-                engine = NavigationEngine(r, laneGuidance)
-                speedFetchedUntil = 0.0
-                if (r.provider != "offline" && online) fetchCorridor(r, 0.0)
-                _ui.update { it.copy(routes = listOf(r), selected = 0) }
-                break
+                if (ahead.isNotEmpty() && !p.supportsVia) continue
+                route = attempt(p, req) ?: req.heading?.let { attempt(p, req.copy(heading = null)) }
+                if (route != null) break
             }
+            val r = route ?: run {
+                android.util.Log.w("LaneWise", "reroute failed (online=$online)")
+                _ui.update { it.copy(message = strings.rerouteWaiting) }
+                return@launch
+            }
+            val withTraffic = runCatching { withTrafficFromTomTom(listOf(r), s, online).first() }.getOrDefault(r)
+            if (_ui.value.mode != Mode.NAVIGATING) return@launch
+            laneGuidance.reset()
+            // Keep the journey progress: what was driven on the old route stays driven.
+            val drivenOnOld = _ui.value.nav?.distanceAlong ?: 0.0
+            _ui.update { it.copy(journeyDriven = it.journeyDriven + drivenOnOld) }
+            currentRoute = withTraffic
+            engine = NavigationEngine(withTraffic, laneGuidance)
+            rerouteAnnounced = false
+            speedFetchedUntil = 0.0
+            corridorJob?.cancel()
+            if (withTraffic.provider != "offline" && online) fetchCorridor(withTraffic, 0.0)
+            _ui.update { it.copy(routes = listOf(withTraffic), selected = 0, message = null) }
         }
     }
+
+    private suspend fun attempt(p: RoutingProvider, req: RouteRequest): Route? =
+        kotlinx.coroutines.withTimeoutOrNull(REROUTE_TIMEOUT_MS) {
+            try {
+                p.route(req).firstOrNull()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.w("LaneWise", "reroute ${p.javaClass.simpleName}: ${e.message}")
+                null
+            }
+        }
 
     // --- offline data ---------------------------------------------------------------------------
     private fun graphFile(region: String) = File(ctx.filesDir, "graph_$region.lwg")
 
-    private suspend fun loadGraph() {
-        val f = graphFile(settings.value.offlineRegion)
-        if (!f.exists()) return
-        graph = withContext(Dispatchers.IO) { runCatching { OfflineGraph.load(f) }.getOrNull() }
+    private suspend fun loadGraph(region: String) {
+        val f = graphFile(region)
+        if (!f.exists()) { graph = null; _ui.update { it.copy(offlineGraphReady = false) }; return }
+        graph = withContext(Dispatchers.IO) {
+            runCatching { OfflineGraph.load(f) }.onFailure { android.util.Log.w("LaneWise", "offline map ${f.name}: $it") }.getOrNull()
+        }
         _ui.update { it.copy(offlineGraphReady = graph != null) }
     }
 
@@ -650,12 +961,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val st = strings
                 _ui.update { it.copy(offlineProgress = st.dlStart) }
-                graph = OfflineGraphBuilder().build(region, graphFile(region.id), st) { msg -> _ui.update { it.copy(offlineProgress = msg) } }
+                graph = OfflineGraphBuilder(laneOverrides()).build(region, graphFile(region.id), st) { msg -> _ui.update { it.copy(offlineProgress = msg) } }
                 _ui.update { it.copy(offlineGraphReady = true, offlineProgress = st.dlTiles + " …") }
-                for (dark in listOf(false, true)) {
-                    OfflineTiles(ctx).download(region, dark) { pct ->
-                        if (pct >= 0) _ui.update { it.copy(offlineProgress = "${st.dlTiles} ${if (dark) st.dlTilesDark else st.dlTilesLight}: $pct %") }
-                    }
+                // One download: light and dark styles use the same tiles (see OfflineTiles).
+                OfflineTiles(ctx).download(region) { pct ->
+                    if (pct >= 0) _ui.update { it.copy(offlineProgress = "${st.dlTiles}: $pct %") }
                 }
                 _ui.update { it.copy(offlineProgress = null, message = "${st.dlReady}: ${region.name}") }
             } catch (e: Exception) {
@@ -665,6 +975,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun isOnline(): Boolean {
+        // Debug demo "offline": the route is planned online, then the drive runs as if the network were gone.
+        if (de.lanewise.BuildConfig.DEBUG && debugOffline && _ui.value.mode == Mode.NAVIGATING) {
+            if (_ui.value.online) _ui.update { it.copy(online = false) }
+            return false
+        }
         val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
         return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
@@ -680,6 +995,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     companion object {
         /** Demo playback speeds (× real driving time). */
         val DEMO_SPEEDS = listOf(0.25, 0.5, 1.0, 2.0, 4.0, 8.0)
+        /** Longest wait for one routing provider while off the route. */
+        const val REROUTE_TIMEOUT_MS = 20_000L
     }
 }
 

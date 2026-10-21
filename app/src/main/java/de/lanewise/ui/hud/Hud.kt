@@ -6,6 +6,10 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -20,12 +24,17 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.rounded.Cloud
+import androidx.compose.material.icons.rounded.CloudOff
+import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.material.icons.Icons
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.runtime.remember
 import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.asImageBitmap
@@ -59,17 +68,22 @@ import de.lanewise.ui.theme.LocalLaneColors
  * than limit − offset (steady, softer). Offsets are configurable in Settings.
  */
 @Composable
-fun SpeedBorderOverlay(status: SpeedStatus, modifier: Modifier = Modifier) {
+fun SpeedBorderOverlay(
+    status: SpeedStatus, modifier: Modifier = Modifier,
+    /** Glow strength from Settings (0.2 … 2): wider and more opaque with more. */
+    intensity: Float = 1f,
+) {
     if (status != SpeedStatus.OVER && status != SpeedStatus.UNDER) return
     val c = LocalLaneColors.current
     val pulse by rememberInfiniteTransition(label = "pulse").animateFloat(
         0.55f, 1f, infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "pulseAnim",
     )
     val alpha = if (status == SpeedStatus.OVER) pulse else 0.6f
-    val color = (if (status == SpeedStatus.OVER) c.overSpeed else c.underSpeed).copy(alpha = 0.8f * alpha)
+    val k = intensity.coerceIn(0.1f, 2f)
+    val color = (if (status == SpeedStatus.OVER) c.overSpeed else c.underSpeed).copy(alpha = (0.8f * alpha * k).coerceAtMost(1f))
     Box(
         modifier.fillMaxSize().drawBehind {
-            val t = 28.dp.toPx()
+            val t = 28.dp.toPx() * (0.5f + 0.5f * k)
             val clear = Color.Transparent
             drawRect(Brush.verticalGradient(listOf(color, clear), 0f, t), Offset.Zero, Size(size.width, t))
             drawRect(Brush.verticalGradient(listOf(clear, color), size.height - t, size.height), Offset(0f, size.height - t), Size(size.width, t))
@@ -296,6 +310,8 @@ fun ManeuverBanner(
     belowLeft: (@Composable () -> Unit)? = null,
     /** Colour the banner like the German guide sign of the road after the manoeuvre (option). */
     signColors: Boolean = false,
+    /** No manoeuvre ([step] null) but a state to show: off route the tile shows a turning "recalculating" symbol. */
+    recalculating: Boolean = false,
     below: @Composable () -> Unit = {},
 ) {
     val base = LocalLaneColors.current
@@ -316,10 +332,20 @@ fun ManeuverBanner(
             Box(
                 Modifier.size(64.dp).clip(RoundedCornerShape(16.dp)).background(c.bannerAccent),
                 contentAlignment = Alignment.Center,
-            ) { if (step != null) ManeuverIcon(step, if (sign != null) c.onBanner else Color.White, Modifier.size(46.dp)) }
+            ) {
+                if (step != null) ManeuverIcon(step, if (sign != null) c.onBanner else Color.White, Modifier.size(46.dp))
+                else if (recalculating) {
+                    // Off route: a slowly turning refresh symbol instead of an empty tile.
+                    val spin = androidx.compose.animation.core.rememberInfiniteTransition(label = "recalc")
+                    val deg by spin.animateFloat(0f, 360f, androidx.compose.animation.core.infiniteRepeatable(
+                        androidx.compose.animation.core.tween(1600, easing = androidx.compose.animation.core.LinearEasing)), label = "recalcDeg")
+                    androidx.compose.material3.Icon(Icons.Rounded.Sync, contentDescription = null, tint = Color.White,
+                        modifier = Modifier.size(40.dp).graphicsLayer { rotationZ = -deg })
+                }
+            }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text(distanceText, color = c.onBanner, fontSize = 32.sp, fontWeight = FontWeight.Bold)
+                if (distanceText.isNotEmpty()) Text(distanceText, color = c.onBanner, fontSize = 32.sp, fontWeight = FontWeight.Bold)
                 Text(instruction, color = c.onBanner.copy(alpha = 0.9f), fontSize = 17.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         }
@@ -348,7 +374,7 @@ fun ManeuverBanner(
 @Composable
 fun ManeuverIcon(step: RouteStep, color: Color, modifier: Modifier = Modifier) {
     val bit = when (step.maneuver.type) {
-        ManeuverType.ARRIVE, ManeuverType.DEPART -> LaneDir.STRAIGHT
+        ManeuverType.ARRIVE, ManeuverType.DEPART, ManeuverType.WAYPOINT -> LaneDir.STRAIGHT
         else -> step.maneuver.modifier.toLaneDir()
     }
     Canvas(modifier) {
@@ -364,22 +390,55 @@ fun ManeuverIcon(step: RouteStep, color: Color, modifier: Modifier = Modifier) {
 fun EtaBar(
     remainingText: String, distanceText: String, etaText: String,
     onClose: () -> Unit, onOverview: () -> Unit, modifier: Modifier = Modifier,
+    /** Driving time so far (stopwatch), shown next to the remaining time; null = off. */
+    elapsedText: String? = null,
     /** Share of the journey driven (0..1): violet bar along the top of the panel with a lime marker at the car. */
     progress: Float? = null,
+    /**
+     * Demo only: the bar becomes a scrub bar like in a video player — tap or drag it, the demo jumps there on release.
+     * [scrubLabel] tells what to show above the thumb while dragging (e.g. the distance there).
+     */
+    onSeek: ((Float) -> Unit)? = null,
+    scrubLabel: (Float) -> String = { "" },
+    /**
+     * Connection badge before the distance line: green cloud = online, grey crossed-out cloud = offline (routing and
+     * re-routing then use the offline map only, no traffic / corridor data). Null = not shown. [onlineText] /
+     * [offlineText]: spoken by TalkBack.
+     */
+    online: Boolean? = null,
+    onlineText: String = "", offlineText: String = "",
 ) {
     val c = LocalLaneColors.current
     // The panel's colour runs down behind the system navigation bar, so it sits on the screen edge instead of hovering.
     Column(modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp)).background(c.chip)
         .navigationBarsPadding()) {
     if (progress != null) {
-        val p by androidx.compose.animation.core.animateFloatAsState(progress.coerceIn(0f, 1f), label = "journey")
-        Canvas(Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 8.dp).height(10.dp)) {
-            val h = 6.dp.toPx(); val y = (size.height - h) / 2
+        var drag by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<Float?>(null) }
+        val animated by androidx.compose.animation.core.animateFloatAsState(progress.coerceIn(0f, 1f), label = "journey")
+        val p = drag ?: animated
+        if (drag != null) Text(scrubLabel(drag!!), color = c.onChip, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier.fillMaxWidth().padding(top = 6.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        val seek = onSeek
+        val touch = if (seek == null) Modifier else Modifier
+            .pointerInput(seek) {
+                detectTapGestures { o -> seek((o.x / size.width).coerceIn(0f, 1f)) }
+            }
+            .pointerInput(seek) {
+                detectHorizontalDragGestures(
+                    onDragStart = { o -> drag = (o.x / size.width).coerceIn(0f, 1f) },
+                    onDragEnd = { drag?.let(seek); drag = null },
+                    onDragCancel = { drag = null },
+                ) { change, _ -> change.consume(); drag = (change.position.x / size.width).coerceIn(0f, 1f) }
+            }
+        Canvas(Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = if (seek != null) 2.dp else 8.dp)
+            .height(if (seek != null) 26.dp else 10.dp).then(touch)) {
+            val h = (if (seek != null) 8 else 6).dp.toPx(); val y = (size.height - h) / 2
             val r = androidx.compose.ui.geometry.CornerRadius(h / 2)
             drawRoundRect(Color(0xFF3A3F4B), Offset(0f, y), Size(size.width, h), r)
             drawRoundRect(Color(0xFF6C4CF5), Offset(0f, y), Size(size.width * p, h), r)
             val x = (size.width * p).coerceIn(2.dp.toPx(), size.width - 2.dp.toPx())
-            drawLine(Color(0xFFB8F33A), Offset(x, 0f), Offset(x, size.height), 4.dp.toPx(), StrokeCap.Round)
+            if (seek != null) drawCircle(Color(0xFFB8F33A), (if (drag != null) 11 else 8).dp.toPx(), Offset(x, size.height / 2))
+            else drawLine(Color(0xFFB8F33A), Offset(x, 0f), Offset(x, size.height), 4.dp.toPx(), StrokeCap.Round)
         }
     }
     Row(
@@ -388,8 +447,24 @@ fun EtaBar(
     ) {
         RoundAction(RoundIcon.CLOSE, onClose)
         Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(remainingText, color = c.onChip, fontSize = 26.sp, fontWeight = FontWeight.Bold)
-            Text("$distanceText · $etaText", color = c.onChip.copy(alpha = 0.7f), fontSize = 15.sp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(remainingText, color = c.onChip, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+                if (elapsedText != null) {
+                    Text("  ⏱ $elapsedText", color = c.onChip.copy(alpha = 0.85f), fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (online != null) {
+                    androidx.compose.material3.Icon(
+                        if (online) androidx.compose.material.icons.Icons.Rounded.Cloud else androidx.compose.material.icons.Icons.Rounded.CloudOff,
+                        contentDescription = if (online) onlineText else offlineText,
+                        tint = if (online) Color(0xFF34C759) else c.onChip.copy(alpha = 0.7f),
+                        modifier = Modifier.size(18.dp),
+                    )
+                    androidx.compose.foundation.layout.Spacer(Modifier.width(6.dp))
+                }
+                Text("$distanceText · $etaText", color = c.onChip.copy(alpha = 0.7f), fontSize = 15.sp)
+            }
         }
         RoundAction(RoundIcon.OVERVIEW, onOverview)
     }

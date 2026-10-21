@@ -233,6 +233,7 @@ Tại vòng xuyến, đi lối ra thứ 8
 Tại vòng xuyến, đi lối ra thứ 8 vào
 Ra khỏi vòng xuyến
 Ra khỏi vòng xuyến vào
+Bạn đã đến điểm dừng
 hướng
 Chuyển 4 làn sang phải, vào làn ngoài cùng bên trái
 Chuyển 3 làn sang phải, vào làn ngoài cùng bên trái

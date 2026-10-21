@@ -233,6 +233,7 @@ At the roundabout take the 8th exit
 At the roundabout take the 8th exit onto
 Exit the roundabout
 Exit the roundabout onto
+You have reached your stop
 towards
 Move 4 lanes to the right into the left lane
 Move 3 lanes to the right into the left lane

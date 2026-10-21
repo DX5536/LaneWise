@@ -27,6 +27,9 @@ class VoicePack(val dir: File, val id: String, val language: String, val name: S
 
     val clipCount get() = index.size
 
+    /** A clip exists for this segment. */
+    fun has(part: String): Boolean = index[VoiceInventory.normalize(part)]?.let { File(dir, it).exists() } == true
+
     /** Clip files for all [parts], or null if any part is missing (then the whole sentence goes to Android TTS). */
     fun clips(parts: List<String>): List<File>? = parts.map { p ->
         index[VoiceInventory.normalize(p)]?.let { File(dir, it) }?.takeIf { it.exists() } ?: return null
