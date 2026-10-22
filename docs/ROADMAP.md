@@ -911,6 +911,26 @@ Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which
   street were deleted and redone.
 - Next district: by coverage (`amap_2lane.py status`), e.g. Linden-Mitte (15), List (12), Zoo (13).
 
+## Done (v0.4.4, part 14, 2026-10-22) — 2-lane AMAP survey: Linden-Mitte + List complete
+- **Linden-Mitte 15 / 15** (2 match, 1 equivalent, 10 without arrows, 2 differ) and **List 12 / 12** (4 match,
+  5 without arrows, 3 not found), on the phone. All: 113 / 977 (11.6 %).
+- **Differences (DOP20 / Mapillary next; nothing written to `lane_overrides.json`)**:
+  - 3 Am Lindener Hafen S-bound at Fössestraße: AMAP 3 lanes `left|left|through;right`, OSM trunk_link 2 lanes
+    `left|right` (no through lane).
+  - 560 Fössestraße W-bound at Am Lindener Hafen: AMAP `none|through` (jog to the offset west leg), OSM
+    `through|through;right` (AMAP shows no right turn) - minor.
+- Where AMAP has arrows they agree with OSM: Lister Kirchweg / Ferdinand-Wallbrecht-Straße (all 4 approaches),
+  Schwarzer Bär, Falkenstraße. Three more OSM ways end where the road widens before the stop line (513 Blumenauer
+  Straße, 561 Fössestraße E-bound - AMAP's 4-lane arrows match the next OSM way).
+- **AMAP draws 1 lane per direction where OSM has 2** (check DOP20): Blumenauer Straße at Gartenallee (515 / 516),
+  Lister Kirchweg at Wöhlerstraße (726), Spannhagenstraße S-bound (793), Celler Straße at Lützerodestraße (531).
+- Podbielskistraße / Spannhagenstraße / Hermann-Bahlsen-Allee is one junction box in AMAP: W-bound stop line
+  `left|through|through;right` (3 lanes) vs. OSM's inner 2-lane ways `through|right` (366 / 368 / 369, not
+  comparable directly - check DOP20).
+- Note for the survey: double-taps on a POI label open the place and then AMAP's login page - close it with the X
+  (never sign in) and leave with the upper-left back button; zoom with double-taps on bare road.
+- Next district: by coverage, e.g. Zoo (13), Bult (18), Döhren (18).
+
 ## Done (v0.4.4, part 11, 2026-10-20) — emulator
 - **Android emulator for LaneWise** (owner: test without connecting the phone): AVD `LaneWise_S24` (Android 14 Google
   APIs x86_64 + arm64 translation, 1440×3120, 8 GB RAM, WHPX, RTX GPU). LaneWise installs and runs there: debug demo,
