@@ -27,7 +27,7 @@ Read this first when resuming work in a new chat.
 > `docs/DATA_SOURCES.md` (AMAP rules) and `docs/ROADMAP.md` (v0.4.4 parts 6-10). The 64 big junctions are done
 > (`tools/streetview/work/amap_check.json`). 2-lane plan: `tools/streetview/work/amap_plan_2lane.json`, by Stadtteil:
 > `python -I tools/streetview/amap_2lane.py status` (coverage % per district), `todo DISTRICT`, `record N ...`
-> (readings in `amap_check_2lane.json`). Mitte is done (100 %); continue with Calenberger Neustadt, Oststadt or Nordstadt. AMAP is open on my phone (adb): its lane-level view
+> (readings in `amap_check_2lane.json`). Mitte, Calenberger Neustadt, Oststadt and Nordstadt are done (100 %); continue with Linden-Mitte, List or Zoo. AMAP is open on my phone (adb): its lane-level view
 > does NOT render in the emulator, so AMAP readings need the phone. Way of working:
 > search a nearby place, open it, leave with the upper-left back button (not the system back) until the home map,
 > then pan / zoom by hand (double-tap on empty map; double-tap + drag down zooms out) to the 5 m scale bar or closer -

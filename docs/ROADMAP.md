@@ -885,6 +885,32 @@ Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which
 - Next district: pick by coverage (`amap_2lane.py status`), e.g. the neighbours Calenberger Neustadt (16), Oststadt
   (9), Nordstadt (19).
 
+## Done (v0.4.4, part 13, 2026-10-22) — 2-lane AMAP survey: Calenberger Neustadt, Oststadt, Nordstadt complete
+- **Calenberger Neustadt 16 / 16** (4 match, 1 equivalent, 10 without arrows, 1 differs) and **Oststadt 9 / 9**
+  (6 match, 2 differ, 1 without arrows), on the phone. All: 67 / 977 (6.9 %).
+- **Differences (DOP20 / Mapillary next; nothing written to `lane_overrides.json`)**:
+  - 357 Lavesallee SW-bound before Ritter-Brüning-Straße: AMAP 4 lanes `left|through|through|through;right` over the
+    last ~60 m (= big-junction check 14); OSM splits it into a 2-lane way (`left;through|through;right`) then 3 lanes.
+  - 532 Celler Straße NE-bound at Hamburger Allee: AMAP 3 lanes `left|through|right`, OSM 2 `left|through`.
+  - 201 Berliner Allee W-bound at Fernroder Straße (north side of the Raschplatzhochstraße): AMAP 1 left-turn lane + 2
+    through, OSM 2 left-turn lanes (`sharp_left|left`) + 2 through.
+- **AMAP draws 1 lane per direction where OSM has 2** (likely AMAP outdated, as in part 10 - check DOP20):
+  Königsworther Straße at Grotefendstraße / Weddigenufer (712 / 713), Friederikenplatz upper roadway (243, OSM even
+  models it as one-way pairs), Beuermannstraße / Robert-Enke-Straße by the stadium (510 / 768 / 769).
+- AMAP's arrows on the Hohenzollernstraße approaches only rendered at maximum zoom (645 / 646 / 647) - "no arrows" at
+  2 m is not enough there.
+- **Nordstadt 19 / 19** (7 match, 3 equivalent, 9 without arrows, 0 differ). All: 86 / 977 (8.8 %).
+  - Where AMAP has arrows, they agree with OSM: Kopernikusstraße, Haltenhoffstraße, Bodestraße, Bremer Damm /
+    Westschnellweg (4-lane stop lines). Three OSM ways end where the road widens before the stop line (447 Weidendamm
+    E-bound, 151 Westschnellweg SE-bound, 222 Bremer Damm W-bound); there AMAP's arrows match the next OSM way.
+  - **AMAP draws 1 lane per direction where OSM has 2** (check DOP20): Weidendamm at Am Kläperberg (445) and at
+    Gertrud-Knebusch-Straße (448), Nienburger Straße at Schneiderberg (730 / 731), Engelbosteler Damm SE-bound at
+    Haltenhoffstraße (241, one wide lane). Arndtstraße SW-bound at Türkstraße (187): AMAP 3 lanes, OSM 2.
+- Lesson: Engelbosteler Damm and Weidendamm run parallel 200 m apart and AMAP labels part of Weidendamm's area
+  "Engelbosteler Damm" - match the OSM junction node (side street names) before reading; 5 readings taken on the wrong
+  street were deleted and redone.
+- Next district: by coverage (`amap_2lane.py status`), e.g. Linden-Mitte (15), List (12), Zoo (13).
+
 ## Done (v0.4.4, part 11, 2026-10-20) — emulator
 - **Android emulator for LaneWise** (owner: test without connecting the phone): AVD `LaneWise_S24` (Android 14 Google
   APIs x86_64 + arm64 translation, 1440×3120, 8 GB RAM, WHPX, RTX GPU). LaneWise installs and runs there: debug demo,
