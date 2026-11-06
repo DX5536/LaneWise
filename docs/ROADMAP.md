@@ -931,6 +931,30 @@ Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which
   (never sign in) and leave with the upper-left back button; zoom with double-taps on bare road.
 - Next district: by coverage, e.g. Zoo (13), Bult (18), Döhren (18).
 
+## Done (v0.4.5, part 1, 2026-11-05) — owner's real drive (video 2026-11-02, Musterstraße 1 → Musterweg 3, 8.4 km)
+- **"You have arrived" 250 m early** (Herschelstraße, 28 km/h): one GNSS fix projected onto the end of the route
+  (the route turns off and its end lies close to the car's street) and `remaining < 25` ended the trip.
+  `NavigationEngine` now holds a forward jump further than the car can have driven since the last fix (speed ×
+  time × 1.5 + 40 m) until three fixes agree, and "arrived" also needs the car itself within 50 m (or accuracy + 30 m)
+  of the route's end. Demo fixes (seek / ×8) are not held. Tests: `NavigationEngineTest`.
+- **Distance bouncing at a red light** (Philipsbornstraße, standing: "20 m" → "100 m" → "20 m"): a single fix ≥ 30 m
+  back was taken as a re-anchoring; now it needs three fixes in a row too.
+- **"Move one lane to the left" inside the junction** (Schulenburger Landstraße → left into Fenskestraße): the turn
+  has two nodes (stop line, turn node 25–30 m later). With the car still in the through lane near the stop line the
+  plan kept the through lane at the stop line and put the change into the junction box. `LanePlanner` now counts a
+  lane change between a stop-line node and the turn node of one junction (≤ 50 m) like one across a solid line, and two
+  turn nodes ≤ 30 m apart ("bear left" + "left", Arndtstraße → Herschelstraße) are one knot: the car keeps its lane
+  between them (no free turn entry). Test: `LanePlannerTest.noLaneChangeInsideTheJunctionBox`.
+- The drive ran with the cloud crossed out (no internet): no OSM corridor, so the lanes were OSRM's only - fewer
+  lane sites than online. `RouteRenderLiveTest` takes `LANEWISE_VIA` and `LANEWISE_NOCORRIDOR=1` to replay that.
+- Offline replay of the drive (`LANEWISE_NOCORRIDOR=1`): left lane at Fenskestraße (change advised from 4.6 km, 600 m
+  ahead) and at Arndtstraße → Herschelstraße. Still to confirm on a real drive (the video, with the older build,
+  recommended the through lane under "bear left, then left").
+- 134 unit tests pass (3 new). **Audit** (20 random routes): 19 findings (17 STRIP_ZIGZAG on Schnellwege / B 65 /
+  Bückeburger Allee, 2 LATE on the A 2 / A 352). Three of those routes re-run with the planner from before this
+  change give the same 6 findings at the same places - they are older open items (OSM data changed since the last
+  audit), not caused by this work. Open: look at the zigzags (lane 0 → 1 → 0 within 790 m on 2-3 lane Schnellwege).
+
 ## Done (v0.4.4, part 11, 2026-10-20) — emulator
 - **Android emulator for LaneWise** (owner: test without connecting the phone): AVD `LaneWise_S24` (Android 14 Google
   APIs x86_64 + arm64 translation, 1440×3120, 8 GB RAM, WHPX, RTX GPU). LaneWise installs and runs there: debug demo,

@@ -111,12 +111,12 @@ class LanePlanner(private val config: Config = Config()) {
 
         return horizon.mapIndexed { k, site ->
             val entry = if (k == 0) options.currentLateral
-            else transition(horizon[k - 1], path[k - 1], allowed[k - 1], site, path[k], options.freeTurnEntry).entry
+            else transition(horizon[k - 1], path[k - 1], allowed[k - 1], site, path[k], options.freeEntry(horizon[k - 1], site)).entry
             val target = site.lateral(path[k])
             val changes = when {
                 entry == null -> 0
                 k == 0 -> effectiveChanges(site, entry, target, minLanes(options, options.gapStart(), site.distanceAlong))
-                else -> transition(horizon[k - 1], path[k - 1], allowed[k - 1], site, path[k], options.freeTurnEntry,
+                else -> transition(horizon[k - 1], path[k - 1], allowed[k - 1], site, path[k], options.freeEntry(horizon[k - 1], site),
                     minLanes(options, horizon[k - 1].distanceAlong, site.distanceAlong)).changes
             }
             val change = if (entry == null) 0 else changes * Integer.signum(target - entry)
@@ -188,7 +188,8 @@ class LanePlanner(private val config: Config = Config()) {
         prev: LaneSite, i: Int, prevAllowed: BooleanArray, next: LaneSite, j: Int, freeEntry: Boolean = true,
         gapLanes: Int? = null,
     ): Transition {
-        val corr = entryLateral(prev, i, prevAllowed, next)
+        // Two turn nodes of one knot: the car is still in the same lane at the second.
+        val corr = if (prev.isManeuver && junctionBox(prev, next)) prev.lateral(i) else entryLateral(prev, i, prevAllowed, next)
         val target = next.lateral(j)
         // Explicit connectivity: only the lanes this lane really leads into can be entered (any of them, no cost).
         connectedLaterals(prev, i, next)?.let { lats ->
@@ -314,10 +315,11 @@ class LanePlanner(private val config: Config = Config()) {
             }
         }
 
-        fun edgeCost(changes: Int, fromLat: Int, toLat: Int, d0: Double, d1: Double, kind: RoadKind): Double {
+        fun edgeCost(changes: Int, fromLat: Int, toLat: Int, d0: Double, d1: Double, kind: RoadKind, box: Boolean = false): Double {
             if (changes == 0) return if (includeTieBreakers) config.freeMoveCost * abs(toLat - fromLat) else 0.0
             val gap = d1 - d0
-            val usable = gap - blockedLength(options.changeSpans, fromLat, toLat, d0, d1)
+            // Between the stop line and the turn's own node of one junction there are no lanes to change between.
+            val usable = if (box) 0.0 else gap - blockedLength(options.changeSpans, fromLat, toLat, d0, d1)
             val per = metersPerChange(kind)
             val doable = max(0.0, usable / per)
             val shortBy = max(0.0, changes - doable)
@@ -351,9 +353,10 @@ class LanePlanner(private val config: Config = Config()) {
                 for (i in 0 until prev.laneCount) {
                     val f = forward[k - 1][i]
                     if (f >= INF) continue
-                    val tr = transition(prev, i, allowed[k - 1], cur, j, options.freeTurnEntry, gapLanes[k - 1])
+                    val tr = transition(prev, i, allowed[k - 1], cur, j, options.freeEntry(prev, cur), gapLanes[k - 1])
                     val c = tr.changes
-                    val e = edgeCost(c, tr.entry, cur.lateral(j), prev.distanceAlong, cur.distanceAlong, cur.roadKind)
+                    val e = edgeCost(c, tr.entry, cur.lateral(j), prev.distanceAlong, cur.distanceAlong, cur.roadKind,
+                        junctionBox(prev, cur))
                     val v = f + tr.entryCost + e + if (c == 0) 0.0 else TIE_EPS * i
                     if (v < best - 1e-9) { best = v; arg = i }
                 }
@@ -377,8 +380,9 @@ class LanePlanner(private val config: Config = Config()) {
                     if (b >= INF) continue
                     val nc = nodeCost(k + 1, j)
                     if (nc >= INF) continue
-                    val tr = transition(cur, i, allowed[k], next, j, options.freeTurnEntry, gapLanes[k])
-                    val e = edgeCost(tr.changes, tr.entry, next.lateral(j), cur.distanceAlong, next.distanceAlong, next.roadKind)
+                    val tr = transition(cur, i, allowed[k], next, j, options.freeEntry(cur, next), gapLanes[k])
+                    val e = edgeCost(tr.changes, tr.entry, next.lateral(j), cur.distanceAlong, next.distanceAlong, next.roadKind,
+                        junctionBox(cur, next))
                     best = min(best, b + nc + tr.entryCost + e)
                 }
                 backward[k][i] = best
@@ -395,6 +399,22 @@ class LanePlanner(private val config: Config = Config()) {
         return Solution(sites, forward, backward, parent)
     }
 
+    /**
+     * [a] is the stop line and [b] the turn's own node of one junction (two nodes, see [mergeDoubleNodeJunctions]): a
+     * lane change in between counts like one across a solid line. Owner's drive (Schulenburger Landstraße → left into
+     * Fenskestraße): with the car still in the through lane near the stop line, the plan kept the through lane there and
+     * moved the "move left" into the 25 m inside the junction. Two turns of one knot ("bear left", then "left" a few
+     * metres on, Arndtstraße → Herschelstraße) are one junction box as well.
+     */
+    private fun junctionBox(a: LaneSite, b: LaneSite): Boolean {
+        if (!b.isManeuver || b.turn == LaneDir.STRAIGHT) return false
+        val gap = b.distanceAlong - a.distanceAlong
+        return if (a.isManeuver) gap <= KNOT_M else gap <= JUNCTION_BOX_M
+    }
+
+    /** Free choice of the lane turned into - not between two turn nodes of one knot (the car stays in its lane there). */
+    private fun Options.freeEntry(a: LaneSite, b: LaneSite) = freeTurnEntry && !(a.isManeuver && junctionBox(a, b))
+
     private fun argMin(a: DoubleArray): Int {
         var bi = 0
         for (i in a.indices) if (a[i] < a[bi]) bi = i
@@ -405,5 +425,9 @@ class LanePlanner(private val config: Config = Config()) {
         private const val INF = Double.POSITIVE_INFINITY
         private const val BIG = 1e6
         private const val TIE_EPS = 1e-6
+        /** Longest stretch between a junction's stop line and its turn node (as in [mergeDoubleNodeJunctions]). */
+        private const val JUNCTION_BOX_M = 50.0
+        /** Two turn nodes this close are one knot (a lane change between them is not possible). */
+        private const val KNOT_M = 30.0
     }
 }

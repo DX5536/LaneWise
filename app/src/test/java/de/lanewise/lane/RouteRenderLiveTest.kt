@@ -26,11 +26,14 @@ class RouteRenderLiveTest {
         // LANEWISE_FROM / LANEWISE_TO = "lat,lon" check any other route.
         fun env(k: String, d: LatLon) = System.getenv(k)?.split(',')?.let { LatLon(it[0].trim().toDouble(), it[1].trim().toDouble()) } ?: d
         val req = RouteRequest(env("LANEWISE_FROM", LatLon(52.3784754, 9.7340973)), env("LANEWISE_TO", LatLon(52.4380884, 9.7052888)),
-            alternatives = true)
+            alternatives = true, via = System.getenv("LANEWISE_VIA")?.split(';')?.filter { it.contains(',') }
+                ?.map { v -> v.split(',').let { LatLon(it[0].trim().toDouble(), it[1].trim().toDouble()) } }.orEmpty())
         val routes = OsrmRoutingProvider().route(req)
         println("${routes.size} routes: " + routes.joinToString { "${it.distance.toInt()} m" })
         var route: Route = routes.getOrElse(System.getenv("LANEWISE_ALT")?.toIntOrNull() ?: 1) { routes.first() }
-        val c = runCatching { SpeedLimitProvider().corridor(route.geometry, 0.0, route.distance, route.osmNodes) }
+        // LANEWISE_NOCORRIDOR=1: OSRM's lanes only, as in the app when the OSM corridor could not be fetched (offline).
+        val c = if (System.getenv("LANEWISE_NOCORRIDOR") == "1") null
+        else runCatching { SpeedLimitProvider().corridor(route.geometry, 0.0, route.distance, route.osmNodes) }
             .onFailure { println("corridor unavailable (${it.message}) - checking without OSM lane counts") }.getOrNull()
         if (c != null) route = route.copy(laneChanges = c.laneChanges, bikeLanes = c.bikeLanes, sideRoads = c.sideRoads).withOsmTurnLanes(c.turnLanes.map { it.distanceAlong to it.lanes }).withLaneAccess(c.laneAccess.map { it.distanceAlong to it.carLanes }).withLaneCounts(c.laneCounts)
         println("route ${route.distance.toInt()} m, ${route.laneSites.size} lane sites, ${route.laneCounts.size} lane-count spans, ${route.sideRoads.size} side roads")

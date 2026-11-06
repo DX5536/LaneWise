@@ -194,7 +194,7 @@ class LaneConnectivityTest {
         var last: de.lanewise.nav.NavSnapshot? = null
         var said = 0
         for ((k, d) in listOf(250.0, 350.0, 450.0, 550.0, 595.0).withIndex()) {
-            val (snap, ann) = engine.update(Fix(Geo.destination(line.pointAt(d), 90.0, 150.0), 12f, 0f, 5f, 2000L + k), s, p)
+            val (snap, ann) = engine.update(Fix(Geo.destination(line.pointAt(d), 90.0, 150.0), 12f, 0f, 5f, 9000L + 8000L * k), s, p)
             last = snap; if (snap.offRoute) said += ann.size   // 3 fixes in a row before off route (GPS jitter)
         }
         val snap = last!!

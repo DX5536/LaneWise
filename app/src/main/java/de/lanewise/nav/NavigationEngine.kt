@@ -76,6 +76,8 @@ class NavigationEngine(
     private var hint = 0
     private var lastAlong = 0.0
     private var offRouteCount = 0
+    private var lastFixMs: Long? = null
+    private var jumpCount = 0
     private var overActive = false
     private val spoken = HashSet<String>()
 
@@ -84,6 +86,7 @@ class NavigationEngine(
         if (previous == null) return
         hint = previous.hint
         lastAlong = previous.lastAlong
+        lastFixMs = previous.lastFixMs
         spoken += previous.spoken
     }
 
@@ -95,6 +98,8 @@ class NavigationEngine(
         hint = route.geometry.segmentIndexAt(d)
         lastAlong = d
         offRouteCount = 0
+        lastFixMs = null
+        jumpCount = 0
         spoken.clear()
         laneGuidance.reset()
     }
@@ -112,12 +117,24 @@ class NavigationEngine(
         // Keep progress monotonic against GNSS jitter, but allow re-anchoring on large jumps. Off the route the car is
         // not on it at all: progress stays where it left the route (the projection onto the nearest bit of route could
         // jump ahead - even to "arrived" - while driving down another street).
+        // A forward jump further than the car can have driven since the last fix is a GNSS outlier (or a projection
+        // onto a later bit of route close by): held until three fixes in a row agree. Owner's drive (2026-11-02,
+        // Herschelstraße): one such fix jumped 230 m ahead to the destination - "You have arrived", navigation over.
+        val dt = lastFixMs?.let { (fix.timeMs - it).coerceAtLeast(0L) / 1000.0 }
+        val reach = dt?.let { max(fix.speedMps.toDouble(), 14.0) * max(1.0, it) * 1.5 + 40.0 }
+        // Backwards likewise: standing at a red light (Philipsbornstraße) one fix put the car 80 m back - "20 m" turned
+        // into "100 m" and back. A real re-anchoring (the car did go back) still happens after three fixes.
+        val implausible = !offRoute && !fix.simulated && reach != null &&
+            (proj.distanceAlong - lastAlong > reach || lastAlong - proj.distanceAlong >= 30)
+        jumpCount = if (implausible) jumpCount + 1 else 0
+        val held = implausible && jumpCount < 3
+        lastFixMs = fix.timeMs
         val along = when {
-            offRoute -> lastAlong
+            offRoute || held -> lastAlong
             proj.distanceAlong < lastAlong && lastAlong - proj.distanceAlong < 30 -> lastAlong
             else -> proj.distanceAlong
         }
-        if (!offRoute) { hint = proj.segmentIndex; lastAlong = along }
+        if (!offRoute && !held) { hint = proj.segmentIndex; lastAlong = along }
 
         val remaining = max(0.0, route.distance - along)
         val remainingSec = route.etaDuration * (remaining / max(1.0, route.distance))
@@ -155,7 +172,9 @@ class NavigationEngine(
         // Off the route the planned lanes belong to a road the car is not on: no lane advice until the new route.
         val lanes = if (unknownTurn || offRoute) LaneState.EMPTY.copy(assumedLateral = planned.assumedLateral, assumedSince = planned.assumedSince)
         else planned
-        val arrived = !offRoute && remaining < 25
+        // Arrived only when the car itself is at the end of the route, not just its projection.
+        val arrived = !offRoute && remaining < 25 &&
+            de.lanewise.core.geo.Geo.distance(fix.position, line.pointAt(line.length)) < max(50.0, fix.accuracyM + 30.0)
 
         val ahead = route.features.filter { it.distanceAlong > along - 5 && it.distanceAlong - along < 400 }
         // One HUD entry per junction: signal positions within 50 m of each other count as one junction.

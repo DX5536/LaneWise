@@ -581,6 +581,45 @@ class LanePlannerTest {
         assertEquals(listOf(6884.0, 6982.0, 7300.0), kept)
     }
 
+    /**
+     * Owner's drive (2026-11-02, Schulenburger Landstraße → left into Fenskestraße): one lane widening into
+     * `left | through;right` 60 m before the stop line, the turn's own node 30 m after it. The lane bar kept the
+     * through lane at the stop line and asked "move left" only for the 30 m inside the junction.
+     */
+    @Test
+    fun noLaneChangeInsideTheJunctionBox() {
+        // Pocket opening 60 m before the stop line, or two lanes all along; with or without a solid line before it.
+        val widening: (Double) -> Int? = { d -> if (d < 5180) 1 else 2 }
+        val solid = listOf(ChangeSpan(5200.0, 5237.0, listOf(0, 0)))
+        for ((counts, spans) in listOf(widening to emptyList(), widening to solid, { _: Double -> 2 } to solid)) {
+            val stop = LaneSite(5237.0, listOf(L, S or R), listOf(false, true), S, false, RoadKind.URBAN)
+            val turn = LaneSite(5267.0, listOf(L, S or R), listOf(true, false), L, true, RoadKind.URBAN)
+            val sites = mergeDoubleNodeJunctions(listOf(stop, turn))
+            val g = LaneGuidance()
+            g.overrideCurrentLane(stop, 1)                          // the car in the through lane
+            var d = 4800.0
+            var st = g.update(sites, d, true, true, spans, laneCountAt = counts)
+            while (d < 5230) { d += 10; st = g.update(sites, d, true, true, spans, laneCountAt = counts) }
+            val a = st.nextAdvice!!
+            assertEquals(5237.0, a.site.distanceAlong, 0.1)
+            assertEquals("spans=$spans", 0, a.recommended)          // the left lane at the stop line, not the through lane
+        }
+        // The driver is still in the through lane 15 m before the stop line (queue, late advice): the move left is
+        // still due before the stop line - never inside the junction, where there are no lanes to change between.
+        val stop = LaneSite(5237.0, listOf(L, S or R), listOf(false, true), S, false, RoadKind.URBAN)
+        val turn = LaneSite(5262.0, listOf(L, S), listOf(true, false), L, true, RoadKind.URBAN)
+        val sites = mergeDoubleNodeJunctions(listOf(stop, turn))
+        val plan = LanePlanner().plan(sites, LanePlanner.Options(currentLateral = 0, carDistance = 5222.0, laneCountAt = { 2 }))
+        assertEquals(0, plan[0].recommended)
+        assertEquals(0, plan[1].changeFromPrevious)
+        // A knot: "bear left" and then "left" 20 m on (Arndtstraße → Herschelstraße) - the left lane at the first node.
+        val bear = LaneSite(7640.0, listOf(L, S, S, R), null, LaneDir.SLIGHT_LEFT, true, RoadKind.URBAN)
+        val left = LaneSite(7660.0, listOf(L, S, S, R), null, L, true, RoadKind.URBAN)
+        val knot = LanePlanner().plan(listOf(bear, left), LanePlanner.Options(currentLateral = 1, carDistance = 7500.0, laneCountAt = { 4 }))
+        assertEquals(0, knot[0].recommended)
+        assertEquals(0, knot[1].changeFromPrevious)
+    }
+
     /** Lane audit (Blumenauer Straße → left into Fössestraße): an equal change goes into the longer stretch. */
     @Test
     fun changeGoesIntoTheLongerStretch() {
