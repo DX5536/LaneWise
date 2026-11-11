@@ -54,6 +54,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -82,6 +83,7 @@ import de.lanewise.ui.PlaceBadge
 import de.lanewise.ui.PlaceIcons
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AddLocationAlt
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.MyLocation
@@ -225,6 +227,51 @@ fun MainScreen(
                     .padding(horizontal = 16.dp, vertical = 12.dp),
             ) { Text(msg, color = Color.White, fontSize = 15.sp) }
             LaunchedEffect(msg) { kotlinx.coroutines.delay(5000); vm.clearMessage() }
+        }
+
+        ArrivalCard(ui.arrival, Modifier.align(Alignment.BottomCenter), onDone = vm::clearArrival)
+    }
+}
+
+/** Slides up after a finished trip: destination, driving time and distance; closes itself after 15 s. */
+@Composable
+private fun ArrivalCard(arrival: de.lanewise.ui.Arrival?, modifier: Modifier, onDone: () -> Unit) {
+    val str = LocalStrings.current
+    // Keep the last trip on screen while the card slides out.
+    var shown by remember { mutableStateOf(arrival) }
+    if (arrival != null) shown = arrival
+    androidx.compose.animation.AnimatedVisibility(
+        arrival != null, modifier,
+        enter = androidx.compose.animation.slideInVertically { it } + androidx.compose.animation.fadeIn(),
+        exit = androidx.compose.animation.slideOutVertically { it } + androidx.compose.animation.fadeOut(),
+    ) {
+        val a = shown ?: return@AnimatedVisibility
+        val pop = remember { androidx.compose.animation.core.Animatable(0.4f) }
+        LaunchedEffect(a) {
+            pop.snapTo(0.4f)
+            pop.animateTo(1f, androidx.compose.animation.core.spring(dampingRatio = 0.45f, stiffness = 300f))
+        }
+        LaunchedEffect(a) { kotlinx.coroutines.delay(15_000); onDone() }
+        Row(
+            Modifier.navigationBarsPadding().padding(16.dp).fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp)).background(Color(0xF214161C)).padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier.size(48.dp).graphicsLayer { scaleX = pop.value; scaleY = pop.value }
+                    .clip(CircleShape).background(de.lanewise.ui.theme.Palette.Lime),
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Rounded.Check, null, tint = Color(0xFF14161C), modifier = Modifier.size(30.dp)) }
+            Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
+                Text(str.arrived, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                if (a.place.isNotBlank()) Text(a.place, color = Color.White.copy(alpha = 0.8f), fontSize = 14.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(String.format(java.util.Locale.getDefault(), "%d min · %.1f km", a.minutes, a.km),
+                    color = de.lanewise.ui.theme.Palette.Lime, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            }
+            Button(onDone, colors = ButtonDefaults.buttonColors(containerColor = de.lanewise.ui.theme.Palette.Violet)) {
+                Text(str.done, color = Color.White)
+            }
         }
     }
 }

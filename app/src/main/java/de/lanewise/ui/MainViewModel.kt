@@ -122,9 +122,14 @@ data class UiState(
     val nearbyFeatures: List<de.lanewise.core.model.RoadFeature> = emptyList(),
     /** Autobahn GmbH rest/parking areas, chargers, webcams (kinds enabled in Settings). */
     val autobahnPois: List<de.lanewise.core.model.AutobahnPoi> = emptyList(),
+    /** Arrival card after a finished trip; null = none shown. */
+    val arrival: Arrival? = null,
 ) {
     val selectedRoute get() = routes.getOrNull(selected)
 }
+
+/** Finished trip for the arrival card. */
+data class Arrival(val place: String, val minutes: Int, val km: Double)
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val ctx: Context get() = getApplication()
@@ -241,7 +246,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         updateNavNotification(snap, phrases)
         if (s.voice) ann.sortedByDescending { it.priority }.forEach { voice.speak(it) }
         if (s.overSpeedSound && snap.speedStatus == SpeedStatus.OVER && (fix.timeMs / 1000) % 5 == 0L) voice.beep()
-        if (snap.arrived) { stopNavigation(); _ui.update { it.copy(message = phrases.instruction(snap.route.steps.last())) }; return }
+        if (ann.any { it.key.startsWith("lane-") }) laneTick()
+        if (snap.arrived) { arrive(); return }
         if (snap.offRoute && (!fix.simulated || demoDrivePath != null)) reroute(fix)
         // Next stretch of OSM data 8 km before the fetched one ends - only if there is more route to fetch, one fetch at
         // a time and not again within 30 s of a failure. Short routes (< 8 km) were refetched on every fix (4 / s),
@@ -704,7 +710,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         currentRoute = route
         engine = NavigationEngine(route, laneGuidance)
         speedFetchedUntil = 0.0
-        _ui.update { it.copy(mode = Mode.NAVIGATING, simulating = simulate, routes = listOf(route), selected = 0, journeyDriven = 0.0,
+        _ui.update { it.copy(mode = Mode.NAVIGATING, simulating = simulate, routes = listOf(route), selected = 0, journeyDriven = 0.0, arrival = null,
             navStartedAt = System.currentTimeMillis()) }
         notifText = ""
         de.lanewise.nav.NavigationService.start(ctx, "LaneWise", route.steps.firstOrNull()?.name.orEmpty(),
@@ -720,11 +726,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     .collect { onFix(it) }
                 // The demo drove to the end of the route line: arrived, even if the last fix snapped a few metres short
                 // (it stayed at "50 m" with an empty banner).
-                if (_ui.value.mode == Mode.NAVIGATING && _ui.value.simulating) {
-                    val last = currentRoute?.steps?.lastOrNull()
-                    stopNavigation()
-                    last?.let { _ui.update { st -> st.copy(message = Phrases(settings.value.language).instruction(it)) } }
-                }
+                if (_ui.value.mode == Mode.NAVIGATING && _ui.value.simulating) arrive()
             }
         } else {
             onLocationPermissionGranted()
@@ -778,6 +780,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val i = DEMO_SPEEDS.indexOfFirst { it >= st.demoSpeed }.let { if (it < 0) DEMO_SPEEDS.lastIndex else it }
             st.copy(demoSpeed = DEMO_SPEEDS[(i + if (faster) 1 else -1).coerceIn(0, DEMO_SPEEDS.lastIndex)])
         }
+    }
+
+    /** End of the trip: stop navigating and show the arrival card (destination, driving time, distance). */
+    private fun arrive() {
+        val u = _ui.value
+        val place = u.destination?.title ?: currentRoute?.steps?.lastOrNull()?.let { Phrases(settings.value.language).instruction(it) }.orEmpty()
+        val minutes = ((System.currentTimeMillis() - u.navStartedAt) / 60_000).toInt().coerceAtLeast(1)
+        val km = (u.journeyDriven + (u.nav?.distanceAlong ?: 0.0)) / 1000
+        stopNavigation()
+        _ui.update { it.copy(arrival = Arrival(place, minutes, km)) }
+    }
+
+    fun clearArrival() = _ui.update { it.copy(arrival = null) }
+
+    /** Short double tick when a lane change is announced: felt even with voice off or music on. */
+    @Suppress("DEPRECATION")
+    private fun laneTick() {
+        val v = ctx.getSystemService(android.os.Vibrator::class.java) ?: return
+        if (!v.hasVibrator()) return
+        v.vibrate(if (android.os.Build.VERSION.SDK_INT >= 29) android.os.VibrationEffect.createPredefined(android.os.VibrationEffect.EFFECT_DOUBLE_CLICK)
+            else android.os.VibrationEffect.createWaveform(longArrayOf(0, 30, 80, 30), -1))
     }
 
     fun stopNavigation() {

@@ -618,6 +618,15 @@ class LanePlannerTest {
         val knot = LanePlanner().plan(listOf(bear, left), LanePlanner.Options(currentLateral = 1, carDistance = 7500.0, laneCountAt = { 4 }))
         assertEquals(0, knot[0].recommended)
         assertEquals(0, knot[1].changeFromPrevious)
+        // A fork, not a knot: 4-lane "bear left" (two left lanes) into a 2-lane road whose left lane turns left 20 m on.
+        // The lanes differ, so the fork's lateral must not be reused: the left fork lanes, then the left lane, no change.
+        val SL = LaneDir.SLIGHT_LEFT
+        val fork = LaneSite(7640.0, listOf(SL, SL, S, S), null, SL, true, RoadKind.URBAN)
+        val turnLeft = LaneSite(7660.0, listOf(L, S), null, L, true, RoadKind.URBAN)
+        val forked = LanePlanner().plan(listOf(fork, turnLeft), LanePlanner.Options(currentLateral = 2, carDistance = 7500.0, laneCountAt = { 4 }))
+        assertTrue("fork lane ${forked[0].recommended}", forked[0].recommended in 0..1)
+        assertEquals(0, forked[1].recommended)
+        assertEquals(0, forked[1].changeFromPrevious)
     }
 
     /** Lane audit (Blumenauer Straße → left into Fössestraße): an equal change goes into the longer stretch. */
@@ -715,5 +724,23 @@ class LanePlannerTest {
         for (car in listOf(50.0, 200.0, 450.0, 700.0)) {
             assertNull("car $car", g.update(sites, car, avoidLaneChanges = true, keepRight = true, laneCountAt = counts).pendingChange)
         }
+    }
+
+    /**
+     * Audit regression (ramp onto the Messeschnellweg, STRIP_ZIGZAG): A is `through|through|merge_to_left`, the merge
+     * lane ends just after A. It is already outside A's lane frame (right pocket), so it must not shift the frame again:
+     * before the fix A recommended the left lane and B the right one ("left lane for 120 m, then back").
+     */
+    @Test
+    fun mergeLaneThatIsAPocketAtTheSiteDoesNotShiftTheFrameAgain() {
+        val a = site(100.0, listOf(LaneDir.NONE, LaneDir.NONE, LaneDir.MERGE_TO_LEFT), S)
+        val b = site(900.0, listOf(LaneDir.NONE, S or LaneDir.SLIGHT_RIGHT), S)
+        val counts: (Double) -> Int? = { d -> if (d < 120) 3 else 2 }
+        val sites = markEndedLanes(listOf(a, b), listOf(115.0 to 1), counts)
+        assertEquals(0, sites[1].endedRight)
+        val plan = LanePlanner().plan(sites, LanePlanner.Options(currentLateral = 0, carDistance = 0.0, laneCountAt = counts))
+        assertEquals(1, plan[0].recommended)                    // the right through lane, where the ramp joins
+        assertEquals(1, plan[1].recommended)
+        assertEquals(0, plan[1].changeFromPrevious)
     }
 }

@@ -188,8 +188,7 @@ class LanePlanner(private val config: Config = Config()) {
         prev: LaneSite, i: Int, prevAllowed: BooleanArray, next: LaneSite, j: Int, freeEntry: Boolean = true,
         gapLanes: Int? = null,
     ): Transition {
-        // Two turn nodes of one knot: the car is still in the same lane at the second.
-        val corr = if (prev.isManeuver && junctionBox(prev, next)) prev.lateral(i) else entryLateral(prev, i, prevAllowed, next)
+        val corr = if (knot(prev, next)) prev.lateral(i) else entryLateral(prev, i, prevAllowed, next)
         val target = next.lateral(j)
         // Explicit connectivity: only the lanes this lane really leads into can be entered (any of them, no cost).
         connectedLaterals(prev, i, next)?.let { lats ->
@@ -412,8 +411,14 @@ class LanePlanner(private val config: Config = Config()) {
         return if (a.isManeuver) gap <= KNOT_M else gap <= JUNCTION_BOX_M
     }
 
+    /**
+     * Two turn nodes of one knot with the same lanes: the car is still in the same lane at the second. A fork into a
+     * road with other lanes (4-lane "bear left" → 2-lane left turn) is not: its lanes map like any turn.
+     */
+    private fun knot(a: LaneSite, b: LaneSite) = a.isManeuver && a.laneCount == b.laneCount && junctionBox(a, b)
+
     /** Free choice of the lane turned into - not between two turn nodes of one knot (the car stays in its lane there). */
-    private fun Options.freeEntry(a: LaneSite, b: LaneSite) = freeTurnEntry && !(a.isManeuver && junctionBox(a, b))
+    private fun Options.freeEntry(a: LaneSite, b: LaneSite) = freeTurnEntry && !knot(a, b)
 
     private fun argMin(a: DoubleArray): Int {
         var bi = 0

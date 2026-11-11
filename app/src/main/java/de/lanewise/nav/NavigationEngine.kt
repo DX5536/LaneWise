@@ -87,6 +87,7 @@ class NavigationEngine(
         hint = previous.hint
         lastAlong = previous.lastAlong
         lastFixMs = previous.lastFixMs
+        jumpCount = previous.jumpCount
         spoken += previous.spoken
     }
 

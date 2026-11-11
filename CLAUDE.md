@@ -21,6 +21,26 @@ Read this first when resuming work in a new chat.
 > as screenshot references; as a last resort, where OSM / photos / DOP20 are unclear, the lanes read from an AMAP
 > screenshot may go into `lane_overrides.json` as text (never the screenshot itself, never OSM; see `docs/DATA_SOURCES.md`). Never write my real addresses. When done, update `docs/ROADMAP.md`. My next request is:
 
+## Next session (copy-paste prompt, 2026-11-11)
+
+> Continue LaneWise (read `CLAUDE.md`, `docs/ROADMAP.md` v0.4.5 part 1 first). Uncommitted work from the last chat:
+> GPS-jump guard + "arrived only near the end" in `nav/NavigationEngine.kt`, junction-box / knot rule in
+> `lane/LanePlanner.kt`, tests `NavigationEngineTest`, `LanePlannerTest.noLaneChangeInsideTheJunctionBox`,
+> `RouteRenderLiveTest` env `LANEWISE_VIA` / `LANEWISE_NOCORRIDOR`. The build with it is on my phone. Open, in order:
+> 1. **Fix the fork bug** (review finding 1): `LanePlanner.transition()` reuses `prev.lateral(i)` between two turn
+>    nodes ≤ 30 m apart; wrong when the lane counts differ (4-lane "bear left" fork → 2-lane left turn). Guard with
+>    `prev.laneCount == next.laneCount`, add that fork case to the test (finding 2), optionally copy `jumpCount` in
+>    `NavigationEngine.rehydrate` (finding 3). Run unit tests, then the lane audit for 3 routes
+>    (`LANEWISE_AUDIT_ROUTES`), then install on my phone (`adb -s R5CX133SJ3P install -r ...`; an offline emulator may
+>    also be listed).
+> 2. **App polish** (my wish: modern, usable, interactive): start with the lane-guidance items - haptic tick when a
+>    lane change is due, lane-bar highlight that glides between lanes, a small arrival card; check first that they do
+>    not exist yet. Other ideas (recent destinations, route fly-through, lock-screen card, speed-camera voice, night
+>    lime) only if I ask. Keep DE/EN/VI strings in sync.
+> 3. The 17 STRIP_ZIGZAG audit findings on Schnellwege / B 65 / Bückeburger Allee (older, not from the last change).
+> Note: if Bash / Grep fail with "context-mode NODE_TOO_OLD", the context-mode plugin needs Node ≥ 24.15.0 - tell me.
+> MapMap MCP was checked: no lane data, not useful for lanes. Never commit or push.
+
 ## AMAP survey (copy-paste prompt to continue)
 
 > Continue the AMAP cross-check, now the 2-lane junctions district by district (skill `phoneapp-survey`). Read

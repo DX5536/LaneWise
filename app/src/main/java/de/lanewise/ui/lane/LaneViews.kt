@@ -27,6 +27,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.unit.toSize
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -74,6 +77,11 @@ fun LaneBar(
         countdown?.coerceIn(0f, 1f) ?: 0f, tween(900, easing = LinearEasing), label = "laneBoxCountdown",
     )
     val site = advice.site
+    // Lane cell bounds (Row content coordinates) and the recommended index, animated: the highlight glides between lanes.
+    val cells = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateMapOf<Int, androidx.compose.ui.geometry.Rect>() }
+    val glide by androidx.compose.animation.core.animateFloatAsState(
+        advice.recommended.toFloat(), androidx.compose.animation.core.spring(dampingRatio = 0.7f, stiffness = 300f), label = "laneGlide",
+    )
     // Docked: full width under the manoeuvre banner, lanes share the width, same colour as the banner.
     Row(
         modifier
@@ -84,7 +92,20 @@ fun LaneBar(
                 if (docked && countdown != null) drawRect(c.bannerAccent.copy(alpha = 0.38f),
                     size = androidx.compose.ui.geometry.Size(size.width * fill, size.height))
             }
-            .padding(horizontal = 8.dp, vertical = 6.dp),
+            .padding(horizontal = 8.dp, vertical = 6.dp)
+            .drawBehind {
+                val i0 = kotlin.math.floor(glide).toInt()
+                val r0 = cells[i0] ?: return@drawBehind
+                val r1 = cells[i0 + 1] ?: r0
+                val t = glide - i0
+                val left = r0.left + (r1.left - r0.left) * t
+                val width = r0.width + (r1.width - r0.width) * t
+                val radius = androidx.compose.ui.geometry.CornerRadius(10.dp.toPx())
+                drawRoundRect(Color(0x33B8F33A), Offset(left, r0.top), androidx.compose.ui.geometry.Size(width, r0.height), radius)
+                // Lime underline: the lane to be in, readable at a glance.
+                drawRoundRect(c.laneRecommended, Offset(left + width * 0.2f, r0.bottom - 4.dp.toPx()),
+                    androidx.compose.ui.geometry.Size(width * 0.6f, 3.dp.toPx()), androidx.compose.ui.geometry.CornerRadius(2.dp.toPx()))
+            },
         horizontalArrangement = Arrangement.spacedBy(2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -106,8 +127,8 @@ fun LaneBar(
             val highlight = if (allowed) usedBits(mask, site.turn) else 0
             Box(
                 (if (docked) Modifier.weight(1f).height(52.dp) else Modifier.size(width = 44.dp, height = 52.dp))
+                    .onPlaced { cells[i] = androidx.compose.ui.geometry.Rect(it.positionInParent(), it.size.toSize()) }
                     .clip(RoundedCornerShape(10.dp))
-                    .background(if (recommended) Color(0x33B8F33A) else Color.Transparent)
                     .combinedClickable(onClick = { onLaneTap(i) }, onLongClick = onLongPress),
                 contentAlignment = Alignment.Center,
             ) {

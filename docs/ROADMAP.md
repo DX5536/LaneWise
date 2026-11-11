@@ -931,6 +931,20 @@ Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which
   (never sign in) and leave with the upper-left back button; zoom with double-taps on bare road.
 - Next district: by coverage, e.g. Zoo (13), Bult (18), Döhren (18).
 
+## Done (v0.4.5, part 2, 2026-11-11) — review fixes + lane-guidance polish
+- **Fork vs. knot** (review findings 1-3): the knot rule (car keeps its lateral between two turn nodes ≤ 30 m apart) now
+  needs equal lane counts (`LanePlanner.knot`); a 4-lane "bear left" fork into a 2-lane left turn maps its lanes like
+  any turn. Test: fork case in `noLaneChangeInsideTheJunctionBox` (fails without the guard). `rehydrate` copies
+  `jumpCount`. Audit of the test drive (Settings → Test drive route): 4 findings with the guard, 5 without (a LATE
+  change at 2.4 km goes away); the ZIGZAG @ 12.6 km and 3 STRIP_ZIGZAG are older. Two short city routes: 0 findings.
+- **Haptic tick** (double click) when a lane change is announced - also with voice off (`MainViewModel.laneTick`,
+  `VIBRATE` permission).
+- **Lane bar**: the recommended-lane highlight glides between lanes (spring) with a lime underline, instead of jumping.
+- **Arrival card**: slides up after the trip with a popping check, destination, driving time and distance; "Done" or
+  15 s closes it (DE / EN / VI strings `arrived`, `done`).
+- Not installed yet: the phone was not connected (adb: no devices).
+- Open: the STRIP_ZIGZAG findings (Schnellwege / B 65 / Bückeburger Allee).
+
 ## Done (v0.4.5, part 1, 2026-11-05) — owner's real drive (video 2026-11-02, Musterstraße 1 → Musterweg 3, 8.4 km)
 - **"You have arrived" 250 m early** (Herschelstraße, 28 km/h): one GNSS fix projected onto the end of the route
   (the route turns off and its end lies close to the car's street) and `remaining < 25` ended the trip.
@@ -954,6 +968,16 @@ Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which
   Bückeburger Allee, 2 LATE on the A 2 / A 352). Three of those routes re-run with the planner from before this
   change give the same 6 findings at the same places - they are older open items (OSM data changed since the last
   audit), not caused by this work. Open: look at the zigzags (lane 0 → 1 → 0 within 790 m on 2-3 lane Schnellwege).
+- Installed on the owner's phone 2026-11-06.
+- **Open from the code review (2026-11-11):** (1) the knot rule in `LanePlanner.transition()` reuses
+  `prev.lateral(i)` also when the two turn nodes have different lane counts (a fork that splits 4 lanes into 2) - guard
+  it with equal lane counts; (2) add that fork case to `noLaneChangeInsideTheJunctionBox`; (3) `rehydrate` does not
+  copy `jumpCount` (minor).
+- **MapMap MCP checked** (2026-11-10): routes carry no lane data (no `turn:lanes`, arrows or connectivity), same OSM
+  routing as OSRM, online only - not useful for lane guidance. Possible later: its landmark instructions for the voice.
+- **App polish wish (owner)**: modern / interactive UI. Proposed first: haptic tick for a due lane change, gliding
+  lane-bar highlight, small arrival card; later only on request: recent destinations, route fly-through, lock-screen
+  card, speed-camera voice, night lime.
 
 ## Done (v0.4.4, part 11, 2026-10-20) — emulator
 - **Android emulator for LaneWise** (owner: test without connecting the phone): AVD `LaneWise_S24` (Android 14 Google

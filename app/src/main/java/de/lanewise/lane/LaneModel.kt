@@ -377,8 +377,13 @@ fun markEndedLanes(sites: List<LaneSite>, ended: List<Pair<Double, Int>>, laneCo
             val shift = minOf(n, existed - after)
             if (shift > 0) d to shift else null
         }
-        if (here.isEmpty()) s.copy(endedRight = 0, endedRightAt = null)
-        else s.copy(endedRight = here.sumOf { it.second }, endedRightAt = here.maxOf { it.first })
+        // A `merge_to_left` lane that was already a right pocket at the previous site is outside that site's frame
+        // (`lateral` skips it): it must not shift the frame a second time (audit, ramp onto the Messeschnellweg).
+        val pockets = if (k == 0) 0 else sorted[k - 1].lanes.takeLastWhile { it == LaneDir.MERGE_TO_LEFT }.size
+            .coerceAtMost(sorted[k - 1].rightPockets())
+        val shift = here.sumOf { it.second } - pockets
+        if (shift <= 0) s.copy(endedRight = 0, endedRightAt = null)
+        else s.copy(endedRight = shift, endedRightAt = here.maxOf { it.first })
     }
 }
 

@@ -88,6 +88,7 @@ class LaneAuditLiveTest {
         val instructions = LinkedHashMap<Pair<Double, Int>, LaneChangeInstruction>()
         val strip = ArrayList<Pair<Double, Double>>()
         var keepRightRun = 0.0
+        val trace = System.getenv("LANEWISE_AUDIT_TRACE")?.split('-')?.let { it[0].toDouble()..it[1].toDouble() }
         var d = 0.0
         while (d < route.distance - 30) {
             val st = g.update(route.laneSites, d, true, true, route.laneChanges, counts, kindAt)
@@ -98,6 +99,12 @@ class LaneAuditLiveTest {
             }
             val lat = LaneRibbonBuilder.stripLateralAt(route, st, d, d)
             if (lat != null) strip += d to lat
+            if (trace != null && d in trace && d.toInt() % 200 == 0) println("    plan ${d.toInt()}: " + st.plan.joinToString(" ") {
+                "${it.site.distanceAlong.toInt()}:${it.recommended}/${it.site.lanes}${if (it.site.isManeuver) "M" else ""}${it.site.roadKind.name.take(1)}c${it.changeFromPrevious}" })
+            // LANEWISE_AUDIT_TRACE="from-to" (m): strip, lane count and advice every 10 m there.
+            trace?.let { r -> if (d in r) println(String.format(java.util.Locale.US, "    trace %6.0f lat=%s lanes=%s next=@%s %s rec=%s pending=%s",
+                d, lat?.let { "%.2f".format(it) }, counts?.invoke(d), a?.site?.distanceAlong?.toInt(), "${a?.site?.lanes} ${a?.site?.roadKind} man=${a?.site?.isManeuver} ok=${a?.allowed?.toList()} opt=${a?.optimal?.toList()} assumed=${st.assumedLateral}", a?.recommended,
+                st.pendingChange?.let { "${it.lanes}@${it.site.distanceAlong.toInt()} from ${it.startAt.toInt()}" })) }
             // Keep right: motorway / expressway, strip left of the right lane, and the next change is not a move left soon.
             val fast = kindAt(d).let { it == RoadKind.MOTORWAY || it == RoadKind.TRUNK }
             val nextLeftSoon = st.pendingChange?.let { it.lanes > 0 && it.startAt - d < 1500 } == true
