@@ -122,3 +122,11 @@ val JsonElement?.int: Int? get() = (this as? JsonPrimitive)?.intOrNull
 val JsonElement?.bool: Boolean? get() = (this as? JsonPrimitive)?.booleanOrNull
 operator fun JsonElement?.get(key: String): JsonElement? = (this as? JsonObject)?.get(key)
 operator fun JsonElement?.get(index: Int): JsonElement? = (this as? JsonArray)?.getOrNull(index)
+
+/**
+ * [runCatching] for suspending work: failures become a [Result], but cancellation is passed on. A plain `runCatching`
+ * also caught the cancel of a replaced job, which then went on as if the work had failed (reroute reset the corridor
+ * progress; a replaced search showed "Search failed").
+ */
+inline fun <T> catching(block: () -> T): Result<T> =
+    runCatching(block).onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }

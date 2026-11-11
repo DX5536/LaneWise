@@ -113,6 +113,10 @@ class CarOverlayView(context: Context) : View(context) {
     }
     private val haloPaint = Paint(textPaint).apply { style = Paint.Style.STROKE; strokeWidth = 5f * resources.displayMetrics.density }
 
+    private val dp = resources.displayMetrics.density
+    private val dotFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF6C4CF5.toInt() }
+    private val dotRing = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; style = Paint.Style.STROKE; strokeWidth = 3f * dp }
+
     init { setWillNotDraw(false) }
 
     /** Show [s] with its anchor at ([px], [py]); null hides the car. */
@@ -126,6 +130,14 @@ class CarOverlayView(context: Context) : View(context) {
 
     override fun onDraw(canvas: Canvas) {
         val s = sprite ?: return
+        // "You are here" dot under a car drawn small (zoomed-out browse map: the 3D car has its real 4.5 m size and was a
+        // speck). Fades in as the car shrinks below 40 dp, fully there at 24 dp.
+        val fade = ((40f * dp - maxOf(s.bitmap.width, s.bitmap.height)) / (16f * dp)).coerceIn(0f, 1f)
+        if (fade > 0f) {
+            dotFill.alpha = (fade * 230).toInt(); dotRing.alpha = (fade * 255).toInt()
+            canvas.drawCircle(x, y, 11f * dp, dotFill)
+            canvas.drawCircle(x, y, 11f * dp, dotRing)
+        }
         canvas.drawBitmap(s.bitmap, x - s.anchorX, y - s.anchorY, bmpPaint)
         val t = label ?: return
         val ty = y - s.anchorY + s.bitmap.height + textPaint.textSize * 1.2f

@@ -27,6 +27,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.unit.toSize
@@ -73,6 +75,7 @@ fun LaneBar(
     countdown: Float? = null,
 ) {
     val c = LocalLaneColors.current
+    val str = de.lanewise.ui.i18n.LocalStrings.current
     val fill by androidx.compose.animation.core.animateFloatAsState(
         countdown?.coerceIn(0f, 1f) ?: 0f, tween(900, easing = LinearEasing), label = "laneBoxCountdown",
     )
@@ -94,10 +97,12 @@ fun LaneBar(
             }
             .padding(horizontal = 8.dp, vertical = 6.dp)
             .drawBehind {
-                val i0 = kotlin.math.floor(glide).toInt()
+                // The spring overshoots a little past the end lanes: clamp, or the highlight blinks off there.
+                val g = glide.coerceIn(0f, (site.laneCount - 1).coerceAtLeast(0).toFloat())
+                val i0 = kotlin.math.floor(g).toInt()
                 val r0 = cells[i0] ?: return@drawBehind
                 val r1 = cells[i0 + 1] ?: r0
-                val t = glide - i0
+                val t = g - i0
                 val left = r0.left + (r1.left - r0.left) * t
                 val width = r0.width + (r1.width - r0.width) * t
                 val radius = androidx.compose.ui.geometry.CornerRadius(10.dp.toPx())
@@ -129,7 +134,15 @@ fun LaneBar(
                 (if (docked) Modifier.weight(1f).height(52.dp) else Modifier.size(width = 44.dp, height = 52.dp))
                     .onPlaced { cells[i] = androidx.compose.ui.geometry.Rect(it.positionInParent(), it.size.toSize()) }
                     .clip(RoundedCornerShape(10.dp))
-                    .combinedClickable(onClick = { onLaneTap(i) }, onLongClick = onLongPress),
+                    .combinedClickable(onClickLabel = str.laneTapAction, onClick = { onLaneTap(i) }, onLongClick = onLongPress)
+                    // The state is shown by colour: TalkBack reads it as words.
+                    .semantics {
+                        contentDescription = String.format(str.laneCell, i + 1, site.laneCount) + ", " + when {
+                            recommended -> str.laneIsRecommended
+                            optimal || allowed -> str.laneIsPossible
+                            else -> str.laneIsWrong
+                        }
+                    },
                 contentAlignment = Alignment.Center,
             ) {
                 Canvas(Modifier.size(34.dp)) {

@@ -27,6 +27,8 @@ data class AppSettings(
     val showLaneScene: Boolean = true,
     /** Countdown fill in the lane box under the manoeuvre banner (shrinks towards the junction). */
     val laneBoxCountdown: Boolean = true,
+    /** On-screen lane hint as "← 3 lanes · 2nd from left" instead of the full sentence (the voice keeps it). */
+    val shortLaneHint: Boolean = false,
     /** Driving time so far (stopwatch since the start of navigation) next to the remaining time. */
     val showDriveTimer: Boolean = true,
     /** AMAP-style navigation view: no junction box, the camera zooms in at decisions and out on plain stretches. */
@@ -119,6 +121,7 @@ class SettingsRepository(private val context: Context) {
         val keepRight = booleanPreferencesKey("keep_right")
         val laneScene = booleanPreferencesKey("lane_scene")
         val laneBoxCountdown = booleanPreferencesKey("lane_box_countdown")
+        val shortLaneHint = booleanPreferencesKey("short_lane_hint")
         val driveTimer = booleanPreferencesKey("drive_timer")
         val laneSceneDist = intPreferencesKey("lane_scene_distance")
         val junctionZoom = booleanPreferencesKey("junction_zoom")
@@ -176,6 +179,7 @@ class SettingsRepository(private val context: Context) {
             keepRight = p[K.keepRight] ?: d.keepRight,
             showLaneScene = p[K.laneScene] ?: d.showLaneScene,
             laneBoxCountdown = p[K.laneBoxCountdown] ?: d.laneBoxCountdown,
+            shortLaneHint = p[K.shortLaneHint] ?: d.shortLaneHint,
             showDriveTimer = p[K.driveTimer] ?: d.showDriveTimer,
             immersiveView = p[K.immersive] ?: d.immersiveView,
             streetsWhileDriving = p[K.streetsDriving] ?: d.streetsWhileDriving,
@@ -234,6 +238,7 @@ class SettingsRepository(private val context: Context) {
             p[K.keepRight] = s.keepRight
             p[K.laneScene] = s.showLaneScene
             p[K.laneBoxCountdown] = s.laneBoxCountdown
+            p[K.shortLaneHint] = s.shortLaneHint
             p[K.driveTimer] = s.showDriveTimer
             p[K.immersive] = s.immersiveView
             p[K.streetsDriving] = s.streetsWhileDriving

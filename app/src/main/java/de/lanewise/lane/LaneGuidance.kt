@@ -201,7 +201,7 @@ class LaneGuidance(private val planner: LanePlanner = LanePlanner()) {
                 val target = a.site.lateral(a.recommended)
                 // The car's lane ends on the way (right edge, no junction): the change is due before it ends, not
                 // before the junction.
-                val endsAt = a.site.endedRightAt?.takeIf { a.site.endedRight > 0 && fromLat != null && fromLat < 0 && it > prevDist + 20 }
+                val endsAt = a.site.endedRightAt?.takeIf { fromLat != null && fromLat < 0 && it > prevDist + 20 }
                 val due = min(a.site.distanceAlong, endsAt ?: a.site.distanceAlong) - 10.0
                 // Change where the line is dashed: the last legal stretch before the site (solid lines from OSM).
                 val windows = legalWindows(spans, target - a.changeFromPrevious, target, prevDist + 10.0, due)

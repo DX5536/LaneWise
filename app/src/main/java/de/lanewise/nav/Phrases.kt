@@ -156,6 +156,24 @@ class Phrases(private val lang: AppLanguage) {
         )
     }
 
+    /**
+     * Short on-screen form of [laneChange] (read at a glance while driving; the voice keeps the full sentence):
+     * "← 3 lanes · 2nd from left".
+     */
+    fun laneChangeShort(c: LaneChangeInstruction, laneCount: Int): String {
+        val n = abs(c.lanes)
+        val target = c.targetLane
+        val fromRight = laneCount - target
+        val pos = when {
+            target == 0 -> t("linke Spur", "left lane", "làn trái")
+            target == laneCount - 1 -> t("rechte Spur", "right lane", "làn phải")
+            target + 1 <= fromRight -> t("${target + 1}. von links", "${ordinal(target + 1)} from left", "làn ${target + 1} từ trái")
+            else -> t("$fromRight. von rechts", "${ordinal(fromRight)} from right", "làn $fromRight từ phải")
+        }
+        val lanes = t(if (n == 1) "1 Spur" else "$n Spuren", if (n == 1) "1 lane" else "$n lanes", "$n làn")
+        return "${if (c.lanes > 0) "←" else "→"} $lanes · $pos"
+    }
+
     fun stayInLane(): String = t("Bleiben Sie auf Ihrer Spur", "Stay in your lane", "Giữ nguyên làn đường")
 
     fun rerouting(): String = t("Route wird neu berechnet", "Recalculating route", "Đang tính lại lộ trình")

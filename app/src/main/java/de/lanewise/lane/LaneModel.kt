@@ -128,7 +128,10 @@ data class LaneSite(
      * the previous site's lane x is this site's lane x - [endedRight]; a lane below 0 is gone and must be left.
      */
     val endedRight: Int = 0,
-    /** Where the last of those lanes ended (route distance, m): the lane change out of it is due before this point. */
+    /**
+     * Where the last of those lanes ended (route distance, m): the lane change out of it is due before this point. Also
+     * set with [endedRight] 0 when the lane was a merge pocket at the previous site (outside its frame, no shift).
+     */
     val endedRightAt: Double? = null,
 ) {
     val laneCount get() = lanes.size
@@ -382,8 +385,9 @@ fun markEndedLanes(sites: List<LaneSite>, ended: List<Pair<Double, Int>>, laneCo
         val pockets = if (k == 0) 0 else sorted[k - 1].lanes.takeLastWhile { it == LaneDir.MERGE_TO_LEFT }.size
             .coerceAtMost(sorted[k - 1].rightPockets())
         val shift = here.sumOf { it.second } - pockets
-        if (shift <= 0) s.copy(endedRight = 0, endedRightAt = null)
-        else s.copy(endedRight = shift, endedRightAt = here.maxOf { it.first })
+        // The end stays known without a shift: a driver who tapped the merge lane must still leave it before it ends.
+        if (here.isEmpty()) s.copy(endedRight = 0, endedRightAt = null)
+        else s.copy(endedRight = shift.coerceAtLeast(0), endedRightAt = here.maxOf { it.first })
     }
 }
 

@@ -2,6 +2,7 @@ package de.lanewise.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -237,15 +238,15 @@ fun MainScreen(
 @Composable
 private fun ArrivalCard(arrival: de.lanewise.ui.Arrival?, modifier: Modifier, onDone: () -> Unit) {
     val str = LocalStrings.current
-    // Keep the last trip on screen while the card slides out.
+    // Keep the last trip on screen while the card slides out (written after composition, not during it).
     var shown by remember { mutableStateOf(arrival) }
-    if (arrival != null) shown = arrival
+    LaunchedEffect(arrival) { if (arrival != null) shown = arrival }
     androidx.compose.animation.AnimatedVisibility(
         arrival != null, modifier,
         enter = androidx.compose.animation.slideInVertically { it } + androidx.compose.animation.fadeIn(),
         exit = androidx.compose.animation.slideOutVertically { it } + androidx.compose.animation.fadeOut(),
     ) {
-        val a = shown ?: return@AnimatedVisibility
+        val a = arrival ?: shown ?: return@AnimatedVisibility
         val pop = remember { androidx.compose.animation.core.Animatable(0.4f) }
         LaunchedEffect(a) {
             pop.snapTo(0.4f)
@@ -346,9 +347,9 @@ private fun BrowseOverlay(vm: MainViewModel, ui: UiState, settings: AppSettings,
                 ) { Icon(painterResource(R.drawable.ic_tune), str.settings, tint = c.onChip) }
             }
 
-            // Shortcuts: Home, Work, Favourites.
+            // Shortcuts: Home, Work, Favourites. Scrolls sideways with large system fonts ("Favourites" broke into 3 lines).
             Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ShortcutChip(Icons.Rounded.Home, str.home, set = home != null) {
                     if (home != null) vm.goTo(home) else hint = str.setHomeHint
                 }
@@ -365,7 +366,7 @@ private fun BrowseOverlay(vm: MainViewModel, ui: UiState, settings: AppSettings,
                     Modifier.fillMaxWidth().heightIn(max = 380.dp).clip(RoundedCornerShape(20.dp)).background(c.chip),
                 ) {
                     itemsIndexed(ui.results) { i, p ->
-                        PlaceRow(p, ui.places, onClick = { vm.chooseDestination(p) })
+                        PlaceRow(p, ui.places, from = ui.fix?.position, onClick = { vm.chooseDestination(p) })
                         if (i < ui.results.size - 1) HorizontalDivider(color = c.onChip.copy(alpha = 0.08f), modifier = Modifier.padding(start = 68.dp))
                     }
                 }
@@ -414,7 +415,7 @@ private fun ShortcutChip(icon: androidx.compose.ui.graphics.vector.ImageVector, 
     ) {
         Icon(icon, null, tint = tint?.let { if (set) it else it.copy(alpha = 0.55f) } ?: fg, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(6.dp))
-        Text(label, color = fg, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Text(label, color = fg, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
     }
 }
 
@@ -423,7 +424,7 @@ private fun ShortcutChip(icon: androidx.compose.ui.graphics.vector.ImageVector, 
  * badge next to it (yellow star, home, work or your own icon) and your name for it: "Am Muster 1 (Cousin)".
  */
 @Composable
-private fun PlaceRow(p: Place, saved: List<SavedPlace>, onClick: () -> Unit) {
+private fun PlaceRow(p: Place, saved: List<SavedPlace>, from: LatLon? = null, onClick: () -> Unit) {
     val c = LocalLaneColors.current
     val mine = saved.firstOrNull { de.lanewise.core.geo.Geo.distance(LatLon(it.lat, it.lon), p.position) < 40 }
     Row(
@@ -446,6 +447,12 @@ private fun PlaceRow(p: Place, saved: List<SavedPlace>, onClick: () -> Unit) {
             }
             if (p.subtitle.isNotBlank()) Text(p.subtitle, color = c.onChip.copy(alpha = 0.65f), fontSize = 13.sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        // Straight-line distance from the car: tells apart results with the same name (five "Kröpcke" stops).
+        from?.let { f ->
+            val m = de.lanewise.core.geo.Geo.distance(f, p.position)
+            Text(if (m < 1000) "${(m / 10).toInt() * 10} m" else String.format(java.util.Locale.getDefault(), "%.1f km", m / 1000),
+                color = c.onChip.copy(alpha = 0.65f), fontSize = 13.sp, modifier = Modifier.padding(start = 8.dp))
         }
     }
 }
@@ -820,7 +827,12 @@ private fun RouteRow(r: Route, selected: Boolean, phrases: Phrases, onClick: () 
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(formatDuration(r.etaDuration), color = c.onChip, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(formatDuration(r.etaDuration), color = c.onChip, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                // Arrival clock time, like the bottom bar while driving.
+                Text("  " + java.time.LocalTime.now().plusSeconds(r.etaDuration.toLong()).format(java.time.format.DateTimeFormatter.ofPattern("HH:mm")),
+                    color = c.onChip.copy(alpha = 0.7f), fontSize = 15.sp, modifier = Modifier.padding(bottom = 2.dp))
+            }
             val closures = r.incidents.count { it.blocked || it.kind == IncidentKind.CLOSURE }
             val works = r.incidents.count { it.kind == IncidentKind.ROADWORKS }
             val lights = r.features.count { it.kind == de.lanewise.core.model.FeatureKind.TRAFFIC_SIGNALS }
@@ -830,7 +842,7 @@ private fun RouteRow(r: Route, selected: Boolean, phrases: Phrases, onClick: () 
                 if (lights > 0) add("$lights × ${str.trafficLight}")
                 if (works > 0) add("$works ${str.roadworks}")
                 if (closures > 0) add("$closures ${str.closures}")
-                add(r.provider.uppercase())
+                if (r.provider == "offline") add(str.offline)
             }
             Text(extra.joinToString(" · "), color = c.onChip.copy(alpha = 0.7f), fontSize = 13.sp)
         }
@@ -961,9 +973,23 @@ private fun NavigationOverlay(
                 Spacer(Modifier.height(6.dp))
                 BikeLaneChip(bikeHere.exclusive, bikeColor, Modifier.align(Alignment.CenterHorizontally))
             }
-            ui.laneHint?.let { Spacer(Modifier.height(8.dp)); LaneHint(it, countdown = ui.laneHintCountdown) }
             // Safety: no lane data for the next turn - say so instead of guessing a lane.
-            if (ui.nav?.lanesUnknown == true && ui.laneHint == null) { Spacer(Modifier.height(8.dp)); LaneHint(str.lanesUnknown) }
+            val hintText = ui.laneHint ?: str.lanesUnknown.takeIf { ui.nav?.lanesUnknown == true }
+            // Slides in and out like the close-up (it popped in a single frame); the last text stays while it leaves.
+            var lastHint by remember { mutableStateOf(hintText) }
+            LaunchedEffect(hintText) { if (hintText != null) lastHint = hintText }
+            androidx.compose.animation.AnimatedVisibility(
+                visible = hintText != null,
+                enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(200)) +
+                    androidx.compose.animation.expandVertically(androidx.compose.animation.core.tween(200)),
+                exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(200)) +
+                    androidx.compose.animation.shrinkVertically(androidx.compose.animation.core.tween(200)),
+            ) {
+                Column {
+                    Spacer(Modifier.height(8.dp))
+                    LaneHint(hintText ?: lastHint.orEmpty(), countdown = if (ui.laneHint != null) ui.laneHintCountdown else null)
+                }
+            }
         }
 
         SpeedPanel(nav.fix.speedKmh, nav.speedStatus, Modifier.align(Alignment.CenterStart).padding(start = 12.dp, top = 160.dp))

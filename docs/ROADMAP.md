@@ -942,8 +942,38 @@ Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which
 - **Lane bar**: the recommended-lane highlight glides between lanes (spring) with a lime underline, instead of jumping.
 - **Arrival card**: slides up after the trip with a popping check, destination, driving time and distance; "Done" or
   15 s closes it (DE / EN / VI strings `arrived`, `done`).
-- Not installed yet: the phone was not connected (adb: no devices).
-- Open: the STRIP_ZIGZAG findings (Schnellwege / B 65 / Bückeburger Allee).
+- Installed and checked on the phone (demo drives): arrival card, haptic tick (vibration log), lane-bar underline.
+- **STRIP_ZIGZAG cause found** (ramp from Hans-Böckler-Allee onto the Messeschnellweg, test drive @ 2.4 km): the way
+  at the merge is `through|through|merge_to_left`; the merge lane is a right pocket there (outside the lateral frame)
+  *and* was counted as a lane that ended on the way (`endedRight`), so the frame shifted twice: the planner advised
+  the left lane at the merge and the right one 120 m later. `markEndedLanes` no longer shifts for a merge lane that was
+  a pocket at the previous site (it keeps `endedRightAt`, so a driver who taps that lane is still told to leave it
+  before it ends). Test: `mergeLaneThatIsAPocketAtTheSiteDoesNotShiftTheFrameAgain`. `LANEWISE_AUDIT_TRACE=from-to`
+  prints strip, lane count and plan every 10 m in `LaneAuditLiveTest`.
+- **Road kind from OSM**: OSRM only guesses it from a step's speed (Messeschnellweg = "rural": no keep-right, short
+  lane-change distances). The corridor now takes `highway=trunk / motorway` of the matched ways and upgrades the road
+  spans and lane sites (`Route.withRoadKinds`, never a downgrade; links excluded). Test: `osmTrunkUpgradesTheGuessedRoadKind`.
+- **Code audit / review fixes**: route searches cancel the previous one (an older answer showed the route to the
+  previous destination); `catching` (`core/net/Http.kt`) replaces `runCatching` where a job can be replaced, so a
+  cancelled corridor fetch no longer resets its progress (double Overpass fetch + route rebuild after every reroute)
+  and a replaced search no longer shows "Search failed"; offline OSRM parsing test (`OsrmParseTest`); lane highlight
+  clamped (no blink at the edge lanes); aerial / override files load once under a lock; one `Phrases` per fix.
+- **20-route audit** (seed 1): 3 findings, all LATE on Schnellwege (B 65, Südschnellweg, Westschnellweg) - before:
+  19 (17 STRIP_ZIGZAG). Those 3 routes without the OSM road kinds: 0 findings; re-runs with and without were both 0, but
+  Overpass was degraded then (half the lane sites). So `withRoadKinds` is **not used in the app yet** (comment in
+  `fetchCorridor`); `LANEWISE_ROADKINDS=1` turns it on in `LaneAuditLiveTest`. To do: re-run those 3 routes with and
+  without it when Overpass is healthy, trace the LATE ones (`LANEWISE_AUDIT_TRACE`), then decide.
+- **UI review** (design critique, motion and accessibility skills; screenshots on the phone):
+  "you are here" dot under the small car on the browse map (`CarOverlayView`); distance in search results; arrival
+  time on the route card, no provider jargon ("OSRM"), "Kreuzungen mit Spurführung" instead of "Spur-Knoten"; lane hint
+  fades in / out; keep-right setting cites § 2 StVO (was § 7); setting "Short lane hint" (off by default:
+  "← 3 lanes · 2nd from left" on screen, the voice keeps the full sentence; `PhrasesTest`).
+- **Accessibility**: TalkBack names for the trip bar's end / overview buttons and for each lane cell ("Lane 2 of 5,
+  recommended", tap = "I am in this lane"); the wrong-lane grey meets 3:1 in the light theme too; shortcut chips scroll
+  sideways at large system fonts (200 %: "Favourites" broke into 3 lines). Checked at 130 % / 200 % font (phone font
+  size restored to 100 %). Not done: the 40 dp demo "slower" button, a full TalkBack walk-through.
+- Installed on the phone 2026-11-11 (all of the above).
+- Open: real drive on the Messeschnellweg ramp (merge-lane fix); road kinds (above).
 
 ## Done (v0.4.5, part 1, 2026-11-05) — owner's real drive (video 2026-11-02, Musterstraße 1 → Musterweg 3, 8.4 km)
 - **"You have arrived" 250 m early** (Herschelstraße, 28 km/h): one GNSS fix projected onto the end of the route

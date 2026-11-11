@@ -51,6 +51,11 @@ class OsrmRoutingProvider(
         } catch (e: Exception) {
             throw RoutingException("OSRM request failed: ${e.message}", e)
         }
+        return parse(root)
+    }
+
+    /** OSRM `route` answer → routes with lane sites (pure; unit-tested with a saved answer). */
+    internal fun parse(root: JsonElement): List<Route> {
         if (root["code"].str != "Ok") throw RoutingException("OSRM: ${root["code"].str} ${root["message"].str ?: ""}")
         return root["routes"].arr.orEmpty().mapNotNull { parseRoute(it) }
     }

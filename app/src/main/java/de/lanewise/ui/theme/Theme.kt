@@ -59,7 +59,7 @@ object Palette {
 
 val LightLaneColors = LaneColors(
     asphalt = Color(0xFF2B2F38), asphaltEdge = Color(0xFF8E95A8), laneMarking = Color.White,
-    laneRecommended = Palette.Lime, laneAllowed = Color(0x66B8F33A), laneArrowIdle = Color(0xFF6B7080),
+    laneRecommended = Palette.Lime, laneAllowed = Color(0x66B8F33A), laneArrowIdle = Color(0xFF8A90A2),   // the lane bar is dark in both themes (≥ 3:1 on its countdown fill)
     route = Palette.Violet, routeCasing = Palette.VioletDeep,
     chip = Color.White, onChip = Color(0xFF14161C),
     banner = Palette.Graphite, onBanner = Color.White, bannerAccent = Palette.Violet,

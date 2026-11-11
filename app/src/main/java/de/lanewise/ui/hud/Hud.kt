@@ -41,6 +41,9 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
 import de.lanewise.core.model.RoadFeature
 import de.lanewise.ui.i18n.LocalStrings
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -477,11 +480,15 @@ enum class RoundIcon { CLOSE, OVERVIEW }
 @Composable
 fun RoundAction(icon: RoundIcon, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val c = LocalLaneColors.current
+    val str = LocalStrings.current
+    // Drawn icon: TalkBack needs a name for it.
+    val label = if (icon == RoundIcon.CLOSE) str.endNavigation else str.routeOverview
     Box(
         modifier.size(48.dp).clip(CircleShape)
             .border(if (icon == RoundIcon.CLOSE) 2.5.dp else 1.5.dp,
                 if (icon == RoundIcon.CLOSE) Color(0xFFE5484D) else c.onChip.copy(alpha = 0.6f), CircleShape)
-            .clickable(onClick = onClick),
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = label; role = androidx.compose.ui.semantics.Role.Button },
         contentAlignment = Alignment.Center,
     ) {
         Canvas(Modifier.size(20.dp)) {

@@ -1,6 +1,7 @@
 package de.lanewise.speed
 
 import de.lanewise.core.geo.Geo
+import de.lanewise.lane.RoadKind
 import de.lanewise.core.geo.LatLon
 import de.lanewise.core.geo.Polyline
 import de.lanewise.core.model.BikeLaneSpan
@@ -40,6 +41,8 @@ data class CorridorData(
     val laneOverrides: List<LaneOverrides.At> = emptyList(),
     /** Explicit lane connectivity at junctions on this stretch: patches (`lane_overrides.json`) and OSM relations. */
     val connectivity: List<de.lanewise.lane.ConnectivityAt> = emptyList(),
+    /** Stretches on OSM `highway=trunk` / `motorway` ([Route.withRoadKinds]: OSRM only guesses the kind from speed). */
+    val roadKinds: List<de.lanewise.core.model.RoadSpan> = emptyList(),
 )
 
 /** `turn:lanes` value (travel direction) of a way the route drives on, at the route distance where that way ends. */
@@ -129,7 +132,7 @@ class SpeedLimitProvider {
             patched.flatMap { it.changeSpans }.filter { it.to > fromDist && it.from < toDist })
         CorridorData(m.limits, matchFeatures(line, fromDist, toDist, nodes), m.bikes, m.lanes, changes,
             sideRoads(line, fromDist, toDist, ways.map { it.geom to it.tags }), turnLanesOnRoute(line, fromDist, toDist, ways),
-            laneAccess = laneAccessOnRoute(line, fromDist, toDist, ways),
+            laneAccess = laneAccessOnRoute(line, fromDist, toDist, ways), roadKinds = m.kinds,
             laneOverrides = patched.sortedBy { it.distanceAlong }, connectivity = connectivity.sortedBy { it.distanceAlong })
     }
 
@@ -273,6 +276,7 @@ class SpeedLimitProvider {
     /** Samples the route every 25 m, matches the nearest way in driving direction, and builds spans. */
     private class Matched(
         val limits: List<SpeedLimitSpan>, val bikes: List<BikeLaneSpan>, val lanes: List<LaneCountSpan>, val changes: List<ChangeSpan>,
+        val kinds: List<de.lanewise.core.model.RoadSpan>,
     )
 
     private fun matchWays(line: Polyline, fromDist: Double, toDist: Double, ways: List<OsmWay>): Matched {
@@ -287,6 +291,8 @@ class SpeedLimitProvider {
         var laneWay: OsmWay? = null; var laneFwd = true
         val changeSpans = ArrayList<ChangeSpan>()
         var changeStart = fromDist; var changeVal: List<Int>? = null
+        val kindSpans = ArrayList<de.lanewise.core.model.RoadSpan>()
+        var kindStart = fromDist; var kindVal: RoadKind? = null
 
         var d = fromDist
         while (d < toDist) {
@@ -300,6 +306,8 @@ class SpeedLimitProvider {
             var lanesDist = 18.0
             var lanesWay: OsmWay? = null; var lanesFwd = true
             var change: List<Int>? = null
+            var kind: RoadKind? = null
+            var kindDist = 18.0
             // Ways the route really drives on (shared OSM nodes) win over anything else in reach - a bridge above,
             // a road below or a parallel service road.
             fun near(w: OsmWay) = !(p.lat < w.minLat - pad || p.lat > w.maxLat + pad || p.lon < w.minLon - pad || p.lon > w.maxLon + pad) &&
@@ -315,6 +323,8 @@ class SpeedLimitProvider {
                 // One-way ways only in their direction of travel (the other carriageway is left out).
                 if (forward && w.reverse) continue
                 if (!forward && !(diff > 135 && (!w.oneway || w.reverse))) continue
+                if (off < kindDist) { kindDist = off; kind = w.tags["highway"]?.takeUnless { it.endsWith("_link") }
+                    ?.let { OsmTags.roadKind(it, null) }?.takeIf { it == RoadKind.MOTORWAY || it == RoadKind.TRUNK } }
                 val v = if (forward) w.maxFwd else w.maxBwd
                 if (v != OsmTags.UNKNOWN && off < limitDist) { limitDist = off; limit = if (v == OsmTags.NO_LIMIT) null else v }
                 if (off < bikeDist) { bikeDist = off; bike = OsmTags.bikeLaneRight(w.tags, forward, w.oneway) }
@@ -340,6 +350,10 @@ class SpeedLimitProvider {
                 changeVal?.let { changeSpans += ChangeSpan(changeStart, d, it) }
                 changeStart = d; changeVal = change
             }
+            if (kind != kindVal) {
+                kindVal?.let { kindSpans += de.lanewise.core.model.RoadSpan(kindStart, d, it, twoWay = false) }
+                kindStart = d; kindVal = kind
+            }
             if (bike != bikeVal) {
                 bikeVal?.let { bikes += BikeLaneSpan(bikeStart, d, it) }
                 bikeStart = d; bikeVal = bike
@@ -350,6 +364,7 @@ class SpeedLimitProvider {
         bikeVal?.let { bikes += BikeLaneSpan(bikeStart, toDist, it) }
         laneVal?.let { laneSpans += LaneCountSpan(laneStart, toDist, it, laneEnded) }
         changeVal?.let { changeSpans += ChangeSpan(changeStart, toDist, it) }
-        return Matched(limits, bikes, laneSpans, changeSpans)
+        kindVal?.let { kindSpans += de.lanewise.core.model.RoadSpan(kindStart, toDist, it, twoWay = false) }
+        return Matched(limits, bikes, laneSpans, changeSpans, kindSpans)
     }
 }

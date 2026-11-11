@@ -125,6 +125,24 @@ data class Route(
     fun laneCountAt(d: Double): Int? = laneCounts.firstOrNull { d >= it.from && d < it.to }?.count
 
     /** With OSM lane counts; lane sites are re-checked for turn lanes that run the whole way ([markFullLengthLanes]). */
+    /**
+     * OSM says trunk / motorway ([osm], from the corridor): OSRM only guesses the road kind from a step's average speed,
+     * and the B 3 Messeschnellweg came out "rural" (no keep-right, shorter lane-change distances). Only upgrades.
+     */
+    fun withRoadKinds(osm: List<RoadSpan>): Route {
+        if (osm.isEmpty()) return this
+        val rank = listOf(de.lanewise.lane.RoadKind.URBAN, de.lanewise.lane.RoadKind.RURAL, de.lanewise.lane.RoadKind.TRUNK,
+            de.lanewise.lane.RoadKind.MOTORWAY)
+        fun up(k: de.lanewise.lane.RoadKind, d: Double) =
+            osm.firstOrNull { d >= it.from && d < it.to }?.kind?.takeIf { rank.indexOf(it) > rank.indexOf(k) } ?: k
+        val cuts = osm.flatMap { listOf(it.from, it.to) }
+        val spans = roadSpans.flatMap { s ->
+            val bounds = (listOf(s.from, s.to) + cuts.filter { it > s.from && it < s.to }).sorted()
+            bounds.zipWithNext { a, b -> s.copy(from = a, to = b, kind = up(s.kind, (a + b) / 2)) }
+        }
+        return copy(roadSpans = spans, laneSites = laneSites.map { it.copy(roadKind = up(it.roadKind, it.distanceAlong - 5)) })
+    }
+
     fun withLaneCounts(counts: List<LaneCountSpan>): Route = copy(laneCounts = fillShortLaneDips(counts, laneSites.map { it.distanceAlong })).let { r ->
         r.copy(laneSites = de.lanewise.lane.markFullLengthLanes(
             de.lanewise.lane.trimToRoadLanes(r.laneSites, r::laneCountAt) { d ->

@@ -731,16 +731,40 @@ class LanePlannerTest {
      * lane ends just after A. It is already outside A's lane frame (right pocket), so it must not shift the frame again:
      * before the fix A recommended the left lane and B the right one ("left lane for 120 m, then back").
      */
+    /** OSM `highway=trunk` upgrades OSRM's speed guess (B 3 Messeschnellweg came out "rural"); it never downgrades. */
+    @Test
+    fun osmTrunkUpgradesTheGuessedRoadKind() {
+        val line = de.lanewise.core.geo.Polyline(listOf(de.lanewise.core.geo.LatLon(52.0, 9.0), de.lanewise.core.geo.LatLon(52.0, 9.03)))
+        val spans = listOf(de.lanewise.core.model.RoadSpan(0.0, 1000.0, RoadKind.RURAL, false),
+            de.lanewise.core.model.RoadSpan(1000.0, 2000.0, RoadKind.MOTORWAY, false))
+        val sites = listOf(LaneSite(300.0, listOf(S, S), null, S, false, RoadKind.RURAL),
+            LaneSite(900.0, listOf(S, S), null, S, false, RoadKind.RURAL))
+        val r = de.lanewise.core.model.Route("t", line, 2000.0, 0.0, emptyList(), sites, roadSpans = spans)
+            .withRoadKinds(listOf(de.lanewise.core.model.RoadSpan(500.0, 1500.0, RoadKind.TRUNK, false)))
+        assertEquals(RoadKind.RURAL, r.roadSpanAt(400.0)?.kind)
+        assertEquals(RoadKind.TRUNK, r.roadSpanAt(600.0)?.kind)
+        assertEquals(RoadKind.MOTORWAY, r.roadSpanAt(1200.0)?.kind)   // never down to trunk
+        assertEquals(listOf(RoadKind.RURAL, RoadKind.TRUNK), r.laneSites.map { it.roadKind })
+    }
+
     @Test
     fun mergeLaneThatIsAPocketAtTheSiteDoesNotShiftTheFrameAgain() {
         val a = site(100.0, listOf(LaneDir.NONE, LaneDir.NONE, LaneDir.MERGE_TO_LEFT), S)
         val b = site(900.0, listOf(LaneDir.NONE, S or LaneDir.SLIGHT_RIGHT), S)
-        val counts: (Double) -> Int? = { d -> if (d < 120) 3 else 2 }
-        val sites = markEndedLanes(listOf(a, b), listOf(115.0 to 1), counts)
+        val counts: (Double) -> Int? = { d -> if (d < 205) 3 else 2 }
+        val sites = markEndedLanes(listOf(a, b), listOf(200.0 to 1), counts)
         assertEquals(0, sites[1].endedRight)
+        assertEquals(200.0, sites[1].endedRightAt!!, 0.1)
         val plan = LanePlanner().plan(sites, LanePlanner.Options(currentLateral = 0, carDistance = 0.0, laneCountAt = counts))
         assertEquals(1, plan[0].recommended)                    // the right through lane, where the ramp joins
         assertEquals(1, plan[1].recommended)
         assertEquals(0, plan[1].changeFromPrevious)
+        // The driver taps the merge lane at A: leaving it is due before it ends (200 m), not at B (900 m).
+        val g = LaneGuidance()
+        g.update(sites, 105.0, avoidLaneChanges = true, keepRight = true, laneCountAt = counts)
+        g.overrideCurrentLane(sites[0], 2)
+        val change = g.update(sites, 110.0, avoidLaneChanges = true, keepRight = true, laneCountAt = counts).pendingChange
+        assertTrue("a change is advised", change != null)
+        assertTrue("due before the merge lane ends: ${change!!.deadline}", change.deadline <= 200.0)
     }
 }

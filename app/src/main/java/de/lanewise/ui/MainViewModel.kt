@@ -24,6 +24,8 @@ import de.lanewise.offline.OfflineGraphBuilder
 import de.lanewise.offline.OfflineRouter
 import de.lanewise.offline.OfflineTiles
 import de.lanewise.core.net.Http
+import de.lanewise.core.net.catching
+import kotlinx.coroutines.sync.withLock
 import de.lanewise.routing.OsrmRoutingProvider
 import de.lanewise.routing.RouteRequest
 import de.lanewise.routing.RouteScorer
@@ -234,10 +236,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val e = engine ?: return
         val s = settings.value
         voice.setLanguage(s.language)
-        val (snap, ann) = e.update(fix, s, Phrases(s.language))
         val phrases = Phrases(s.language)
+        val (snap, ann) = e.update(fix, s, phrases)
         val pending = snap.lanes.pendingChange?.takeIf { snap.distanceAlong >= it.startAt - 150 }
-        val hint = pending?.let { phrases.laneChange(it, it.site.laneCount) }
+        val hint = pending?.let { if (s.shortLaneHint) phrases.laneChangeShort(it, it.site.laneCount) else phrases.laneChange(it, it.site.laneCount) }
         val countdown = pending?.let {
             val from = it.startAt - 150
             ((it.deadline - snap.distanceAlong) / (it.deadline - from).coerceAtLeast(1.0)).toFloat().coerceIn(0f, 1f)
@@ -260,17 +262,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var aerial: AerialLanes? = null
 
     /** Lane counts from aerial photos (assets/aerial_lanes.json, built by tools/aerial_lanes); loaded once. */
-    suspend fun aerialLanes(): AerialLanes = aerial ?: withContext(Dispatchers.IO) {
+    /** Loads [aerialLanes] / [laneOverrides] once even when the preview and the navigation corridor ask at the same time. */
+    private val loadLock = kotlinx.coroutines.sync.Mutex()
+
+    suspend fun aerialLanes(): AerialLanes = aerial ?: loadLock.withLock { aerial ?: withContext(Dispatchers.IO) {
         runCatching {
             ctx.assets.open("aerial_lanes.json").bufferedReader().use { AerialLanes.parse(it.readText()) }
         }.getOrDefault(AerialLanes.EMPTY)
-    }.also { aerial = it }
+    }.also { aerial = it } }
 
     /**
      * Hand-checked lane patches: `assets/lane_overrides.json` with `lane_overrides.json` next to `lane_reports.geojson`
      * on top (patch a junction on the phone right away: `adb push`, then restart). Rejected entries go to logcat.
      */
-    suspend fun laneOverrides(): LaneOverrides = overrides ?: withContext(Dispatchers.IO) {
+    suspend fun laneOverrides(): LaneOverrides = overrides ?: loadLock.withLock { overrides ?: withContext(Dispatchers.IO) {
         fun load(text: () -> String, name: String) = runCatching { LaneOverrides.parse(text()) }
             .onFailure { if (it !is java.io.FileNotFoundException) android.util.Log.w("LaneWise", "$name: $it") }
             .getOrDefault(LaneOverrides.EMPTY)
@@ -280,7 +285,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             o.rejected.forEach { android.util.Log.w("LaneWise", "lane override rejected: $it") }
             speedLimits.overrides = o
         }
-    }.also { overrides = it }
+    }.also { overrides = it } }
     private var overrides: LaneOverrides? = null
 
     fun laneOverrideFile() = File(ctx.getExternalFilesDir(null) ?: ctx.filesDir, "lane_overrides.json")
@@ -346,7 +351,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         searchJob = viewModelScope.launch {
             delay(350)
             _ui.update { it.copy(searching = true) }
-            val res = runCatching { geocoder.search(q, _ui.value.fix?.position) }
+            val res = catching { geocoder.search(q, _ui.value.fix?.position) }
             _ui.update { it.copy(results = res.getOrDefault(emptyList()), searching = false,
                 message = res.exceptionOrNull()?.let { e -> "${strings.searchFailed}: ${e.message}" }) }
         }
@@ -361,7 +366,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         originJob = viewModelScope.launch {
             delay(350)
             _ui.update { it.copy(originSearching = true) }
-            val res = runCatching { geocoder.search(q, _ui.value.fix?.position) }
+            val res = catching { geocoder.search(q, _ui.value.fix?.position) }
             _ui.update { it.copy(originResults = res.getOrDefault(emptyList()), originSearching = false,
                 message = res.exceptionOrNull()?.let { e -> "${strings.searchFailed}: ${e.message}" }) }
         }
@@ -398,14 +403,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val from = st.origin?.position ?: route.geometry.points.first()
                 val to = st.destination?.position ?: route.geometry.points.last()
                 val osrm = OsrmRoutingProvider(settings.value.osrmUrl)
-                val res = runCatching {
+                val res = catching {
                     de.lanewise.search.StopFinder { pts -> osrm.durations(pts) }
                         .find(q, route.geometry, listOf(from) + st.stops.map { it.position } + to)
                 }
                 _ui.update { it.copy(stopCandidates = res.getOrDefault(emptyList()), stopPlaces = emptyList(), stopSearching = false,
                     message = res.exceptionOrNull()?.let { e -> "${strings.searchFailed}: ${e.message}" }) }
             } else {
-                val res = runCatching { geocoder.search(q, st.fix?.position ?: st.destination?.position) }
+                val res = catching { geocoder.search(q, st.fix?.position ?: st.destination?.position) }
                 _ui.update { it.copy(stopPlaces = res.getOrDefault(emptyList()), stopCandidates = emptyList(), stopSearching = false,
                     message = res.exceptionOrNull()?.let { e -> "${strings.searchFailed}: ${e.message}" }) }
             }
@@ -586,6 +591,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private var routeJob: Job? = null
+
     fun computeRoutes(origin: LatLon? = null, heading: Double? = null) {
         val dest = _ui.value.destination ?: return
         val custom = _ui.value.origin?.position
@@ -593,7 +600,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _ui.update { it.copy(message = strings.waitingForGps) }; return
         }
         val s = settings.value
-        viewModelScope.launch {
+        // Only the newest search may set the routes: an older, slower answer showed the route to the previous destination.
+        routeJob?.cancel()
+        routeJob = viewModelScope.launch {
             _ui.update { it.copy(routing = true) }
             val online = isOnline()
             val via = _ui.value.stops.map { it.position }
@@ -604,7 +613,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             for (p in providers(s, online)) {
                 if (p.requiresNetwork && !online) continue
                 if (via.isNotEmpty() && !p.supportsVia) { lastError = lastError ?: strings.stopsNeedOnline; continue }
-                val r = runCatching { p.route(req) }
+                val r = catching { p.route(req) }
                 if (r.isSuccess && r.getOrThrow().isNotEmpty()) { routes = r.getOrThrow(); break }
                 lastError = r.exceptionOrNull()?.message
             }
@@ -614,7 +623,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             routes = withTrafficFromTomTom(routes, s, online)
             // Traffic-aware ranking with official German data.
-            val incidents = if (online) runCatching {
+            val incidents = if (online) catching {
                 TrafficService { trafficSources(s) }.incidents(
                     BBox.around(routes.flatMap { listOf(it.geometry.points.first(), it.geometry.points.last()) } +
                         routes.flatMap { r -> r.geometry.points.filterIndexed { i, _ -> i % 50 == 0 } }),
@@ -632,7 +641,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     val o = st.origin?.position ?: return@let null
                     val dest = st.destination?.position ?: return@let null
                     providers(s, online).firstNotNullOfOrNull { p ->
-                        runCatching { p.route(RouteRequest(o, dest, null, alternatives = false, via = listOf(d))).firstOrNull() }.getOrNull()
+                        catching { p.route(RouteRequest(o, dest, null, alternatives = false, via = listOf(d))).firstOrNull() }.getOrNull()
                     }?.geometry
                 }
                 val i = if (!testPreferA7) 0 else ranked.indexOfFirst { r ->
@@ -651,6 +660,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var corridorJob: Job? = null
     private var corridorFailedAt = 0L
 
+    // Not yet: `Route.withRoadKinds(data.roadKinds)` (OSM trunk / motorway). The 20-route audit showed 3 LATE changes on
+    // Schnellwege with it and none without; Overpass was too degraded to confirm the cause (ROADMAP v0.4.5 part 2).
     private fun fetchCorridor(route: Route, from: Double) {
         val to = minOf(route.distance, from + 40_000)
         val before = speedFetchedUntil
@@ -658,7 +669,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         corridorJob?.cancel()
         corridorJob = viewModelScope.launch {
             laneOverrides()
-            val data = runCatching { speedLimits.corridor(route.geometry, from, to, route.osmNodes) }.getOrNull()
+            val data = catching { speedLimits.corridor(route.geometry, from, to, route.osmNodes) }.getOrNull()
             if (data == null) {
                 // Try again later (from where the car is then), not on the next fix.
                 speedFetchedUntil = before
@@ -688,7 +699,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private fun previewCorridor(route: Route) {
         viewModelScope.launch {
             laneOverrides()
-            val data = runCatching { speedLimits.corridor(route.geometry, 0.0, minOf(route.distance, 15_000.0), route.osmNodes) }.getOrNull()
+            val data = catching { speedLimits.corridor(route.geometry, 0.0, minOf(route.distance, 15_000.0), route.osmNodes) }.getOrNull()
                 ?: return@launch
             val updated = route.copy(
                 speedLimits = if (route.provider == "osrm") data.limits else route.speedLimits,
