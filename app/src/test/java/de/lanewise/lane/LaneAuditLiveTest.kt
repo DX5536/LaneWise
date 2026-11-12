@@ -59,6 +59,12 @@ class LaneAuditLiveTest {
                     ?: run { delay(5000); null }
             }
             if (c == null) { println("route ${routesDone + 1}: corridor unavailable, skipped"); continue }
+            if (System.getenv("LANEWISE_SPLITS") == "1") c.turnLanes.filter { t -> route.junctionsAt.none { abs(it - t.distanceAlong) < 25 } &&
+                route.laneSites.none { abs(it.distanceAlong - t.distanceAlong) < 40 } }.forEach { t ->
+                val p = route.geometry.pointAt(t.distanceAlong)
+                val nearest = route.junctionsAt.minByOrNull { abs(it - t.distanceAlong) }?.let { (it - t.distanceAlong).toInt() }
+                println(String.format(java.util.Locale.US, "    split? @%6.0f %.5f,%.5f %-28s nearest junction %s m", t.distanceAlong, p.lat, p.lon, t.lanes, nearest))
+            }
             println("    corridor: ${c.limits.size} limits, ${c.laneCounts.size} lane counts, ${c.turnLanes.size} turn:lanes, ${c.roadKinds.size} road kinds, ${route.osmNodes.size} route nodes")
             route = route.copy(laneChanges = c.laneChanges, bikeLanes = c.bikeLanes, sideRoads = c.sideRoads, features = c.features)
                 .withRoadKinds(if (System.getenv("LANEWISE_ROADKINDS") == "0") emptyList() else c.roadKinds).withOsmTurnLanes(c.turnLanes.map { it.distanceAlong to it.lanes }).withLaneAccess(c.laneAccess.map { it.distanceAlong to it.carLanes }).withLaneCounts(c.laneCounts)

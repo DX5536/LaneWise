@@ -552,8 +552,10 @@ class LanePlannerTest {
         val line = de.lanewise.core.geo.Polyline(listOf(a, de.lanewise.core.geo.Geo.destination(a, 0.0, 1000.0)))
         val exit = LaneSite(900.0, listOf(S, S, LaneDir.SLIGHT_RIGHT), null, LaneDir.SLIGHT_RIGHT, true, RoadKind.TRUNK)
         val r = de.lanewise.core.model.Route("osrm", line, 1000.0, 60.0, emptyList(), listOf(exit), junctionsAt = listOf(400.0, 900.0))
-            .withOsmTurnLanes(listOf(400.0 to "none|none|slight_right", 750.0 to "none|none|slight_right", 830.0 to "none|none|slight_right"))
-        assertEquals(listOf(400.0, 900.0), r.laneSites.map { it.distanceAlong })
+            .withOsmTurnLanes(listOf(400.0 to "none|none|slight_right", 600.0 to "none|none|merge_to_left",
+                750.0 to "none|none|slight_right", 830.0 to "none|none|slight_right"))
+        // The merge between junctions stays: it is where an on-ramp lane ends.
+        assertEquals(listOf(400.0, 600.0, 900.0), r.laneSites.map { it.distanceAlong })
     }
 
     /**

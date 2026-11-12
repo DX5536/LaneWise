@@ -1012,16 +1012,23 @@ Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which
   slower / faster buttons 32 → 48 dp. Left as is: MapLibre's own attribution "i" (23 dp). The app font (Quicksand) has
   no ← / → glyphs: the short lane hint's arrows come from the system font fallback (they show, in its style).
 - Installed on the phone 2026-11-11 (all of the above).
-- Open: real drive on the Messeschnellweg ramp (merge-lane fix); live re-check of the way-split fix (above).
+- Open: real drive on the Messeschnellweg ramp (merge-lane fix); a 20-route audit with the corridor fallback.
 - **Overpass outage found (2026-11-12) - why every live re-check had no corridor:** overpass-api.de (0.7.62.11)
   answers every `around` query with 2 or more points with **0 elements and no error** (one point works: 4 ways at the
   Westschnellweg exit; the same spot as a 2-point line: 0). The corridor query is one such line (480 points for 9 km),
   so the corridor came back empty and the app silently used OSRM's lanes only. The other mirrors: maps.mail.ru fails the
   JVM certificate check (PKIX), kumi.systems and private.coffee time out (190 s). Fixed on the way: an Overpass answer
   with `remark: runtime error ...` (server-side timeout) is now an error, so the next mirror is tried
-  (`Overpass.runtimeError`, `OverpassRemarkTest`). Open: an empty corridor for a long route is not detected yet (decide:
-  treat as failure / split the line into single-point `around`s); re-run the 3 LATE routes once overpass-api.de answers
-  line queries again. `LaneAuditLiveTest` now prints the corridor size per route.
+  (`Overpass.runtimeError`, `OverpassRemarkTest`). **Owner's decision: detect + fallback** - an empty corridor answer
+  for more than 1 km is a server fault: `corridor()` retries once with single-point circles every 40 m collected into a
+  set (~10 KB for 9 km; checked at the Westschnellweg exit: the 3-lane exit ways, signals, crossings), and if that is
+  empty too the corridor is unavailable (an error, never a silent "no lanes"). `LaneAuditLiveTest` prints the corridor
+  size per route (`LANEWISE_SPLITS=1` lists the OSM lane sites dropped as way splits).
+- **Way-split fix verified live (full corridor via the fallback):** the 3 LATE routes give **0 findings**; at the
+  Westschnellweg exit the strip moves into the exit lane where it opens (4960 m, ~190 m before the exit; before: 60 m).
+  The first version also dropped `merge_to_*` sites between junctions (on-ramp lane ends, which the merge-lane logic
+  needs): those are kept now (test extended); re-run with them: still 0 findings (17 / 29 / 10 lane sites). The dropped
+  sites were all repeated exit-lane pictures 28-306 m from the nearest OSRM intersection.
 - **Second code audit - all four fixed (2026-11-11):** `.part` folders skipped and deleted on a failed download,
   download interruptible (`runInterruptible`), `OfflineGraph.save` throws when the rename fails, `Overpass.withRetries`
   rethrows cancellation. Findings were:

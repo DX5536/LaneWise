@@ -160,10 +160,11 @@ data class Route(
     fun withOsmTurnLanes(at: List<Pair<Double, String>>): Route {
         // Only at real junctions: a way that is merely split in OSM repeats its `turn:lanes` at every split, and each
         // repeat read as a junction kept the car out of the exit lane until the last split (audit, Westschnellweg:
-        // exit lane 226 m long, "move right" only 60 m before the exit).
+        // exit lane 226 m long, "move right" only 60 m before the exit). A merge between junctions (an on-ramp lane
+        // ending) is kept: it is where that lane ends.
         val split = { d: Double -> junctionsAt.isNotEmpty() && junctionsAt.none { kotlin.math.abs(it - d) < 25 } }
-        val added = at.filter { (d, _) -> laneSites.none { kotlin.math.abs(it.distanceAlong - d) < 40 } &&
-            unknownLanesAt.none { kotlin.math.abs(it - d) < 40 } && !split(d) }.mapNotNull { (d, v) ->
+        val added = at.filter { (d, v) -> laneSites.none { kotlin.math.abs(it.distanceAlong - d) < 40 } &&
+            unknownLanesAt.none { kotlin.math.abs(it - d) < 40 } && (!split(d) || v.contains("merge")) }.mapNotNull { (d, v) ->
             val masks = de.lanewise.lane.LaneDir.parseTurnLanes(v)
             if (masks.size < 2) return@mapNotNull null
             val turn = turnAt(d)

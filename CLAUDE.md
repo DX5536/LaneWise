@@ -28,9 +28,9 @@ Read this first when resuming work in a new chat.
 > OSM `turn:lanes` sites only at OSRM intersections), haptic tick, gliding lane highlight, arrival card, short-hint
 > setting, accessibility fixes (Settings rows as one toggle, 48 dp demo buttons). The build with all of it is on my
 > phone. Open, in order:
-> 1. **Live check of the way-split fix**: re-run the 3 LATE routes with full Overpass data
->    (`LANEWISE_LIVE=1 LANEWISE_AUDIT=1 LANEWISE_AUDIT_ROUTES="52.42006,9.91984>52.35101,9.74045;52.34134,9.71344>52.40328,9.98321;52.34200,9.73295>52.39067,9.67400"`,
->    `--rerun`); full data = the trace shows `lanes=<n>`, not `lanes=null`. Expect 0 LATE; then a 20-route audit.
+> 1. **20-route audit** with the corridor fallback (way-split fix verified on the 3 LATE routes: 0 findings).
+>    (`LANEWISE_LIVE=1 LANEWISE_AUDIT=1`, `--rerun`, run in the background). Full data = each route's "corridor:" line
+>    shows lane counts > 0 (overpass-api.de answered line queries with 0 elements on 2026-11-12; the fallback covers it).
 > 2. My real drive on the Messeschnellweg ramp (merge-lane fix) - I report back.
 > 3. Polish ideas only if I ask (recent destinations, route fly-through, lock-screen card, speed-camera voice, night lime).
 > Note: if Bash / Grep fail with "context-mode NODE_TOO_OLD", the context-mode plugin needs Node >= 24.15.0 - tell me.
