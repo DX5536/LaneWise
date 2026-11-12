@@ -87,14 +87,25 @@ class SpeedLimitProvider {
             ov.entries.mapNotNull { it.toWay }).distinct()
         // Set .a = the corridor ways and nodes (tags + geometry); then the `type=connectivity` relations of those ways
         // and their member ways as bare node lists + geometry (no tags: they only serve to check from / via / to).
-        val q = "[out:json][timeout:90];(" +
-            (if (patchedIds.isNotEmpty()) "way(id:${patchedIds.joinToString(",")})(around:25,$c)[\"highway\"];" else "") +
-            "way(around:25,$c)[\"highway\"][~\"^maxspeed\"~\".\"];" +
-            "way(around:25,$c)[\"highway\"][~\"^cycleway\"~\"lane\"];" +
-            "way(around:25,$c)[\"highway\"][~\"^(lanes|turn:lanes)\"~\".\"];" +
-            OsmTags.featureNodeQuery("(around:20,$c)") +
+        // `src` selects ways, `nodes` the feature nodes: around the route line, or (fallback) from a prepared set .w.
+        fun query(prefix: String, src: String, nodes: String) = "[out:json][timeout:90];$prefix(" +
+            (if (patchedIds.isNotEmpty()) "way$src(id:${patchedIds.joinToString(",")})[\"highway\"];" else "") +
+            "way$src[\"highway\"][~\"^maxspeed\"~\".\"];" +
+            "way$src[\"highway\"][~\"^cycleway\"~\"lane\"];" +
+            "way$src[\"highway\"][~\"^(lanes|turn:lanes)\"~\".\"];" +
+            OsmTags.featureNodeQuery(nodes) +
             ")->.a;.a out body geom;rel(bw.a)[\"type\"=\"connectivity\"]->.c;.c out body;way(r.c);out skel geom;"
-        val elements = Overpass.json(q)["elements"].arr.orEmpty()
+        var elements = Overpass.json(query("", "(around:25,$c)", "(around:20,$c)"))["elements"].arr.orEmpty()
+        // A route over 1 km always has OSM ways along it: an empty answer is a server fault, not "no data" (2026-11-12:
+        // overpass-api.de answered every `around` with 2+ points with 0 elements, single points still worked). Retry
+        // with single-point circles every 40 m collected into .w; if that is empty too, the corridor is unavailable -
+        // never a silent "no lanes here".
+        if (elements.isEmpty() && toDist - fromDist > 1000) {
+            val circles = generateSequence(fromDist) { it + 40.0 }.takeWhile { it <= toDist }
+                .joinToString("") { line.pointAt(it).let { p -> String.format(Locale.US, "way(around:25,%.5f,%.5f)[\"highway\"];", p.lat, p.lon) } }
+            elements = Overpass.json(query("($circles)->.w;", ".w", "(w.w)"))["elements"].arr.orEmpty()
+            if (elements.isEmpty()) throw java.io.IOException("Overpass returned an empty corridor")
+        }
         val ways = elements.filter { it["type"].str == "way" && it["tags"] != null }.mapNotNull { el ->
             val geom = el["geometry"].arr.orEmpty().mapNotNull { p ->
                 val la = p["lat"].dbl; val lo = p["lon"].dbl

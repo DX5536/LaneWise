@@ -3,7 +3,7 @@ package de.lanewise.nav
 import android.content.Context
 import de.lanewise.core.net.Http
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.runInterruptible
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Request
@@ -52,7 +52,8 @@ class VoicePack(val dir: File, val id: String, val language: String, val name: S
 
         /** All installed packs (clips are Ogg Opus, which MediaPlayer plays from Android 10). */
         fun installed(context: Context): List<VoicePack> = if (android.os.Build.VERSION.SDK_INT < 29) emptyList() else roots(context).flatMap { root ->
-            root.listFiles().orEmpty().filter { it.isDirectory }.mapNotNull { load(it) }
+            // `<id>.part`: a download that did not finish (its pack.json may be there, its clips not).
+            root.listFiles().orEmpty().filter { it.isDirectory && !it.name.endsWith(".part") }.mapNotNull { load(it) }
         }.distinctBy { it.id }
 
         fun load(dir: File): VoicePack? = runCatching {
@@ -63,31 +64,37 @@ class VoicePack(val dir: File, val id: String, val language: String, val name: S
 
         /** Downloads and unpacks `<baseUrl><id>.zip` into `files/voices/<id>/`; [progress] gets 0..100. */
         suspend fun download(context: Context, id: String, baseUrl: String = DEFAULT_BASE_URL, progress: (Int) -> Unit = {}): VoicePack =
-            withContext(Dispatchers.IO) {
+            // Interruptible: cancelling the coroutine stops the blocking OkHttp read (project rule: no plain execute()).
+            runInterruptible(Dispatchers.IO) {
                 val target = File(File(context.filesDir, "voices"), id)
                 val tmp = File(target.parentFile, "$id.part").also { it.deleteRecursively(); it.mkdirs() }
-                val req = Request.Builder().url(baseUrl.trimEnd('/') + "/$id.zip").build()
-                Http.client.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
-                    val body = resp.body ?: throw IOException("empty response")
-                    val total = body.contentLength()
-                    var read = 0L
-                    val counting = object : java.io.FilterInputStream(body.byteStream()) {
-                        override fun read(b: ByteArray, off: Int, len: Int): Int =
-                            super.read(b, off, len).also { if (it > 0) { read += it; if (total > 0) progress((read * 100 / total).toInt()) } }
-                    }
-                    ZipInputStream(counting.buffered()).use { zip ->
-                        while (true) {
-                            val e = zip.nextEntry ?: break
-                            val out = File(tmp, e.name.substringAfterLast('/'))   // flat archive, no path traversal
-                            if (!e.isDirectory && out.name.isNotEmpty()) out.outputStream().use { zip.copyTo(it) }
+                try {
+                    val req = Request.Builder().url(baseUrl.trimEnd('/') + "/$id.zip").build()
+                    Http.client.newCall(req).execute().use { resp ->
+                        if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
+                        val body = resp.body ?: throw IOException("empty response")
+                        val total = body.contentLength()
+                        var read = 0L
+                        val counting = object : java.io.FilterInputStream(body.byteStream()) {
+                            override fun read(b: ByteArray, off: Int, len: Int): Int =
+                                super.read(b, off, len).also { if (it > 0) { read += it; if (total > 0) progress((read * 100 / total).toInt()) } }
+                        }
+                        ZipInputStream(counting.buffered()).use { zip ->
+                            while (true) {
+                                val e = zip.nextEntry ?: break
+                                val out = File(tmp, e.name.substringAfterLast('/'))   // flat archive, no path traversal
+                                if (!e.isDirectory && out.name.isNotEmpty()) out.outputStream().use { zip.copyTo(it) }
+                            }
                         }
                     }
+                    val pack = load(tmp) ?: throw IOException("not a LaneWise voice pack")
+                    target.deleteRecursively()
+                    if (!tmp.renameTo(target)) throw IOException("could not install voice pack")
+                    load(target) ?: pack
+                } catch (e: Throwable) {
+                    tmp.deleteRecursively()   // a half-unpacked pack must never be listed as installed
+                    throw e
                 }
-                val pack = load(tmp) ?: throw IOException("not a LaneWise voice pack")
-                target.deleteRecursively()
-                if (!tmp.renameTo(target)) throw IOException("could not install voice pack")
-                load(target) ?: pack
             }
 
         fun delete(pack: VoicePack) { pack.dir.deleteRecursively() }

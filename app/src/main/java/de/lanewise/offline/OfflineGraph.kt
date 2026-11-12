@@ -162,7 +162,7 @@ class OfflineGraph(
             out.writeInt(restrictions.only.size); out.write(restrictions.only)
         }
         if (file.exists()) file.delete()
-        tmp.renameTo(file)
+        if (!tmp.renameTo(file)) throw java.io.IOException("could not save the offline map")
     }
 
     companion object {

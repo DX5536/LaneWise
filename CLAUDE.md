@@ -21,25 +21,20 @@ Read this first when resuming work in a new chat.
 > as screenshot references; as a last resort, where OSM / photos / DOP20 are unclear, the lanes read from an AMAP
 > screenshot may go into `lane_overrides.json` as text (never the screenshot itself, never OSM; see `docs/DATA_SOURCES.md`). Never write my real addresses. When done, update `docs/ROADMAP.md`. My next request is:
 
-## Next session (copy-paste prompt, 2026-11-11)
+## Next session (copy-paste prompt, 2026-11-12)
 
-> Continue LaneWise (read `CLAUDE.md`, `docs/ROADMAP.md` v0.4.5 part 1 first). Uncommitted work from the last chat:
-> GPS-jump guard + "arrived only near the end" in `nav/NavigationEngine.kt`, junction-box / knot rule in
-> `lane/LanePlanner.kt`, tests `NavigationEngineTest`, `LanePlannerTest.noLaneChangeInsideTheJunctionBox`,
-> `RouteRenderLiveTest` env `LANEWISE_VIA` / `LANEWISE_NOCORRIDOR`. The build with it is on my phone. Open, in order:
-> 1. **Fix the fork bug** (review finding 1): `LanePlanner.transition()` reuses `prev.lateral(i)` between two turn
->    nodes ≤ 30 m apart; wrong when the lane counts differ (4-lane "bear left" fork → 2-lane left turn). Guard with
->    `prev.laneCount == next.laneCount`, add that fork case to the test (finding 2), optionally copy `jumpCount` in
->    `NavigationEngine.rehydrate` (finding 3). Run unit tests, then the lane audit for 3 routes
->    (`LANEWISE_AUDIT_ROUTES`), then install on my phone (`adb -s R5CX133SJ3P install -r ...`; an offline emulator may
->    also be listed).
-> 2. **App polish** (my wish: modern, usable, interactive): start with the lane-guidance items - haptic tick when a
->    lane change is due, lane-bar highlight that glides between lanes, a small arrival card; check first that they do
->    not exist yet. Other ideas (recent destinations, route fly-through, lock-screen card, speed-camera voice, night
->    lime) only if I ask. Keep DE/EN/VI strings in sync.
-> 3. The 17 STRIP_ZIGZAG audit findings on Schnellwege / B 65 / Bückeburger Allee (older, not from the last change).
-> Note: if Bash / Grep fail with "context-mode NODE_TOO_OLD", the context-mode plugin needs Node ≥ 24.15.0 - tell me.
-> MapMap MCP was checked: no lane data, not useful for lanes. Never commit or push.
+> Continue LaneWise (read `CLAUDE.md`, `docs/ROADMAP.md` v0.4.5 part 2 first). Uncommitted work from the last chats:
+> fork-bug guard, merge-pocket fix, road kinds from OSM (`Route.withRoadKinds`), way-split fix (`Route.junctionsAt`:
+> OSM `turn:lanes` sites only at OSRM intersections), haptic tick, gliding lane highlight, arrival card, short-hint
+> setting, accessibility fixes (Settings rows as one toggle, 48 dp demo buttons). The build with all of it is on my
+> phone. Open, in order:
+> 1. **Live check of the way-split fix**: re-run the 3 LATE routes with full Overpass data
+>    (`LANEWISE_LIVE=1 LANEWISE_AUDIT=1 LANEWISE_AUDIT_ROUTES="52.42006,9.91984>52.35101,9.74045;52.34134,9.71344>52.40328,9.98321;52.34200,9.73295>52.39067,9.67400"`,
+>    `--rerun`); full data = the trace shows `lanes=<n>`, not `lanes=null`. Expect 0 LATE; then a 20-route audit.
+> 2. My real drive on the Messeschnellweg ramp (merge-lane fix) - I report back.
+> 3. Polish ideas only if I ask (recent destinations, route fly-through, lock-screen card, speed-camera voice, night lime).
+> Note: if Bash / Grep fail with "context-mode NODE_TOO_OLD", the context-mode plugin needs Node >= 24.15.0 - tell me.
+> Never commit or push.
 
 ## AMAP survey (copy-paste prompt to continue)
 
@@ -47,7 +42,7 @@ Read this first when resuming work in a new chat.
 > `docs/DATA_SOURCES.md` (AMAP rules) and `docs/ROADMAP.md` (v0.4.4 parts 6-10). The 64 big junctions are done
 > (`tools/streetview/work/amap_check.json`). 2-lane plan: `tools/streetview/work/amap_plan_2lane.json`, by Stadtteil:
 > `python -I tools/streetview/amap_2lane.py status` (coverage % per district), `todo DISTRICT`, `record N ...`
-> (readings in `amap_check_2lane.json`). Mitte, Calenberger Neustadt, Oststadt, Nordstadt, Linden-Mitte and List are done (100 %); continue with Zoo, Bult or Döhren. AMAP is open on my phone (adb): its lane-level view
+> (readings in `amap_check_2lane.json`). Mitte, Calenberger Neustadt, Oststadt, Nordstadt, Linden-Mitte and List are done (100 %), Zoo 10 / 13 (left: 12, 644, 831); then Bult or Döhren. AMAP is open on my phone (adb): its lane-level view
 > does NOT render in the emulator, so AMAP readings need the phone. Way of working:
 > search a nearby place, open it, leave with the upper-left back button (not the system back) until the home map,
 > then pan / zoom by hand (double-tap on empty map; double-tap + drag down zooms out) to the 5 m scale bar or closer -

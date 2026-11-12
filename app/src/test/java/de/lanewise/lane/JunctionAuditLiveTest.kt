@@ -43,7 +43,7 @@ class JunctionAuditLiveTest {
         }
         if (c != null) {
             route = route.copy(laneChanges = c.laneChanges, bikeLanes = c.bikeLanes, sideRoads = c.sideRoads, features = c.features)
-                .withLaneOverrides(c.laneOverrides).withOsmTurnLanes(c.turnLanes.map { it.distanceAlong to it.lanes }).withLaneAccess(c.laneAccess.map { it.distanceAlong to it.carLanes }).withLaneCounts(c.laneCounts).withConnectivity(c.connectivity)
+                .withLaneOverrides(c.laneOverrides).withRoadKinds(c.roadKinds).withOsmTurnLanes(c.turnLanes.map { it.distanceAlong to it.lanes }).withLaneAccess(c.laneAccess.map { it.distanceAlong to it.carLanes }).withLaneCounts(c.laneCounts).withConnectivity(c.connectivity)
             if (c.laneOverrides.isNotEmpty()) println("patched junctions: ${c.laneOverrides}, lanes unknown at ${route.unknownLanesAt}")
             if (c.connectivity.isNotEmpty()) println("lane connectivity: ${c.connectivity}, lanes unknown at ${route.unknownLanesAt}")
         } else println("corridor unavailable - OSRM lanes only")

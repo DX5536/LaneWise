@@ -42,8 +42,18 @@ object Overpass {
         if (!r.contentType.contains("json") || !r.body.trimStart().startsWith("{")) {
             throw IOException("Overpass returned no JSON (busy?) at $url")
         }
-        return withContext(kotlinx.coroutines.Dispatchers.Default) { Http.json.parseToJsonElement(r.body) }
+        val root = withContext(kotlinx.coroutines.Dispatchers.Default) { Http.json.parseToJsonElement(r.body) }
+        runtimeError(root)?.let { throw IOException("Overpass $it at $url") }
+        return root
     }
+
+    /**
+     * A query that times out or runs out of memory still comes back as HTTP 200 JSON, with empty or partial `elements`
+     * and a `remark` "runtime error: …". Taken as data it read as "no lanes here" and no other mirror was tried.
+     */
+    internal fun runtimeError(root: JsonElement): String? =
+        ((root as? kotlinx.serialization.json.JsonObject)?.get("remark") as? kotlinx.serialization.json.JsonPrimitive)
+            ?.content?.takeIf { it.contains("runtime error") }
 
     /**
      * Interactive searches (smart stops): the [n] healthiest mirrors at once, the first answer wins and the other
@@ -91,6 +101,8 @@ object Overpass {
             for (url in preferred) {
                 try {
                     return withContext(Dispatchers.IO) { execute(url, query, client, read) }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     last = e
                 }

@@ -69,6 +69,7 @@ class OsrmRoutingProvider(
         val steps = ArrayList<RouteStep>()
         val sites = ArrayList<LaneSite>()
         val spans = ArrayList<RoadSpan>()
+        val junctions = ArrayList<Double>()
         var hint = 0
 
         val legs = r["legs"].arr.orEmpty()
@@ -125,9 +126,10 @@ class OsrmRoutingProvider(
 
                 // Lane sites.
                 inters.forEachIndexed { idx, inter ->
-                    val lanes = inter["lanes"].arr ?: return@forEachIndexed
                     val iloc = latLon(inter["location"]) ?: return@forEachIndexed
                     val ip = line.project(iloc, hint, 800) ?: return@forEachIndexed
+                    junctions += ip.distanceAlong
+                    val lanes = inter["lanes"].arr ?: return@forEachIndexed
                     val masks = lanes.map { l -> l["indications"].arr.orEmpty().fold(LaneDir.NONE) { acc, e -> acc or LaneDir.fromToken(e.str ?: "") } }
                     val valid = lanes.map { it["valid"].bool ?: false }
                     val isFirst = idx == 0
@@ -163,6 +165,7 @@ class OsrmRoutingProvider(
             ))),
             roadSpans = spans,
             osmNodes = osmNodes,
+            junctionsAt = junctions.sorted(),
         ).let { route -> route.copy(laneSites = de.lanewise.lane.dropRoundaboutInterior(route.laneSites, route.roundabouts())) }
     }
 

@@ -1014,14 +1014,14 @@ private fun NavigationOverlay(
                     color = Color(0xFFB8F33A), fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 // Play / pause, like a video player: the car stands still and the lanes there can be studied.
                 Box(
-                    Modifier.size(32.dp).clip(RoundedCornerShape(8.dp)).clickable { vm.toggleDemoPause() }
+                    Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)).clickable(role = androidx.compose.ui.semantics.Role.Button) { vm.toggleDemoPause() }
                         .semantics { contentDescription = if (ui.demoPaused) str.demoPlay else str.demoPause },
                     contentAlignment = Alignment.Center,
                 ) { Icon(if (ui.demoPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause, null, tint = Color.White) }
                 Row {
                     for ((faster, label, desc) in listOf(Triple(false, "−", str.demoSlower), Triple(true, "+", str.demoFaster))) {
                         Box(
-                            Modifier.size(32.dp).clip(RoundedCornerShape(8.dp)).clickable { vm.changeDemoSpeed(faster) }
+                            Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)).clickable(role = androidx.compose.ui.semantics.Role.Button) { vm.changeDemoSpeed(faster) }
                                 .semantics { contentDescription = desc },
                             contentAlignment = Alignment.Center,
                         ) { Text(label, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold) }

@@ -660,8 +660,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var corridorJob: Job? = null
     private var corridorFailedAt = 0L
 
-    // Not yet: `Route.withRoadKinds(data.roadKinds)` (OSM trunk / motorway). The 20-route audit showed 3 LATE changes on
-    // Schnellwege with it and none without; Overpass was too degraded to confirm the cause (ROADMAP v0.4.5 part 2).
     private fun fetchCorridor(route: Route, from: Double) {
         val to = minOf(route.distance, from + 40_000)
         val before = speedFetchedUntil
@@ -685,7 +683,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 laneChanges = de.lanewise.lane.ChangeSpan.merge(
                     (base.laneChanges.filter { it.to <= from && it !in base.tomtomLaneLines } + data.laneChanges).sortedBy { it.from }, base.tomtomLaneLines),
                 sideRoads = base.sideRoads + data.sideRoads,
-            ).withLaneOverrides(data.laneOverrides).withOsmTurnLanes(data.turnLanes.map { it.distanceAlong to it.lanes })
+            ).withRoadKinds(data.roadKinds).withLaneOverrides(data.laneOverrides).withOsmTurnLanes(data.turnLanes.map { it.distanceAlong to it.lanes })
                 .withLaneAccess(data.laneAccess.map { it.distanceAlong to it.carLanes })
                 .withLaneCounts((base.laneCounts.filter { it.to <= from } + data.laneCounts).sortedBy { it.from }).withConnectivity(data.connectivity)
             if (_ui.value.mode == Mode.NAVIGATING) {
@@ -706,7 +704,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 features = data.features, bikeLanes = data.bikeLanes,
                 laneChanges = de.lanewise.lane.ChangeSpan.merge(data.laneChanges, route.tomtomLaneLines),
                 sideRoads = data.sideRoads,
-            ).withLaneOverrides(data.laneOverrides).withOsmTurnLanes(data.turnLanes.map { it.distanceAlong to it.lanes })
+            ).withRoadKinds(data.roadKinds).withLaneOverrides(data.laneOverrides).withOsmTurnLanes(data.turnLanes.map { it.distanceAlong to it.lanes })
                 .withLaneAccess(data.laneAccess.map { it.distanceAlong to it.carLanes }).withLaneCounts(data.laneCounts)
                 .withConnectivity(data.connectivity)
             _ui.update { st -> st.copy(routes = st.routes.map { if (it === route) updated else it }) }

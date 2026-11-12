@@ -543,6 +543,20 @@ class LanePlannerTest {
     }
 
     /**
+     * Lane audit (Westschnellweg): the exit lane's ways are split three times in OSM, each repeating
+     * `none | none | slight_right`. Only a split at an OSRM intersection is a junction; the others are not sites.
+     */
+    @Test
+    fun osmTurnLanesAtAPureWaySplitAreNotAJunction() {
+        val a = de.lanewise.core.geo.LatLon(52.37, 9.70)
+        val line = de.lanewise.core.geo.Polyline(listOf(a, de.lanewise.core.geo.Geo.destination(a, 0.0, 1000.0)))
+        val exit = LaneSite(900.0, listOf(S, S, LaneDir.SLIGHT_RIGHT), null, LaneDir.SLIGHT_RIGHT, true, RoadKind.TRUNK)
+        val r = de.lanewise.core.model.Route("osrm", line, 1000.0, 60.0, emptyList(), listOf(exit), junctionsAt = listOf(400.0, 900.0))
+            .withOsmTurnLanes(listOf(400.0 to "none|none|slight_right", 750.0 to "none|none|slight_right", 830.0 to "none|none|slight_right"))
+        assertEquals(listOf(400.0, 900.0), r.laneSites.map { it.distanceAlong })
+    }
+
+    /**
      * Lane audit (Bückeburger Allee): an on-ramp lane joins on the right (`none | none | merge_to_left`). It is not a
      * through lane: the car's right lane keeps lateral 0, and the ending lane is never recommended.
      */

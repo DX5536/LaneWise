@@ -120,6 +120,8 @@ data class Route(
      * `lanes_unknown`) says OSM is wrong there, or a patch's lanes cannot make the route's turn. No lane advice there.
      */
     val unknownLanesAt: List<Double> = emptyList(),
+    /** Route distances of every intersection the router reports (OSRM `intersections`; empty for other providers). */
+    val junctionsAt: List<Double> = emptyList(),
 ) {
     fun laneChangeAt(d: Double): de.lanewise.lane.ChangeSpan? = laneChanges.firstOrNull { d >= it.from && d < it.to }
     fun laneCountAt(d: Double): Int? = laneCounts.firstOrNull { d >= it.from && d < it.to }?.count
@@ -156,8 +158,12 @@ data class Route(
      * work at junctions OSRM drops lanes at (Aegidientorplatz, left into Hildesheimer Straße).
      */
     fun withOsmTurnLanes(at: List<Pair<Double, String>>): Route {
+        // Only at real junctions: a way that is merely split in OSM repeats its `turn:lanes` at every split, and each
+        // repeat read as a junction kept the car out of the exit lane until the last split (audit, Westschnellweg:
+        // exit lane 226 m long, "move right" only 60 m before the exit).
+        val split = { d: Double -> junctionsAt.isNotEmpty() && junctionsAt.none { kotlin.math.abs(it - d) < 25 } }
         val added = at.filter { (d, _) -> laneSites.none { kotlin.math.abs(it.distanceAlong - d) < 40 } &&
-            unknownLanesAt.none { kotlin.math.abs(it - d) < 40 } }.mapNotNull { (d, v) ->
+            unknownLanesAt.none { kotlin.math.abs(it - d) < 40 } && !split(d) }.mapNotNull { (d, v) ->
             val masks = de.lanewise.lane.LaneDir.parseTurnLanes(v)
             if (masks.size < 2) return@mapNotNull null
             val turn = turnAt(d)

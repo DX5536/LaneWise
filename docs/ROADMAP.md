@@ -931,6 +931,25 @@ Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which
   (never sign in) and leave with the upper-left back button; zoom with double-taps on bare road.
 - Next district: by coverage, e.g. Zoo (13), Bult (18), Döhren (18).
 
+## Done (v0.4.4, part 15, 2026-11-12) — 2-lane AMAP survey: Zoo (10 / 13)
+- **Match (4):** Bernadotteallee S-bound at Fritz-Behrens-Allee / Waldchaussee (508, and its inner piece 509),
+  Waldchaussee SW-bound (826; inner piece 828 equivalent) - `left | through;right`.
+- **Fritz-Behrens-Allee NE-bound at Bernadotteallee (557): AMAP 3 lanes `left | through | right`, OSM 2 - DOP20
+  confirms OSM:** one dashed divider, a left arrow and a combined straight / right double arrow in a wide right lane.
+  AMAP probably read the double arrow as two lanes. Nothing to change.
+- **Wrong junction - readings deleted (536, 541):** the DOP20 crop at OSM's stop point shows the railway bridge just
+  south of it, so these approaches are at Clausewitzstraße / **Kleefelder Straße** (north of the railway), not at
+  Hans-Böckler-Allee where AMAP was read (AMAP there: Clausewitzstraße S-bound 3 lanes `left | left | ?`, Seligmannallee
+  N-bound `left;through | right | right` - not in the plan). Redone at Kleefelder Straße: AMAP draws 2 lanes each way
+  (as OSM) but no arrows or stop lines, also at max zoom - `no_arrows`. Same lesson as in Nordstadt: check the OSM stop
+  point on DOP20 / the cross street before reading AMAP.
+- **No arrows at max zoom:** Waldchaussee NE-bound at the side road 110 m east of Bernadotteallee (827, AMAP 1 lane,
+  OSM 2); Messeschnellweg S-bound exit to Hans-Böckler-Allee (116, AMAP ~4 lanes splitting 2 + 2, OSM 2, unconfirmed);
+  Weidetorkreisel west side toward Klingerstraße (117, position assumed, AMAP 3 lanes, OSM 2).
+- Left: 12 (Klingerstraße on-ramp merge at the Weidetorkreisel), 644
+  Hohenzollernstraße, 831 Walderseestraße.
+  Nothing was written to `lane_overrides.json` (all differences go to DOP20 / Mapillary first).
+
 ## Done (v0.4.5, part 2, 2026-11-11) — review fixes + lane-guidance polish
 - **Fork vs. knot** (review findings 1-3): the knot rule (car keeps its lateral between two turn nodes ≤ 30 m apart) now
   needs equal lane counts (`LanePlanner.knot`); a 4-lane "bear left" fork into a 2-lane left turn maps its lanes like
@@ -959,10 +978,24 @@ Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which
   and a replaced search no longer shows "Search failed"; offline OSRM parsing test (`OsrmParseTest`); lane highlight
   clamped (no blink at the edge lanes); aerial / override files load once under a lock; one `Phrases` per fix.
 - **20-route audit** (seed 1): 3 findings, all LATE on Schnellwege (B 65, Südschnellweg, Westschnellweg) - before:
-  19 (17 STRIP_ZIGZAG). Those 3 routes without the OSM road kinds: 0 findings; re-runs with and without were both 0, but
-  Overpass was degraded then (half the lane sites). So `withRoadKinds` is **not used in the app yet** (comment in
-  `fetchCorridor`); `LANEWISE_ROADKINDS=1` turns it on in `LaneAuditLiveTest`. To do: re-run those 3 routes with and
-  without it when Overpass is healthy, trace the LATE ones (`LANEWISE_AUDIT_TRACE`), then decide.
+  19 (17 STRIP_ZIGZAG). **Road kinds checked (Overpass healthy again, same 24 / 36 / 14 lane sites):** with them the
+  3 LATE, without them 0 - but the advice is identical (Westschnellweg traced: same plan, same "move right from
+  5091 for the exit at 5151"); only the audit's judgement differs (trunk: change must start ≥ 100 m before its
+  deadline, urban 25 m). `withRoadKinds` is now used in the app. `LANEWISE_ROADKINDS=0` turns it off in the audit.
+- **Late exit-lane changes on Schnellwege (the 3 LATE) - photo check 2026-11-12:** not solid lines. DOP20 strips
+  (300 m before each exit) show dashed lines all along: Westschnellweg (Limmerstraße exit) has a 3rd lane ~226 m long
+  (OSM: 3 lanes from the same point, no `change:lanes`); Südschnellweg is a cloverleaf weaving lane (on-ramp adds the
+  lane ~250 m before the next exit); B 65 looks like a 2-lane road whose right lane becomes the exit (DOP20 not sharp
+  enough to be sure). Mapillary has 2026 photos at B 65 / Südschnellweg, but only small 360° panoramas - lane lines
+  unreadable. **Cause (Westschnellweg, traced):** OSM splits the exit-lane stretch into 4 ways, each repeating
+  `none|none|slight_right`; `withOsmTurnLanes` made a lane site at every split (5000 / 5018 / 5081 m), each reading
+  "the right lane leaves here", so the plan kept the car out of it until 70 m before the exit. **Fix:** OSRM's
+  intersections are kept on the route (`Route.junctionsAt`); an OSM `turn:lanes` site is only added at a real
+  intersection (± 25 m), never at a pure way split (other providers: unchanged). Test
+  `osmTurnLanesAtAPureWaySplitAreNotAJunction`. The corridor's own way list can't decide this (it only fetches ways
+  with lane / speed tags; a ramp without them would be missed). **Not yet verified live:** Overpass returned no
+  corridor data in every re-run (11 / 15 / 5 lane sites instead of 24 / 36 / 14) - re-run the 3 routes
+  (`LANEWISE_AUDIT_ROUTES`, see the test) when it is healthy; Südschnellweg / B 65 probably have the same cause.
 - **UI review** (design critique, motion and accessibility skills; screenshots on the phone):
   "you are here" dot under the small car on the browse map (`CarOverlayView`); distance in search results; arrival
   time on the route card, no provider jargon ("OSRM"), "Kreuzungen mit Spurführung" instead of "Spur-Knoten"; lane hint
@@ -971,9 +1004,33 @@ Settings → "Autobahn icons (Autobahn GmbH)" (all off by default — pick which
 - **Accessibility**: TalkBack names for the trip bar's end / overview buttons and for each lane cell ("Lane 2 of 5,
   recommended", tap = "I am in this lane"); the wrong-lane grey meets 3:1 in the light theme too; shortcut chips scroll
   sideways at large system fonts (200 %: "Favourites" broke into 3 lines). Checked at 130 % / 200 % font (phone font
-  size restored to 100 %). Not done: the 40 dp demo "slower" button, a full TalkBack walk-through.
+  size restored to 100 %).
+- **Accessibility walk-through (2026-11-12, uiautomator tree on the phone; TalkBack itself not switched on):** main
+  screen, search results, route preview and the navigation screen: every control named and ≥ 48 dp. Fixed: every
+  switch and radio button in Settings was read as an unnamed "Switch, on" (row and switch were separate targets) - the
+  whole row is now one `toggleable` / `selectable` (TalkBack: "Keep right on motorways, switch, on"); demo pause /
+  slower / faster buttons 32 → 48 dp. Left as is: MapLibre's own attribution "i" (23 dp). The app font (Quicksand) has
+  no ← / → glyphs: the short lane hint's arrows come from the system font fallback (they show, in its style).
 - Installed on the phone 2026-11-11 (all of the above).
-- Open: real drive on the Messeschnellweg ramp (merge-lane fix); road kinds (above).
+- Open: real drive on the Messeschnellweg ramp (merge-lane fix); live re-check of the way-split fix (above).
+- **Overpass outage found (2026-11-12) - why every live re-check had no corridor:** overpass-api.de (0.7.62.11)
+  answers every `around` query with 2 or more points with **0 elements and no error** (one point works: 4 ways at the
+  Westschnellweg exit; the same spot as a 2-point line: 0). The corridor query is one such line (480 points for 9 km),
+  so the corridor came back empty and the app silently used OSRM's lanes only. The other mirrors: maps.mail.ru fails the
+  JVM certificate check (PKIX), kumi.systems and private.coffee time out (190 s). Fixed on the way: an Overpass answer
+  with `remark: runtime error ...` (server-side timeout) is now an error, so the next mirror is tried
+  (`Overpass.runtimeError`, `OverpassRemarkTest`). Open: an empty corridor for a long route is not detected yet (decide:
+  treat as failure / split the line into single-point `around`s); re-run the 3 LATE routes once overpass-api.de answers
+  line queries again. `LaneAuditLiveTest` now prints the corridor size per route.
+- **Second code audit - all four fixed (2026-11-11):** `.part` folders skipped and deleted on a failed download,
+  download interruptible (`runInterruptible`), `OfflineGraph.save` throws when the rename fails, `Overpass.withRetries`
+  rethrows cancellation. Findings were:
+  - Should fix: (1) a failed voice-pack download leaves `voices/<id>.part` with its `pack.json`; `VoicePack.installed()`
+    lists it and may pick it over the complete pack (missing clips mid-drive) - delete `tmp` on failure and skip `.part`
+    folders. (2) `VoicePack.download` uses blocking OkHttp `execute()` (against the project rule) - not cancellable;
+    `runInterruptible(Dispatchers.IO)` or the streaming call.
+  - Nice to have: (3) `OfflineGraph.save` ignores the `renameTo` result ("offline map ready" while the old file stays);
+    (4) `Overpass.withRetries` catches `CancellationException` and tries the next mirror - rethrow it like `json()`.
 
 ## Done (v0.4.5, part 1, 2026-11-05) — owner's real drive (video 2026-11-02, Musterstraße 1 → Musterweg 3, 8.4 km)
 - **"You have arrived" 250 m early** (Herschelstraße, 28 km/h): one GNSS fix projected onto the end of the route
